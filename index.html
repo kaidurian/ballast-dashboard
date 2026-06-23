@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barge Ballast · Custom Tank Dimensions</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+    <style>
+        :root {
+            --bg-dark: #0f141c;
+            --panel-bg: #161d26;
+            --panel-border: #242f41;
+            --tank-box-bg: #1c2532;
+            --input-bg: rgba(15,20,28,0.9);
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --tank-water: rgba(56,189,248,0.25);
+            --tank-water-solid: #38bdf8;
+            --quay-bg: #2d3748;
+            --quay-border: #4a5568;
+            --quay-text: #cbd5e1;
+        }
+
+        body.light-theme {
+            --bg-dark: #f1f5f9;
+            --panel-bg: #ffffff;
+            --panel-border: #cbd5e1;
+            --tank-box-bg: #f8fafc;
+            --input-bg: rgba(255,255,255,0.95);
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --accent-blue: #0284c7;
+            --accent-green: #16a34a;
+            --tank-water: rgba(2,132,199,0.15);
+            --tank-water-solid: #0284c7;
+            --quay-bg: #e2e8f0;
+            --quay-border: #cbd5e1;
+            --quay-text: #475569;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Calibri','Segoe UI',sans-serif;
+            transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-height: 100vh;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--panel-border);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+            header h1 {
+                font-size: 16px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                color: var(--text-main);
+            }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .theme-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 38px;
+            height: 20px;
+        }
+
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #242f41;
+            transition: .3s;
+            border-radius: 20px;
+            border: 1px solid var(--panel-border);
+        }
+
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 12px;
+                width: 12px;
+                left: 3px;
+                bottom: 3px;
+                background-color: #38bdf8;
+                transition: .3s;
+                border-radius: 50%;
+            }
+
+        input:checked + .slider {
+            background-color: #cbd5e1;
+        }
+
+            input:checked + .slider:before {
+                transform: translateX(18px);
+                background-color: #0284c7;
+            }
+
+        .main-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            flex-grow: 1;
+        }
+
+        .attitude-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .attitude-display-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: space-around;
+        }
+
+        .visual-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0,0,0,0.15);
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            flex: 1;
+            min-width: 280px;
+        }
+
+        .visual-title {
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .attitude-value-badge {
+            font-size: 13px;
+            font-weight: bold;
+            color: var(--accent-green);
+            background: rgba(0,0,0,0.3);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-family: monospace;
+        }
+
+        .attitude-canvas {
+            background: #0b0f19;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+            width: 100%;
+            height: auto;
+            max-width: 320px;
+            aspect-ratio: 320/110;
+        }
+
+        .tank-grid-container {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-x: auto;
+        }
+
+        .section-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            border-left: 3px solid var(--accent-blue);
+            padding-left: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tank-grid {
+            display: grid;
+            grid-template-columns: 90px repeat(9, 1fr);
+            grid-template-rows: repeat(3, 105px);
+            min-width: 1100px;
+            gap: 15px;
+            padding-right: 5px;
+        }
+
+        .quay-structure-box {
+            grid-column: 1;
+            grid-row: 1 / span 3;
+            background: var(--quay-bg);
+            border: 2px dashed var(--quay-border);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            text-align: center;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.2);
+        }
+
+        .quay-title {
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--quay-text);
+        }
+
+        .quay-dims {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .quay-coords-badge {
+            font-size: 9px;
+            margin-top: 8px;
+            background: rgba(0,0,0,0.4);
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #f43f5e;
+            font-family: monospace;
+        }
+
+        .tank-control-box {
+            background: var(--tank-box-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            position: relative;
+            height: 105px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 8px;
+            overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+        }
+
+            .tank-control-box:hover {
+                z-index: 10;
+                box-shadow: 0 0 25px rgba(56,189,248,0.25);
+            }
+
+        .tank-water-level {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: var(--tank-water);
+            border-top: 2px solid var(--tank-water-solid);
+            z-index: 1;
+            transition: height 0.4s ease-out;
+        }
+
+        .tank-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 5;
+            flex-wrap: wrap;
+            gap: 2px;
+        }
+
+        .tank-name {
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--text-muted);
+        }
+
+        .tank-coords-badge {
+            font-size: 8px;
+            background: rgba(0,0,0,0.35);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: var(--accent-blue);
+            font-family: monospace;
+        }
+
+        .tank-inputs {
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .weight-input {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            text-align: center;
+            font-size: 11px;
+            padding: 2px 0;
+            border-radius: 4px;
+        }
+
+            .weight-input:focus {
+                outline: none;
+                border-color: var(--accent-blue);
+            }
+
+        .load-percentage-label {
+            font-size: 9px;
+            text-align: center;
+            color: var(--accent-blue);
+            font-weight: 500;
+        }
+
+        .tank-capacity-badge {
+            font-size: 8px;
+            background: rgba(0,0,0,0.4);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: var(--accent-green);
+            font-family: monospace;
+        }
+
+        .sync-btn {
+            background: transparent;
+            border: 1px solid var(--panel-border);
+            color: var(--accent-blue);
+            padding: 2px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+            .sync-btn:hover {
+                background: rgba(56,189,248,0.1);
+            }
+
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--panel-border);
+            border-radius: 3px;
+        }
+
+        @media (max-width: 700px) {
+            .tank-grid {
+                min-width: 700px;
+            }
+        }
+
+        .coords-note {
+            font-size: 10px;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+            display: inline-block;
+            margin-left: 8px;
+        }
+
+        .tank-size-indicator {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            z-index: 10;
+        }
+
+        .excel-row-badge {
+            font-size: 8px;
+            background: rgba(0,0,0,0.3);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: #f59e0b;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>⚓ BARGE BALLAST · custom tank dimensions</h1>
+        <div class="header-controls">
+            <div class="theme-toggle-container">
+                <span>Day</span>
+                <label class="switch"><input type="checkbox" id="themeToggleCheckbox" onchange="toggleDashboardTheme()"><span class="slider"></span></label>
+            </div>
+            <div id="connectionStatus" style="font-size: 11px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
+            <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
+        </div>
+    </header>
+    <div class="main-layout">
+        <div class="attitude-panel">
+            <div class="section-title">Barge attitude · real coordinates</div>
+            <div class="attitude-display-container">
+                <div class="visual-container">
+                    <div class="visual-title">Trim (longitudinal)</div>
+                    <div class="attitude-value-badge" id="lbl_TrimValue">0.00°</div>
+                    <canvas id="trimCanvas" class="attitude-canvas" width="320" height="110"></canvas>
+                </div>
+                <div class="visual-container">
+                    <div class="visual-title">Heel (transverse)</div>
+                    <div class="attitude-value-badge" id="lbl_HeelValue">0.00°</div>
+                    <canvas id="heelCanvas" class="attitude-canvas" width="320" height="110"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="tank-grid-container">
+            <div class="section-title">
+                <span>🔹 Custom tank layout · each tank has unique size & position</span>
+                <span class="coords-note">dimensions in meters</span>
+            </div>
+            <div class="tank-grid" id="tankContainer"></div>
+        </div>
+    </div>
+    <script>
+        // ============================================================
+        // 1. CUSTOM TANK CONFIGURATION — each tank with unique size
+        //    Ordered: Column 9 (aft) → Column 1 (fwd), Top → Middle → Bottom
+        //    Excel rows: 14-16 = Col 9, 17-19 = Col 8, ..., 38-40 = Col 1
+        // ============================================================
+        const TANK_CONFIG = [
+            // === COLUMN 9 (Aft) — Excel Rows 14, 15, 16 ===
+            { id: 14, name: "AFT P", x_start: 0, x_end: 14, y_start: 5, y_end: 14.5, capacity: 280 },
+            { id: 15, name: "AFT C", x_start: 0, x_end: 14, y_start: -4.5, y_end: 4.5, capacity: 380 },
+            { id: 16, name: "AFT S", x_start: 0, x_end: 14, y_start: -14.5, y_end: -5, capacity: 280 },
+
+            // === COLUMN 8 — Excel Rows 17, 18, 19 ===
+            { id: 17, name: "C8 P", x_start: 15.5, x_end: 29, y_start: 5, y_end: 14, capacity: 240 },
+            { id: 18, name: "C8 C", x_start: 15.5, x_end: 29, y_start: -4, y_end: 4, capacity: 320 },
+            { id: 19, name: "C8 S", x_start: 15.5, x_end: 29, y_start: -14, y_end: -5, capacity: 240 },
+
+            // === COLUMN 7 — Excel Rows 20, 21, 22 ===
+            { id: 20, name: "C7 P", x_start: 30.5, x_end: 44, y_start: 5.5, y_end: 14, capacity: 220 },
+            { id: 21, name: "C7 C", x_start: 30.5, x_end: 44, y_start: -4, y_end: 4, capacity: 300 },
+            { id: 22, name: "C7 S", x_start: 30.5, x_end: 44, y_start: -14, y_end: -5.5, capacity: 220 },
+
+            // === COLUMN 6 — Excel Rows 23, 24, 25 ===
+            { id: 23, name: "C6 P", x_start: 45.5, x_end: 58, y_start: 5, y_end: 13.5, capacity: 200 },
+            { id: 24, name: "C6 C", x_start: 45.5, x_end: 58, y_start: -3.5, y_end: 3.5, capacity: 270 },
+            { id: 25, name: "C6 S", x_start: 45.5, x_end: 58, y_start: -13.5, y_end: -5, capacity: 200 },
+
+            // === COLUMN 5 — Excel Rows 26, 27, 28 ===
+            { id: 26, name: "C5 P", x_start: 59.5, x_end: 71, y_start: 4.5, y_end: 13, capacity: 180 },
+            { id: 27, name: "C5 C", x_start: 59.5, x_end: 71, y_start: -3.5, y_end: 3.5, capacity: 250 },
+            { id: 28, name: "C5 S", x_start: 59.5, x_end: 71, y_start: -13, y_end: -4.5, capacity: 180 },
+
+            // === COLUMN 4 — Excel Rows 29, 30, 31 ===
+            { id: 29, name: "C4 P", x_start: 72.5, x_end: 83, y_start: 4, y_end: 12, capacity: 150 },
+            { id: 30, name: "C4 C", x_start: 72.5, x_end: 83, y_start: -3, y_end: 3, capacity: 210 },
+            { id: 31, name: "C4 S", x_start: 72.5, x_end: 83, y_start: -12, y_end: -4, capacity: 150 },
+
+            // === COLUMN 3 — Excel Rows 32, 33, 34 ===
+            { id: 32, name: "C3 P", x_start: 84.5, x_end: 94, y_start: 3.5, y_end: 11, capacity: 130 },
+            { id: 33, name: "C3 C", x_start: 84.5, x_end: 94, y_start: -2.5, y_end: 2.5, capacity: 180 },
+            { id: 34, name: "C3 S", x_start: 84.5, x_end: 94, y_start: -11, y_end: -3.5, capacity: 130 },
+
+            // === COLUMN 2 — Excel Rows 35, 36, 37 ===
+            { id: 35, name: "C2 P", x_start: 95.5, x_end: 104, y_start: 3, y_end: 10, capacity: 110 },
+            { id: 36, name: "C2 C", x_start: 95.5, x_end: 104, y_start: -2.5, y_end: 2.5, capacity: 150 },
+            { id: 37, name: "C2 S", x_start: 95.5, x_end: 104, y_start: -10, y_end: -3, capacity: 110 },
+
+            // === COLUMN 1 (Fwd) — Excel Rows 38, 39, 40 ===
+            { id: 38, name: "FWD P", x_start: 105.5, x_end: 113, y_start: 2.5, y_end: 9, capacity: 90 },
+            { id: 39, name: "FWD C", x_start: 105.5, x_end: 113, y_start: -2, y_end: 2, capacity: 120 },
+            { id: 40, name: "FWD S", x_start: 105.5, x_end: 113, y_start: -9, y_end: -2.5, capacity: 90 },
+        ];
+
+        // ---- derived constants ----
+        const totalTanks = TANK_CONFIG.length;
+        const GRID_COLS = 9;      // visual grid columns (2-10)
+        const GRID_ROWS = 3;      // visual grid rows (1-3)
+        const EXCEL_START_ROW = 14;
+
+        // ---- state ----
+        let isOfficeInitialized = false;
+        let currentTrimDegrees = 0.0;
+        let currentHeelDegrees = 0.0;
+
+        // tank data store (synced with config)
+        let tankData = TANK_CONFIG.map(cfg => ({
+            row: cfg.id,
+            name: cfg.name,
+            weight: 0,
+            percent: 0.0,
+            capacity: cfg.capacity,
+            geometry: getTankGeometry(cfg.id)
+        }));
+
+        // ============================================================
+        // 2. GEOMETRY HELPERS
+        // ============================================================
+        function getTankGeometry(tankId) {
+            const cfg = TANK_CONFIG.find(t => t.id === tankId);
+            if (!cfg) return null;
+            const cx = (cfg.x_start + cfg.x_end) / 2;
+            const cy = (cfg.y_start + cfg.y_end) / 2;
+            const w = cfg.x_end - cfg.x_start;
+            const h = cfg.y_end - cfg.y_start;
+            return { x: cx, y: cy, width: w, height: h, capacity: cfg.capacity };
+        }
+
+        // Map tank index to visual grid column/row
+        // Order: index 0 → Column 9 (aft), Row 1 (top)
+        //        index 1 → Column 9, Row 2 (middle)
+        //        index 2 → Column 9, Row 3 (bottom)
+        //        index 3 → Column 8, Row 1 (top)
+        //        ...
+        function getTankGridPosition(index) {
+            const colIndex = Math.floor(index / GRID_ROWS);      // 0=col9, 1=col8, ..., 8=col1
+            const rowIndex = index % GRID_ROWS;                  // 0=top, 1=middle, 2=bottom
+
+            // gridCol: 10 → 2 (10=aft/fwd? we want 10=aft, 2=fwd)
+            // colIndex 0 → gridCol 10, colIndex 8 → gridCol 2
+            const gridCol = 10 - colIndex;
+            // gridRow: 1=top, 2=middle, 3=bottom
+            const gridRow = rowIndex + 1;
+
+            return { gridCol, gridRow, excelRow: EXCEL_START_ROW + index };
+        }
+
+        // Colour based on capacity
+        function getTankColor(capacity) {
+            if (capacity > 250) return '#10b981';   // green - large
+            if (capacity > 150) return '#38bdf8';   // blue - medium
+            if (capacity > 50) return '#f59e0b';   // amber - small
+            return '#94a3b8';                       // grey - void / special
+        }
+
+        // ============================================================
+        // 3. RENDER TANKS
+        // ============================================================
+        function initTankMatrix() {
+            const container = document.getElementById('tankContainer');
+            container.innerHTML = '';
+
+            // Quay wall
+            const quayBox = document.createElement('div');
+            quayBox.className = 'quay-structure-box';
+            quayBox.innerHTML = `
+                <div class="quay-title">QUAY WALL</div>
+                <div class="quay-dims">L=20m · W=60m</div>
+                <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+            `;
+            container.appendChild(quayBox);
+
+            // Render each tank from config (in order: col9→col1, top→bottom)
+            TANK_CONFIG.forEach((cfg, index) => {
+                const geo = getTankGeometry(cfg.id);
+                if (!geo) return;
+                const { gridCol, gridRow, excelRow } = getTankGridPosition(index);
+
+                // find data
+                const tank = tankData.find(t => t.row === cfg.id);
+                const pct = tank ? tank.percent * 100 : 0;
+                const pctString = pct.toFixed(0) + '%';
+                const weight = tank ? tank.weight : 0;
+
+                const box = document.createElement('div');
+                box.className = 'tank-control-box';
+                box.id = `tank_card_${cfg.id}`;
+                box.style.gridColumn = gridCol;
+                box.style.gridRow = gridRow;
+
+                // visual size hint: scale based on actual area relative to average
+                const avgArea = 15 * 9; // ~135 m²
+                const area = geo.width * geo.height;
+                const scaleFactor = 0.75 + (area / avgArea) * 0.5;
+                const finalScale = Math.min(Math.max(scaleFactor, 0.7), 1.4);
+                box.style.transform = `scale(${finalScale})`;
+                box.style.transformOrigin = 'center center';
+
+                // border colour by capacity
+                const borderColor = getTankColor(cfg.capacity);
+                box.style.borderColor = borderColor;
+                box.style.borderWidth = '2px';
+
+                // capacity dot
+                const dot = document.createElement('span');
+                dot.className = 'tank-size-indicator';
+                dot.style.background = borderColor;
+                box.appendChild(dot);
+
+                box.innerHTML += `
+                    <div class="tank-water-level" style="height: ${pct}%"></div>
+                    <div class="tank-header">
+                        <span class="tank-name">${cfg.name}</span>
+                        <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
+                    </div>
+                    <div class="tank-inputs">
+                        <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
+                            <span>Row ${excelRow}</span>
+                            <span class="tank-capacity-badge">${cfg.capacity}t</span>
+                        </div>
+                        <input type="number" step="any" class="weight-input"
+                               id="txt_Row${cfg.id}" value="${weight}"
+                               onchange="updateTankFill(${cfg.id}, this.value)">
+                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                            ${weight} (${pctString})
+                        </div>
+                    </div>
+                `;
+                container.appendChild(box);
+            });
+        }
+
+        // ============================================================
+        // 4. ATTITUDE CANVASES
+        // ============================================================
+        function drawAttitudeGraphics() {
+            const isLight = document.body.classList.contains('light-theme');
+            const hullColor = isLight ? '#0284c7' : '#38bdf8';
+            const waterlineColor = '#10b981';
+            const textColor = isLight ? '#0f172a' : '#94a3b8';
+
+            // Trim
+            const trimCanvas = document.getElementById('trimCanvas');
+            if (trimCanvas) {
+                const ctx = trimCanvas.getContext('2d');
+                ctx.clearRect(0, 0, trimCanvas.width, trimCanvas.height);
+                ctx.fillStyle = isLight ? 'rgba(2,132,199,0.05)' : 'rgba(14,116,144,0.2)';
+                ctx.fillRect(0, 55, trimCanvas.width, 55);
+                ctx.strokeStyle = waterlineColor;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(10, 55);
+                ctx.lineTo(310, 55);
+                ctx.stroke();
+                ctx.save();
+                ctx.translate(160, 55);
+                const trimRad = (currentTrimDegrees * Math.PI / 180) * -1;
+                ctx.rotate(trimRad);
+                ctx.strokeStyle = hullColor;
+                ctx.lineWidth = 3;
+                ctx.fillStyle = isLight ? '#cbd5e1' : '#1e293b';
+                ctx.beginPath();
+                ctx.rect(-100, -15, 200, 30);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 9px sans-serif';
+                ctx.fillText("AFT", -90, -4);
+                ctx.fillText("FWD", 70, -4);
+                ctx.restore();
+                let trimText = `${Math.abs(currentTrimDegrees).toFixed(2)}° `;
+                if (currentTrimDegrees > 0) trimText += "AFT TRIM";
+                else if (currentTrimDegrees < 0) trimText += "FWD TRIM";
+                else trimText += "EVEN KEEL";
+                document.getElementById('lbl_TrimValue').textContent = trimText;
+            }
+
+            // Heel
+            const heelCanvas = document.getElementById('heelCanvas');
+            if (heelCanvas) {
+                const ctx = heelCanvas.getContext('2d');
+                ctx.clearRect(0, 0, heelCanvas.width, heelCanvas.height);
+                ctx.fillStyle = isLight ? 'rgba(2,132,199,0.05)' : 'rgba(14,116,144,0.2)';
+                ctx.fillRect(0, 55, heelCanvas.width, 55);
+                ctx.strokeStyle = waterlineColor;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(10, 55);
+                ctx.lineTo(310, 55);
+                ctx.stroke();
+                ctx.save();
+                ctx.translate(160, 55);
+                const heelRad = (currentHeelDegrees * Math.PI / 180) * -1;
+                ctx.rotate(heelRad);
+                ctx.strokeStyle = hullColor;
+                ctx.lineWidth = 3;
+                ctx.fillStyle = isLight ? '#cbd5e1' : '#1e293b';
+                ctx.beginPath();
+                ctx.rect(-70, -18, 140, 36);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 9px sans-serif';
+                ctx.fillText("PORT (P)", -62, -4);
+                ctx.fillText("STBD (S)", 18, -4);
+                ctx.restore();
+                let heelText = `${Math.abs(currentHeelDegrees).toFixed(2)}° `;
+                if (currentHeelDegrees > 0) heelText += "PORT HEEL";
+                else if (currentHeelDegrees < 0) heelText += "STBD HEEL";
+                else heelText += "UPRIGHT";
+                document.getElementById('lbl_HeelValue').textContent = heelText;
+            }
+        }
+
+        // ============================================================
+        // 5. EXCEL SYNC (with custom tank mapping)
+        // ============================================================
+        async function pullExcelTankData() {
+            if (!isOfficeInitialized) {
+                generateMockSystemValues();
+                return;
+            }
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    // use config length to determine range
+                    const startRow = EXCEL_START_ROW;
+                    const endRow = startRow + TANK_CONFIG.length - 1;
+                    const rangeTanks = sheet.getRange(`B${startRow}:E${endRow}`);
+                    const cellTrim = sheet.getRange("E8");
+                    const cellHeel = sheet.getRange("E9");
+                    rangeTanks.load("values");
+                    cellTrim.load("values");
+                    cellHeel.load("values");
+                    await context.sync();
+
+                    currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
+                    currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
+
+                    const tankValues = rangeTanks.values;
+                    tankData.forEach((tank, idx) => {
+                        if (tankValues[idx]) {
+                            tank.name = tankValues[idx][0] || tank.name;
+                            tank.weight = parseFloat(tankValues[idx][2] || 0).toFixed(2);
+                            let rawPct = tankValues[idx][3] || 0;
+                            tank.percent = rawPct > 1 ? rawPct / 100 : rawPct;
+                        }
+                    });
+                    initTankMatrix();
+                    drawAttitudeGraphics();
+                });
+            } catch (e) {
+                console.warn("Excel sync error, using mock", e);
+                generateMockSystemValues();
+            }
+        }
+
+        // ============================================================
+        // 6. MOCK DATA
+        // ============================================================
+        function generateMockSystemValues() {
+            tankData.forEach((tank, i) => {
+                const base = 60 + (i * 7);
+                tank.weight = (base + (i % 5) * 1.8).toFixed(2);
+                tank.percent = Math.min(0.10 + (i * 0.025), 0.90);
+            });
+            currentTrimDegrees = 2.8;
+            currentHeelDegrees = -1.9;
+            initTankMatrix();
+            drawAttitudeGraphics();
+            document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span>';
+        }
+
+        // ============================================================
+        // 7. UPDATE TANK FILL (with Excel write)
+        // ============================================================
+        async function updateTankFill(row, value) {
+            const parsed = parseFloat(value);
+            if (isNaN(parsed)) return;
+            const cfg = TANK_CONFIG.find(t => t.id === row);
+            if (!cfg) return;
+            const mockMax = cfg.capacity || 1000;
+            let targetPct = Math.max(0, Math.min(parsed / mockMax, 1.0));
+
+            const card = document.getElementById(`tank_card_${row}`);
+            if (!card) return;
+            const water = card.querySelector('.tank-water-level');
+            const label = document.getElementById(`lbl_Load${row}`);
+            if (water) water.style.height = `${targetPct * 100}%`;
+            if (label) {
+                const pctStr = (targetPct * 100).toFixed(0) + '%';
+                label.textContent = `${parsed.toFixed(2)} (${pctStr})`;
+            }
+
+            if (!isOfficeInitialized) return;
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const cell = sheet.getRange(`D${row}`);
+                    cell.values = [[parsed]];
+                    await context.sync();
+                    setTimeout(pullExcelTankData, 300);
+                });
+            } catch (e) { console.warn("Excel write error", e); }
+        }
+
+        // ============================================================
+        // 8. THEME TOGGLE
+        // ============================================================
+        function toggleDashboardTheme() {
+            const checked = document.getElementById('themeToggleCheckbox').checked;
+            document.body.classList.toggle('light-theme', checked);
+            drawAttitudeGraphics();
+        }
+
+        // ============================================================
+        // 9. OFFICE INIT
+        // ============================================================
+        Office.onReady((info) => {
+            if (info.host === Office.HostType.Excel) {
+                isOfficeInitialized = true;
+                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
+                pullExcelTankData();
+                registerExcelAutoTrack();
+            } else {
+                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
+                generateMockSystemValues();
+            }
+        });
+
+        async function registerExcelAutoTrack() {
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    sheet.onChanged.add(async () => { await pullExcelTankData(); });
+                    await context.sync();
+                });
+            } catch (e) { /* ignore */ }
+        }
+
+        // initial render fallback
+        window.addEventListener('load', () => {
+            if (!isOfficeInitialized) generateMockSystemValues();
+        });
+    </script>
+</body>
+</html>
