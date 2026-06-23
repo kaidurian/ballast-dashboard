@@ -434,6 +434,15 @@
             color: #f59e0b;
             font-family: monospace;
         }
+
+        .mode-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+        .mode-firebase { background: rgba(56,189,248,0.15); color: var(--accent-blue); }
+        .mode-excel { background: rgba(16,185,129,0.15); color: var(--accent-green); }
     </style>
 </head>
 <body>
@@ -445,7 +454,8 @@
                 <label class="switch"><input type="checkbox" id="themeToggleCheckbox" onchange="toggleDashboardTheme()"><span class="slider"></span></label>
             </div>
             <div id="connectionStatus" style="font-size: 11px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
-            <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
+            <span id="lastUpdated" style="font-size: 10px; color: var(--text-muted);"></span>
+            <button class="sync-btn" onclick="manualRefresh()">↻ Refresh</button>
         </div>
     </header>
     <div class="main-layout">
@@ -473,6 +483,12 @@
         </div>
     </div>
     <script>
+        // ============================================================
+        // 0. FIREBASE CONFIG — your shared data store
+        // ============================================================
+        const FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
+        const FIREBASE_POLL_MS = 4000; // check for new data every 4 seconds
+
         // ============================================================
         // 1. CUSTOM TANK CONFIGURATION — each tank with unique size
         //    Ordered: Column 9 (aft) → Column 1 (fwd), Top → Middle → Bottom
@@ -526,17 +542,15 @@
         ];
 
         // ---- derived constants ----
-        const totalTanks = TANK_CONFIG.length;
-        const GRID_COLS = 9;      // visual grid columns (2-10)
-        const GRID_ROWS = 3;      // visual grid rows (1-3)
+        const GRID_ROWS = 3;
         const EXCEL_START_ROW = 14;
 
         // ---- state ----
         let isOfficeInitialized = false;
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
+        let dataMode = "none"; // "firebase" or "excel"
 
-        // tank data store (synced with config)
         let tankData = TANK_CONFIG.map(cfg => ({
             row: cfg.id,
             name: cfg.name,
@@ -559,31 +573,19 @@
             return { x: cx, y: cy, width: w, height: h, capacity: cfg.capacity };
         }
 
-        // Map tank index to visual grid column/row
-        // Order: index 0 → Column 9 (aft), Row 1 (top)
-        //        index 1 → Column 9, Row 2 (middle)
-        //        index 2 → Column 9, Row 3 (bottom)
-        //        index 3 → Column 8, Row 1 (top)
-        //        ...
         function getTankGridPosition(index) {
-            const colIndex = Math.floor(index / GRID_ROWS);      // 0=col9, 1=col8, ..., 8=col1
-            const rowIndex = index % GRID_ROWS;                  // 0=top, 1=middle, 2=bottom
-
-            // gridCol: 10 → 2 (10=aft/fwd? we want 10=aft, 2=fwd)
-            // colIndex 0 → gridCol 10, colIndex 8 → gridCol 2
+            const colIndex = Math.floor(index / GRID_ROWS);
+            const rowIndex = index % GRID_ROWS;
             const gridCol = 10 - colIndex;
-            // gridRow: 1=top, 2=middle, 3=bottom
             const gridRow = rowIndex + 1;
-
             return { gridCol, gridRow, excelRow: EXCEL_START_ROW + index };
         }
 
-        // Colour based on capacity
         function getTankColor(capacity) {
-            if (capacity > 250) return '#10b981';   // green - large
-            if (capacity > 150) return '#38bdf8';   // blue - medium
-            if (capacity > 50) return '#f59e0b';   // amber - small
-            return '#94a3b8';                       // grey - void / special
+            if (capacity > 250) return '#10b981';
+            if (capacity > 150) return '#38bdf8';
+            if (capacity > 50) return '#f59e0b';
+            return '#94a3b8';
         }
 
         // ============================================================
@@ -593,7 +595,6 @@
             const container = document.getElementById('tankContainer');
             container.innerHTML = '';
 
-            // Quay wall
             const quayBox = document.createElement('div');
             quayBox.className = 'quay-structure-box';
             quayBox.innerHTML = `
@@ -603,13 +604,11 @@
             `;
             container.appendChild(quayBox);
 
-            // Render each tank from config (in order: col9→col1, top→bottom)
             TANK_CONFIG.forEach((cfg, index) => {
                 const geo = getTankGeometry(cfg.id);
                 if (!geo) return;
                 const { gridCol, gridRow, excelRow } = getTankGridPosition(index);
 
-                // find data
                 const tank = tankData.find(t => t.row === cfg.id);
                 const pct = tank ? tank.percent * 100 : 0;
                 const pctString = pct.toFixed(0) + '%';
@@ -621,20 +620,17 @@
                 box.style.gridColumn = gridCol;
                 box.style.gridRow = gridRow;
 
-                // visual size hint: scale based on actual area relative to average
-                const avgArea = 15 * 9; // ~135 m²
+                const avgArea = 15 * 9;
                 const area = geo.width * geo.height;
                 const scaleFactor = 0.75 + (area / avgArea) * 0.5;
                 const finalScale = Math.min(Math.max(scaleFactor, 0.7), 1.4);
                 box.style.transform = `scale(${finalScale})`;
                 box.style.transformOrigin = 'center center';
 
-                // border colour by capacity
                 const borderColor = getTankColor(cfg.capacity);
                 box.style.borderColor = borderColor;
                 box.style.borderWidth = '2px';
 
-                // capacity dot
                 const dot = document.createElement('span');
                 dot.className = 'tank-size-indicator';
                 dot.style.background = borderColor;
@@ -672,7 +668,6 @@
             const waterlineColor = '#10b981';
             const textColor = isLight ? '#0f172a' : '#94a3b8';
 
-            // Trim
             const trimCanvas = document.getElementById('trimCanvas');
             if (trimCanvas) {
                 const ctx = trimCanvas.getContext('2d');
@@ -708,7 +703,6 @@
                 document.getElementById('lbl_TrimValue').textContent = trimText;
             }
 
-            // Heel
             const heelCanvas = document.getElementById('heelCanvas');
             if (heelCanvas) {
                 const ctx = heelCanvas.getContext('2d');
@@ -746,17 +740,77 @@
         }
 
         // ============================================================
-        // 5. EXCEL SYNC (with custom tank mapping)
+        // 5. FIREBASE — read the latest published snapshot
+        // ============================================================
+        let lastFirebaseTimestamp = null;
+
+        async function pullFirebaseData(showAsManual) {
+            try {
+                const res = await fetch(`${FIREBASE_URL}/ballast.json`, { cache: "no-store" });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                if (!data) {
+                    if (showAsManual) setStatus("none", "No published data yet");
+                    return;
+                }
+
+                // Avoid re-rendering if nothing changed (prevents flicker)
+                if (data.updatedAt === lastFirebaseTimestamp && !showAsManual) return;
+                lastFirebaseTimestamp = data.updatedAt;
+
+                currentTrimDegrees = parseFloat(data.trim || 0);
+                currentHeelDegrees = parseFloat(data.heel || 0);
+
+                if (data.tanks) {
+                    tankData.forEach(tank => {
+                        const val = data.tanks[tank.row];
+                        if (val !== undefined) {
+                            tank.weight = parseFloat(val).toFixed(2);
+                            const cfg = TANK_CONFIG.find(t => t.id === tank.row);
+                            tank.percent = cfg ? Math.min(parseFloat(val) / cfg.capacity, 1) : 0;
+                        }
+                    });
+                }
+
+                initTankMatrix();
+                drawAttitudeGraphics();
+                setStatus("firebase", data.source === "excel-vba" ? "Excel (published)" : "Mobile (published)");
+
+                if (data.updatedAt) {
+                    const d = new Date(data.updatedAt);
+                    document.getElementById('lastUpdated').textContent = "Last update: " + d.toLocaleString();
+                }
+            } catch (e) {
+                console.warn("Firebase read error", e);
+                if (showAsManual) setStatus("error", "Could not reach data source");
+            }
+        }
+
+        function setStatus(mode, label) {
+            const el = document.getElementById('connectionStatus');
+            if (mode === "firebase") {
+                el.innerHTML = `Status: <span class="mode-badge mode-firebase">● ${label}</span>`;
+            } else if (mode === "excel") {
+                el.innerHTML = `Status: <span class="mode-badge mode-excel">● ${label}</span>`;
+            } else if (mode === "error") {
+                el.innerHTML = `Status: <span style="color:#ef4444;">● ${label}</span>`;
+            } else {
+                el.innerHTML = `Status: <span style="color:#eab308;">● ${label}</span>`;
+            }
+        }
+
+        function manualRefresh() {
+            pullFirebaseData(true);
+        }
+
+        // ============================================================
+        // 6. EXCEL SYNC (Office.js add-in mode — still works as before)
         // ============================================================
         async function pullExcelTankData() {
-            if (!isOfficeInitialized) {
-                generateMockSystemValues();
-                return;
-            }
+            if (!isOfficeInitialized) return;
             try {
                 await Excel.run(async (context) => {
                     const sheet = context.workbook.worksheets.getItem("Load_Editor");
-                    // use config length to determine range
                     const startRow = EXCEL_START_ROW;
                     const endRow = startRow + TANK_CONFIG.length - 1;
                     const rangeTanks = sheet.getRange(`B${startRow}:E${endRow}`);
@@ -781,31 +835,16 @@
                     });
                     initTankMatrix();
                     drawAttitudeGraphics();
+                    setStatus("excel", "Excel connected (live)");
+                    dataMode = "excel";
                 });
             } catch (e) {
-                console.warn("Excel sync error, using mock", e);
-                generateMockSystemValues();
+                console.warn("Excel sync error", e);
             }
         }
 
         // ============================================================
-        // 6. MOCK DATA
-        // ============================================================
-        function generateMockSystemValues() {
-            tankData.forEach((tank, i) => {
-                const base = 60 + (i * 7);
-                tank.weight = (base + (i % 5) * 1.8).toFixed(2);
-                tank.percent = Math.min(0.10 + (i * 0.025), 0.90);
-            });
-            currentTrimDegrees = 2.8;
-            currentHeelDegrees = -1.9;
-            initTankMatrix();
-            drawAttitudeGraphics();
-            document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span>';
-        }
-
-        // ============================================================
-        // 7. UPDATE TANK FILL (with Excel write)
+        // 7. UPDATE TANK FILL (manual input in this view; writes to Excel if connected)
         // ============================================================
         async function updateTankFill(row, value) {
             const parsed = parseFloat(value);
@@ -847,19 +886,34 @@
         }
 
         // ============================================================
-        // 9. OFFICE INIT
+        // 9. OFFICE INIT — if running inside Excel as an add-in, use that;
+        //    otherwise (plain browser/mobile), rely on Firebase polling.
         // ============================================================
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
                 isOfficeInitialized = true;
-                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
+                dataMode = "excel";
                 pullExcelTankData();
                 registerExcelAutoTrack();
             } else {
-                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
-                generateMockSystemValues();
+                startFirebaseMode();
             }
         });
+
+        // Fallback: if Office.js never calls onReady (plain browser tab),
+        // start Firebase mode after a short timeout.
+        setTimeout(() => {
+            if (!isOfficeInitialized) startFirebaseMode();
+        }, 1200);
+
+        let firebaseStarted = false;
+        function startFirebaseMode() {
+            if (firebaseStarted) return;
+            firebaseStarted = true;
+            setStatus("none", "Loading...");
+            pullFirebaseData(true);
+            setInterval(() => pullFirebaseData(false), FIREBASE_POLL_MS);
+        }
 
         async function registerExcelAutoTrack() {
             try {
@@ -870,11 +924,6 @@
                 });
             } catch (e) { /* ignore */ }
         }
-
-        // initial render fallback
-        window.addEventListener('load', () => {
-            if (!isOfficeInitialized) generateMockSystemValues();
-        });
     </script>
 </body>
 </html>
