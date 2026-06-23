@@ -9,87 +9,149 @@
         --bg-dark: #0f141c;
         --panel-bg: #161d26;
         --panel-border: #242f41;
+        --tank-box-bg: #1c2532;
         --text-main: #e2e8f0;
         --text-muted: #94a3b8;
         --accent-blue: #38bdf8;
         --accent-green: #10b981;
         --input-bg: rgba(15,20,28,0.9);
+        --quay-bg: #2d3748;
+        --quay-border: #4a5568;
+        --quay-text: #cbd5e1;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Calibri','Segoe UI',sans-serif; }
     body {
         background: var(--bg-dark);
         color: var(--text-main);
-        padding: 16px;
-        max-width: 480px;
-        margin: 0 auto;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        min-height: 100vh;
     }
-    h1 {
-        font-size: 18px;
-        margin-bottom: 4px;
+    header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--panel-border);
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    header h1 {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
     }
     .subtitle {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--text-muted);
-        margin-bottom: 16px;
     }
     .panel {
         background: var(--panel-bg);
         border: 1px solid var(--panel-border);
         border-radius: 8px;
-        padding: 14px;
-        margin-bottom: 14px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
     }
-    .panel-title {
-        font-size: 11px;
+    .section-title {
+        font-size: 12px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         color: var(--text-muted);
-        margin-bottom: 10px;
         border-left: 3px solid var(--accent-blue);
         padding-left: 8px;
-    }
-    .field-row {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        margin-bottom: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
     }
-    .field-row label {
-        font-size: 13px;
-        color: var(--text-main);
+    .attitude-row {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+    .attitude-field {
         flex: 1;
+        min-width: 140px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
     }
-    .field-row input {
-        width: 100px;
+    .attitude-field label {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+    .attitude-field input {
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
         color: var(--text-main);
         text-align: center;
-        font-size: 14px;
-        padding: 6px 4px;
+        font-size: 15px;
+        padding: 8px;
         border-radius: 6px;
     }
-    .field-row input:focus {
-        outline: none;
-        border-color: var(--accent-blue);
+    .tank-grid-container {
+        overflow-x: auto;
     }
-    .tank-grid-2col {
+    .tank-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px 14px;
+        grid-template-columns: 70px repeat(9, 1fr);
+        grid-template-rows: repeat(3, 95px);
+        min-width: 900px;
+        gap: 10px;
+        padding-right: 5px;
     }
-    .tank-field {
+    .quay-structure-box {
+        grid-column: 1;
+        grid-row: 1 / span 3;
+        background: var(--quay-bg);
+        border: 2px dashed var(--quay-border);
+        border-radius: 6px;
         display: flex;
         flex-direction: column;
-        gap: 3px;
-        margin-bottom: 6px;
+        justify-content: center;
+        align-items: center;
+        padding: 6px;
+        text-align: center;
     }
-    .tank-field label {
-        font-size: 11px;
+    .quay-title {
+        font-size: 10px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--quay-text);
+    }
+    .tank-input-box {
+        background: var(--tank-box-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 6px;
+        gap: 4px;
+    }
+    .tank-input-box .tname {
+        font-size: 10px;
+        font-weight: bold;
         color: var(--text-muted);
+        display: flex;
+        justify-content: space-between;
     }
-    .tank-field input {
+    .tank-input-box .tname .rowbadge {
+        font-size: 8px;
+        background: rgba(0,0,0,0.35);
+        padding: 1px 4px;
+        border-radius: 3px;
+        color: var(--accent-blue);
+        font-family: monospace;
+    }
+    .tank-input-box input {
         width: 100%;
         background: var(--input-bg);
         border: 1px solid var(--panel-border);
@@ -98,6 +160,18 @@
         font-size: 13px;
         padding: 6px 2px;
         border-radius: 6px;
+    }
+    .tank-input-box input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+    }
+    .tank-input-box .unit-label {
+        font-size: 9px;
+        color: var(--text-muted);
+        text-align: center;
+    }
+    @media (max-width: 700px) {
+        .tank-grid { min-width: 700px; }
     }
     .publish-btn {
         width: 100%;
@@ -109,11 +183,8 @@
         border: none;
         border-radius: 8px;
         cursor: pointer;
-        margin-top: 6px;
     }
-    .publish-btn:active {
-        opacity: 0.85;
-    }
+    .publish-btn:active { opacity: 0.85; }
     .reload-btn {
         width: 100%;
         background: transparent;
@@ -123,41 +194,47 @@
         padding: 10px;
         border-radius: 8px;
         cursor: pointer;
-        margin-top: 8px;
     }
-    .reload-btn:active {
-        background: rgba(56,189,248,0.1);
-    }
+    .reload-btn:active { background: rgba(56,189,248,0.1); }
     .status-msg {
         text-align: center;
         font-size: 13px;
-        margin-top: 10px;
         min-height: 18px;
     }
     .status-ok { color: var(--accent-green); }
     .status-err { color: #ef4444; }
     .status-sending { color: #eab308; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg-dark); }
+    ::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 3px; }
 </style>
 </head>
 <body>
-    <h1>⚓ Ballast Publisher</h1>
-    <div class="subtitle">Type new values, then tap Publish. Updates the public dashboard for everyone.</div>
+    <header>
+        <h1>⚓ Ballast Publisher</h1>
+        <div class="subtitle">Same layout as the dashboard — edit, then Publish</div>
+    </header>
 
     <div class="panel">
-        <div class="panel-title">Barge attitude</div>
-        <div class="field-row">
-            <label for="in_trim">Trim (degrees)</label>
-            <input type="number" step="any" id="in_trim" value="0">
-        </div>
-        <div class="field-row">
-            <label for="in_heel">Heel (degrees)</label>
-            <input type="number" step="any" id="in_heel" value="0">
+        <div class="section-title">Barge attitude</div>
+        <div class="attitude-row">
+            <div class="attitude-field">
+                <label for="in_trim">Trim (degrees)</label>
+                <input type="number" step="any" id="in_trim" value="0">
+            </div>
+            <div class="attitude-field">
+                <label for="in_heel">Heel (degrees)</label>
+                <input type="number" step="any" id="in_heel" value="0">
+            </div>
         </div>
     </div>
 
-    <div class="panel">
-        <div class="panel-title">Tank weights (tonnes)</div>
-        <div class="tank-grid-2col" id="tankFields"></div>
+    <div class="panel tank-grid-container">
+        <div class="section-title">
+            <span>🔹 Tank weights · same layout as dashboard</span>
+            <span style="font-size:10px; color:var(--text-muted);">tonnes</span>
+        </div>
+        <div class="tank-grid" id="tankContainer"></div>
     </div>
 
     <button class="publish-btn" onclick="publishData()">↑ Publish to Dashboard</button>
@@ -165,7 +242,8 @@
     <div class="status-msg" id="statusMsg"></div>
 
     <script>
-        // Must match the same tank list used in the dashboard
+        // Same tank list, same ordering, same grid mapping as the main dashboard,
+        // so the layout matches exactly.
         const TANK_CONFIG = [
             { id: 14, name: "AFT P" }, { id: 15, name: "AFT C" }, { id: 16, name: "AFT S" },
             { id: 17, name: "C8 P" }, { id: 18, name: "C8 C" }, { id: 19, name: "C8 S" },
@@ -177,21 +255,44 @@
             { id: 35, name: "C2 P" }, { id: 36, name: "C2 C" }, { id: 37, name: "C2 S" },
             { id: 38, name: "FWD P" }, { id: 39, name: "FWD C" }, { id: 40, name: "FWD S" },
         ];
+        const GRID_ROWS = 3;
 
         // ====== YOUR FIREBASE DATABASE ======
         const FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
         // =====================================
 
+        function getTankGridPosition(index) {
+            const colIndex = Math.floor(index / GRID_ROWS); // 0=col9(aft) ... 8=col1(fwd)
+            const rowIndex = index % GRID_ROWS;              // 0=top,1=mid,2=bottom
+            const gridCol = 10 - colIndex;
+            const gridRow = rowIndex + 1;
+            return { gridCol, gridRow };
+        }
+
         function buildFields() {
-            const container = document.getElementById('tankFields');
-            TANK_CONFIG.forEach(t => {
-                const wrap = document.createElement('div');
-                wrap.className = 'tank-field';
-                wrap.innerHTML = `
-                    <label for="in_tank_${t.id}">${t.name} (row ${t.id})</label>
+            const container = document.getElementById('tankContainer');
+            container.innerHTML = '';
+
+            const quayBox = document.createElement('div');
+            quayBox.className = 'quay-structure-box';
+            quayBox.innerHTML = `<div class="quay-title">QUAY<br>WALL</div>`;
+            container.appendChild(quayBox);
+
+            TANK_CONFIG.forEach((t, index) => {
+                const { gridCol, gridRow } = getTankGridPosition(index);
+                const box = document.createElement('div');
+                box.className = 'tank-input-box';
+                box.style.gridColumn = gridCol;
+                box.style.gridRow = gridRow;
+                box.innerHTML = `
+                    <div class="tname">
+                        <span>${t.name}</span>
+                        <span class="rowbadge">row ${t.id}</span>
+                    </div>
                     <input type="number" step="any" id="in_tank_${t.id}" value="0">
+                    <div class="unit-label">tonnes</div>
                 `;
-                container.appendChild(wrap);
+                container.appendChild(box);
             });
         }
 
@@ -277,3 +378,4 @@
     </script>
 </body>
 </html>
+
