@@ -763,7 +763,7 @@
 
                 if (data.tanks) {
                     tankData.forEach(tank => {
-                        const val = data.tanks[tank.row];
+                        const val = data.tanks["row" + tank.row];
                         if (val !== undefined) {
                             tank.weight = parseFloat(val).toFixed(2);
                             const cfg = TANK_CONFIG.find(t => t.id === tank.row);

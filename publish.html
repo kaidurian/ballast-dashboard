@@ -114,6 +114,20 @@
     .publish-btn:active {
         opacity: 0.85;
     }
+    .reload-btn {
+        width: 100%;
+        background: transparent;
+        border: 1px solid var(--panel-border);
+        color: var(--accent-blue);
+        font-size: 13px;
+        padding: 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        margin-top: 8px;
+    }
+    .reload-btn:active {
+        background: rgba(56,189,248,0.1);
+    }
     .status-msg {
         text-align: center;
         font-size: 13px;
@@ -147,6 +161,7 @@
     </div>
 
     <button class="publish-btn" onclick="publishData()">↑ Publish to Dashboard</button>
+    <button class="reload-btn" onclick="reloadValues()">↻ Reload current values</button>
     <div class="status-msg" id="statusMsg"></div>
 
     <script>
@@ -180,22 +195,46 @@
             });
         }
 
-        async function loadCurrentValues() {
+        async function loadCurrentValues(showStatus) {
+            const statusEl = document.getElementById('statusMsg');
+            if (showStatus) {
+                statusEl.textContent = "Reloading...";
+                statusEl.className = "status-msg status-sending";
+            }
             try {
-                const res = await fetch(`${FIREBASE_URL}/ballast.json`);
+                const res = await fetch(`${FIREBASE_URL}/ballast.json`, { cache: "no-store" });
                 const data = await res.json();
-                if (!data) return;
+                if (!data) {
+                    if (showStatus) {
+                        statusEl.textContent = "No published data found yet";
+                        statusEl.className = "status-msg status-err";
+                    }
+                    return;
+                }
                 if (data.trim !== undefined) document.getElementById('in_trim').value = data.trim;
                 if (data.heel !== undefined) document.getElementById('in_heel').value = data.heel;
                 if (data.tanks) {
                     TANK_CONFIG.forEach(t => {
                         const el = document.getElementById(`in_tank_${t.id}`);
-                        if (el && data.tanks[t.id] !== undefined) el.value = data.tanks[t.id];
+                        if (el && data.tanks["row" + t.id] !== undefined) el.value = data.tanks["row" + t.id];
                     });
+                }
+                if (showStatus) {
+                    const when = data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "unknown time";
+                    statusEl.textContent = "✓ Reloaded — last published " + when;
+                    statusEl.className = "status-msg status-ok";
                 }
             } catch (e) {
                 console.warn("Could not load current values", e);
+                if (showStatus) {
+                    statusEl.textContent = "✗ Could not reload — check connection";
+                    statusEl.className = "status-msg status-err";
+                }
             }
+        }
+
+        function reloadValues() {
+            loadCurrentValues(true);
         }
 
         async function publishData() {
@@ -206,7 +245,7 @@
             const tanks = {};
             TANK_CONFIG.forEach(t => {
                 const el = document.getElementById(`in_tank_${t.id}`);
-                tanks[t.id] = parseFloat(el.value) || 0;
+                tanks["row" + t.id] = parseFloat(el.value) || 0;
             });
 
             const payload = {
@@ -234,7 +273,7 @@
         }
 
         buildFields();
-        loadCurrentValues();
+        loadCurrentValues(false);
     </script>
 </body>
 </html>
