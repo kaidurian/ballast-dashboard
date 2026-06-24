@@ -93,6 +93,21 @@
             letter-spacing: 0.5px;
         }
 
+        .axle-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
+        .axles-hidden .axle-marker {
+            display: none;
+        }
+
         .switch {
             position: relative;
             display: inline-block;
@@ -324,6 +339,7 @@
         }
 
         .tank-header {
+            position: relative;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -336,6 +352,9 @@
             font-size: 10px;
             font-weight: bold;
             color: var(--text-muted);
+            background: var(--tank-box-bg);
+            padding: 1px 4px;
+            border-radius: 3px;
         }
 
         .tank-coords-badge {
@@ -348,6 +367,7 @@
         }
 
         .tank-inputs {
+            position: relative;
             z-index: 5;
             display: flex;
             flex-direction: column;
@@ -375,6 +395,9 @@
             text-align: center;
             color: var(--accent-blue);
             font-weight: 500;
+            background: var(--tank-box-bg);
+            border-radius: 3px;
+            padding: 1px 0;
         }
 
         .tank-capacity-badge {
@@ -483,7 +506,11 @@
         <div class="tank-grid-container">
             <div class="section-title">
                 <span>🔹 Custom tank layout · each tank has unique size & position</span>
-                <span class="coords-note">dimensions in meters · 🚛 amber overlay = trailer axle (0.86×0.945m)</span>
+                <span class="coords-note">dimensions in meters</span>
+                <div class="axle-toggle-container">
+                    <span>🚛 Show axles</span>
+                    <label class="switch"><input type="checkbox" id="axleToggleCheckbox" checked onchange="toggleAxleVisibility()"><span class="slider"></span></label>
+                </div>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
@@ -677,7 +704,7 @@
                     </div>
                     <div class="tank-inputs">
                         <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
-                            <span>Row ${excelRow}</span>
+                            <span style="background:var(--tank-box-bg); padding:1px 4px; border-radius:3px;">Row ${excelRow}</span>
                             <span class="tank-capacity-badge">${cfg.capacity}t</span>
                         </div>
                         <input type="number" step="any" class="weight-input"
@@ -689,6 +716,52 @@
                     </div>
                 `;
                 container.appendChild(box);
+            });
+
+            // After layout, confine each axle marker to the blank band
+            // between the header and the input block, so it never visually
+            // touches text/badges/input box even at the pixel level.
+            requestAnimationFrame(clampAxleMarkersToSafeZone);
+        }
+
+        // For each tank card, measure the actual rendered gap between the
+        // bottom of the header row and the top of the input block, then
+        // clamp every axle marker inside that card to fit within it.
+        function clampAxleMarkersToSafeZone() {
+            document.querySelectorAll('.tank-control-box').forEach(card => {
+                const header = card.querySelector('.tank-header');
+                const inputs = card.querySelector('.tank-inputs');
+                const markers = card.querySelectorAll('.axle-marker');
+                if (!header || !inputs || !markers.length) return;
+
+                const cardRect = card.getBoundingClientRect();
+                const headerRect = header.getBoundingClientRect();
+                const inputsRect = inputs.getBoundingClientRect();
+                const cardH = cardRect.height;
+                if (cardH === 0) return;
+
+                // Safe vertical band, as % of card height, between the two text blocks
+                const safeTopPct = ((headerRect.bottom - cardRect.top) / cardH) * 100;
+                const safeBottomPct = ((inputsRect.top - cardRect.top) / cardH) * 100;
+                if (safeBottomPct <= safeTopPct) return; // no room: leave markers as-is
+
+                markers.forEach(marker => {
+                    let top = parseFloat(marker.style.top);
+                    let height = parseFloat(marker.style.height);
+                    let bottom = top + height;
+
+                    // Clip into [safeTopPct, safeBottomPct]
+                    top = Math.max(top, safeTopPct);
+                    bottom = Math.min(bottom, safeBottomPct);
+                    height = Math.max(bottom - top, 0);
+
+                    marker.style.top = top + '%';
+                    marker.style.height = height + '%';
+
+                    // If clamping erased the marker entirely, hide it rather
+                    // than show a zero-height sliver.
+                    marker.style.display = height <= 0.5 ? 'none' : '';
+                });
             });
         }
 
@@ -822,6 +895,10 @@
             // No-op placeholder retained for call-site compatibility; axle
             // markers are now built directly inside initTankMatrix().
         }
+
+        // Re-confine axle markers if the grid reflows (window resize can
+        // change card/text wrapping, shifting the safe-zone boundaries).
+        window.addEventListener('resize', () => requestAnimationFrame(clampAxleMarkersToSafeZone));
 
         // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
@@ -962,6 +1039,15 @@
             const checked = document.getElementById('themeToggleCheckbox').checked;
             document.body.classList.toggle('light-theme', checked);
             drawAttitudeGraphics();
+        }
+
+        // ============================================================
+        // 8b. AXLE VISIBILITY TOGGLE
+        // ============================================================
+        function toggleAxleVisibility() {
+            const checked = document.getElementById('axleToggleCheckbox').checked;
+            const wrap = document.getElementById('tankGridWrap');
+            if (wrap) wrap.classList.toggle('axles-hidden', !checked);
         }
 
         // ============================================================
