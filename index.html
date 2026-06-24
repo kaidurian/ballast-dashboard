@@ -212,18 +212,11 @@
         }
 
         .axle-overlay-canvas {
-            z-index: 2;
-        }
-
-        .tank-header,
-        .tank-inputs {
-            position: relative;
-            z-index: 30;
-        }
-
-        .weight-input {
-            position: relative;
-            z-index: 40;
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 20;
         }
 
         .tank-grid-container {
@@ -844,8 +837,7 @@
                 // tank card (water level, label, input box all still show
                 // through), while clearly marking the axle's true footprint.
                 ctx.save();
-                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.20)' : 'rgba(245,158,11,0.4)';
-                ctx.globalCompositeOperation = 'multiply';
+                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
                 ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
