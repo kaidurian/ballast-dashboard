@@ -93,21 +93,6 @@
             letter-spacing: 0.5px;
         }
 
-        .axle-toggle-container {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 11px;
-            font-weight: bold;
-            color: var(--text-muted);
-            text-transform: none;
-            letter-spacing: normal;
-        }
-
-        .axles-hidden .axle-marker {
-            display: none;
-        }
-
         .switch {
             position: relative;
             display: inline-block;
@@ -220,10 +205,18 @@
             aspect-ratio: 320/110;
         }
 
-        /* ---- Tank grid wrapper (tanks + inline trailer axle markers) ---- */
+        /* ---- Tank grid + trailer axle overlay (same coordinate space, meters) ---- */
         .tank-grid-wrap {
             position: relative;
             min-width: 1100px;
+        }
+
+        .axle-overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 20;
         }
 
         .tank-grid-container {
@@ -329,17 +322,7 @@
             transition: height 0.4s ease-out;
         }
 
-        .axle-marker {
-            position: absolute;
-            z-index: 2;
-            background: rgba(245,158,11,0.4);
-            border: 1.5px solid #fbbf24;
-            border-radius: 1px;
-            pointer-events: none;
-        }
-
         .tank-header {
-            position: relative;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -352,9 +335,6 @@
             font-size: 10px;
             font-weight: bold;
             color: var(--text-muted);
-            background: var(--tank-box-bg);
-            padding: 1px 4px;
-            border-radius: 3px;
         }
 
         .tank-coords-badge {
@@ -367,7 +347,6 @@
         }
 
         .tank-inputs {
-            position: relative;
             z-index: 5;
             display: flex;
             flex-direction: column;
@@ -395,9 +374,6 @@
             text-align: center;
             color: var(--accent-blue);
             font-weight: 500;
-            background: var(--tank-box-bg);
-            border-radius: 3px;
-            padding: 1px 0;
         }
 
         .tank-capacity-badge {
@@ -472,6 +448,26 @@
             color: #f59e0b;
             font-family: monospace;
         }
+
+        /* new toggle for trailer overlay */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+            .toggle-container input {
+                margin-right: 4px;
+                accent-color: var(--accent-blue);
+                width: 16px;
+                height: 16px;
+                cursor: pointer;
+            }
     </style>
 </head>
 <body>
@@ -481,6 +477,11 @@
             <div class="theme-toggle-container">
                 <span>Day</span>
                 <label class="switch"><input type="checkbox" id="themeToggleCheckbox" onchange="toggleDashboardTheme()"><span class="slider"></span></label>
+            </div>
+            <!-- new toggle for trailer overlay -->
+            <div class="toggle-container">
+                <span>🚛 Trailer</span>
+                <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
             </div>
             <div id="connectionStatus" style="font-size: 11px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
@@ -506,14 +507,11 @@
         <div class="tank-grid-container">
             <div class="section-title">
                 <span>🔹 Custom tank layout · each tank has unique size & position</span>
-                <span class="coords-note">dimensions in meters</span>
-                <div class="axle-toggle-container">
-                    <span>🚛 Show axles</span>
-                    <label class="switch"><input type="checkbox" id="axleToggleCheckbox" checked onchange="toggleAxleVisibility()"><span class="slider"></span></label>
-                </div>
+                <span class="coords-note">dimensions in meters · 🚛 amber overlay = trailer axle (0.86×0.945m)</span>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
+                <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
             </div>
         </div>
     </div>
@@ -577,14 +575,12 @@
         const EXCEL_START_ROW = 14;
 
         // ---- trailer axle constants ----
-        // Axle footprint: width along X = 0.86m, height along Y = 0.945m
         const AXLE_WIDTH_X = 0.86;
         const AXLE_HEIGHT_Y = 0.945;
-        const AXLE_START_ROW = 124; // Excel rows E124/F124 downward until blank
-        const AXLE_MAX_ROWS = 60;   // safety cap on how far down we scan
+        const AXLE_START_ROW = 124;
+        const AXLE_MAX_ROWS = 60;
 
         // Reference origin (0,0) = center of AFT-C tank (Excel row 15), per spec.
-        // Overall barge extents (for drawing the hull outline) derived from tank config.
         const BARGE_X_MIN = Math.min(...TANK_CONFIG.map(t => t.x_start)); // 0
         const BARGE_X_MAX = Math.max(...TANK_CONFIG.map(t => t.x_end));  // 113
         const BARGE_Y_MIN = Math.min(...TANK_CONFIG.map(t => t.y_start)); // -14.5
@@ -595,6 +591,7 @@
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
         let trailerAxles = []; // [{ name, x, y }]
+        let showTrailer = true;  // new state for trailer toggle
 
         // tank data store (synced with config)
         let tankData = TANK_CONFIG.map(cfg => ({
@@ -647,10 +644,10 @@
             const quayBox = document.createElement('div');
             quayBox.className = 'quay-structure-box';
             quayBox.innerHTML = `
-                <div class="quay-title">QUAY WALL</div>
-                <div class="quay-dims">L=20m · W=60m</div>
-                <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
-            `;
+                    <div class="quay-title">QUAY WALL</div>
+                    <div class="quay-dims">L=20m · W=60m</div>
+                    <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+                `;
             container.appendChild(quayBox);
 
             // Render each tank from config (in order: col9→col1, top→bottom)
@@ -690,78 +687,26 @@
                 dot.style.background = borderColor;
                 box.appendChild(dot);
 
-                // Trailer axle marker(s) that fall within this tank's footprint
-                const axleMarkersHtml = getAxleMarkersForTank(cfg).map(m => `
-                    <div class="axle-marker" style="left:${m.leftPct}%; top:${m.topPct}%; width:${m.widthPct}%; height:${m.heightPct}%;"></div>
-                `).join('');
-
                 box.innerHTML += `
-                    <div class="tank-water-level" style="height: ${pct}%"></div>
-                    ${axleMarkersHtml}
-                    <div class="tank-header">
-                        <span class="tank-name">${cfg.name}</span>
-                        <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
-                    </div>
-                    <div class="tank-inputs">
-                        <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
-                            <span style="background:var(--tank-box-bg); padding:1px 4px; border-radius:3px;">Row ${excelRow}</span>
-                            <span class="tank-capacity-badge">${cfg.capacity}t</span>
+                        <div class="tank-water-level" style="height: ${pct}%"></div>
+                        <div class="tank-header">
+                            <span class="tank-name">${cfg.name}</span>
+                            <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
                         </div>
-                        <input type="number" step="any" class="weight-input"
-                               id="txt_Row${cfg.id}" value="${weight}"
-                               onchange="updateTankFill(${cfg.id}, this.value)">
-                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                            ${weight} (${pctString})
+                        <div class="tank-inputs">
+                            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
+                                <span>Row ${excelRow}</span>
+                                <span class="tank-capacity-badge">${cfg.capacity}t</span>
+                            </div>
+                            <input type="number" step="any" class="weight-input"
+                                   id="txt_Row${cfg.id}" value="${weight}"
+                                   onchange="updateTankFill(${cfg.id}, this.value)">
+                            <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                ${weight} (${pctString})
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
                 container.appendChild(box);
-            });
-
-            // After layout, confine each axle marker to the blank band
-            // between the header and the input block, so it never visually
-            // touches text/badges/input box even at the pixel level.
-            requestAnimationFrame(clampAxleMarkersToSafeZone);
-        }
-
-        // For each tank card, measure the actual rendered gap between the
-        // bottom of the header row and the top of the input block, then
-        // clamp every axle marker inside that card to fit within it.
-        function clampAxleMarkersToSafeZone() {
-            document.querySelectorAll('.tank-control-box').forEach(card => {
-                const header = card.querySelector('.tank-header');
-                const inputs = card.querySelector('.tank-inputs');
-                const markers = card.querySelectorAll('.axle-marker');
-                if (!header || !inputs || !markers.length) return;
-
-                const cardRect = card.getBoundingClientRect();
-                const headerRect = header.getBoundingClientRect();
-                const inputsRect = inputs.getBoundingClientRect();
-                const cardH = cardRect.height;
-                if (cardH === 0) return;
-
-                // Safe vertical band, as % of card height, between the two text blocks
-                const safeTopPct = ((headerRect.bottom - cardRect.top) / cardH) * 100;
-                const safeBottomPct = ((inputsRect.top - cardRect.top) / cardH) * 100;
-                if (safeBottomPct <= safeTopPct) return; // no room: leave markers as-is
-
-                markers.forEach(marker => {
-                    let top = parseFloat(marker.style.top);
-                    let height = parseFloat(marker.style.height);
-                    let bottom = top + height;
-
-                    // Clip into [safeTopPct, safeBottomPct]
-                    top = Math.max(top, safeTopPct);
-                    bottom = Math.min(bottom, safeBottomPct);
-                    height = Math.max(bottom - top, 0);
-
-                    marker.style.top = top + '%';
-                    marker.style.height = height + '%';
-
-                    // If clamping erased the marker entirely, hide it rather
-                    // than show a zero-height sliver.
-                    marker.style.display = height <= 0.5 ? 'none' : '';
-                });
             });
         }
 
@@ -848,107 +793,98 @@
         }
 
         // ============================================================
-        // 4b. TRAILER AXLE MARKERS — rendered INLINE inside each tank card
-        //     (not as a separate overlay layer), so they share that card's
-        //     own stacking context. This avoids cross-element z-index
-        //     issues entirely: the marker sits between the water-level
-        //     fill (z-index 1) and the header/input box (z-index 5),
-        //     guaranteed correct regardless of the card's transform/scale.
+        // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank grid, in the
+        //     SAME real-world coordinate space (meters) as the tanks.
+        //     Respects showTrailer flag.
         // ============================================================
+        function drawAxleOverlay() {
+            const wrap = document.getElementById('tankGridWrap');
+            const gridEl = document.getElementById('tankContainer');
+            const canvas = document.getElementById('axleOverlayCanvas');
+            if (!wrap || !gridEl || !canvas) return;
 
-        // Returns axles whose center point falls within this tank's
-        // real-world footprint (x_start..x_end, y_start..y_end), each
-        // expressed as a percentage box relative to the tank's own
-        // width/height in meters (so it scales correctly with the card).
-        function getAxleMarkersForTank(cfg) {
-            const tankW = cfg.x_end - cfg.x_start;
-            const tankH = cfg.y_end - cfg.y_start;
-            const markers = [];
+            // Match the overlay canvas to the tank grid's actual rendered box
+            const rect = gridEl.getBoundingClientRect();
+            const wrapRect = wrap.getBoundingClientRect();
+            const cssW = rect.width;
+            const cssH = rect.height;
+            if (cssW === 0 || cssH === 0) return; // not laid out yet (e.g. hidden tab)
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.style.width = cssW + 'px';
+            canvas.style.height = cssH + 'px';
+            canvas.style.left = (rect.left - wrapRect.left) + 'px';
+            canvas.style.top = (rect.top - wrapRect.top) + 'px';
+            canvas.width = cssW * dpr;
+            canvas.height = cssH * dpr;
+
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, cssW, cssH);
+
+            // if trailer overlay is hidden, just return (canvas cleared)
+            if (!showTrailer) return;
+
+            // Tank grid layout constants (must match .tank-grid CSS):
+            // 90px label column, then 9 equal 1fr tank columns, 15px gaps.
+            const labelColPx = 90;
+            const gapPx = 15;
+            const plottableW = cssW - labelColPx - gapPx;
+
+            // World X spans the full barge length (BARGE_X_MIN..BARGE_X_MAX),
+            // mapped left(AFT)->right(FWD) across the 9 tank columns, matching
+            // the existing visual order (aft tanks on the left).
+            // World Y spans the full barge beam (BARGE_Y_MIN..BARGE_Y_MAX),
+            // mapped top(PORT, +)->bottom(STBD, -) across the full grid height.
+            function worldToScreen(x, y) {
+                const xFrac = (x - BARGE_X_MIN) / (BARGE_X_MAX - BARGE_X_MIN);
+                const sx = labelColPx + gapPx + xFrac * plottableW;
+                const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
+                const sy = yFrac * cssH;
+                return { sx, sy };
+            }
+
+            const isLight = document.body.classList.contains('light-theme');
+
+            // Pixel-per-meter scale, independent per axis (X and Y tracks are
+            // sized differently), so the axle footprint reads at true scale.
+            const scaleX = plottableW / (BARGE_X_MAX - BARGE_X_MIN);
+            const scaleY = cssH / (BARGE_Y_MAX - BARGE_Y_MIN);
+
+            const halfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 3);
+            const halfH = Math.max((AXLE_HEIGHT_Y / 2) * scaleY, 3);
 
             trailerAxles.forEach((axle) => {
-                const withinX = axle.x >= cfg.x_start && axle.x <= cfg.x_end;
-                const withinY = axle.y >= cfg.y_start && axle.y <= cfg.y_end;
-                if (!withinX || !withinY) return;
+                const p = worldToScreen(axle.x, axle.y);
+                const x0 = p.sx - halfW;
+                const y0 = p.sy - halfH;
+                const w = halfW * 2;
+                const h = halfH * 2;
 
-                // Axle footprint as a % of this tank's own meter dimensions
-                const wPct = (AXLE_WIDTH_X / tankW) * 100;
-                const hPct = (AXLE_HEIGHT_Y / tankH) * 100;
-
-                // Axle center position as a % across the tank (X: left->right
-                // follows aft->fwd already, since tank x_start/x_end increase
-                // toward FWD; Y: top->bottom should show PORT(+) at top).
-                const xCenterPct = ((axle.x - cfg.x_start) / tankW) * 100;
-                const yCenterPct = ((cfg.y_end - axle.y) / tankH) * 100;
-
-                markers.push({
-                    leftPct: xCenterPct - wPct / 2,
-                    topPct: yCenterPct - hPct / 2,
-                    widthPct: wPct,
-                    heightPct: hPct
-                });
+                // Solid fill, but semi-transparent: sits visually above the
+                // tank card (water level, label, input box all still show
+                // through), while clearly marking the axle's true footprint.
+                ctx.save();
+                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
+                ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.rect(x0, y0, w, h);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
             });
-
-            return enforceMarkerSpacing(markers);
-        }
-
-        // Ensures markers never touch or merge into one continuous block.
-        // When several axles land close together in the same tank, their
-        // true-scale rectangles would overlap/abut; this keeps each one
-        // individually visible by inserting a small visual gap and, if a
-        // row is too crowded for everyone to fit at true scale, shrinking
-        // that row's markers just enough so the gaps still fit.
-        function enforceMarkerSpacing(markers) {
-            if (markers.length < 2) return markers;
-
-            const GAP_PCT = 3; // minimum visual gap between adjacent markers, as % of tank width
-
-            // Group markers into horizontal "rows" when their vertical
-            // spans overlap (so axles at different heights aren't forced
-            // to avoid each other unnecessarily).
-            const sorted = markers.slice().sort((a, b) => a.leftPct - b.leftPct);
-            const rows = [];
-            sorted.forEach(m => {
-                const row = rows.find(r => r.some(existing =>
-                    m.topPct < existing.topPct + existing.heightPct &&
-                    existing.topPct < m.topPct + m.heightPct
-                ));
-                if (row) row.push(m); else rows.push([m]);
-            });
-
-            rows.forEach(row => {
-                if (row.length < 2) return;
-                row.sort((a, b) => a.leftPct - b.leftPct);
-
-                // Total width needed (markers + mandatory gaps) vs. available span
-                const naturalWidth = row.reduce((sum, m) => sum + m.widthPct, 0);
-                const totalGap = GAP_PCT * (row.length - 1);
-                const span = (row[row.length - 1].leftPct + row[row.length - 1].widthPct) - row[0].leftPct;
-                const needed = naturalWidth + totalGap;
-
-                // Shrink each marker proportionally if they can't all fit
-                // with gaps inside the row's own footprint span.
-                const shrink = needed > span && naturalWidth > 0 ? Math.max((span - totalGap) / naturalWidth, 0.25) : 1;
-
-                let cursor = row[0].leftPct;
-                row.forEach(m => {
-                    const w = m.widthPct * shrink;
-                    m.leftPct = cursor;
-                    m.widthPct = w;
-                    cursor += w + GAP_PCT;
-                });
-            });
-
-            return markers;
         }
 
         function refreshPlanView() {
-            // No-op placeholder retained for call-site compatibility; axle
-            // markers are now built directly inside initTankMatrix().
+            drawAxleOverlay();
+            // Re-measure one frame later too, in case fonts/scrollbars shift
+            // the grid's rendered box right after the initial paint.
+            requestAnimationFrame(() => drawAxleOverlay());
         }
 
-        // Re-confine axle markers if the grid reflows (window resize can
-        // change card/text wrapping, shifting the safe-zone boundaries).
-        window.addEventListener('resize', () => requestAnimationFrame(clampAxleMarkersToSafeZone));
+        // Recompute overlay alignment whenever the layout reflows
+        window.addEventListener('resize', () => drawAxleOverlay());
 
         // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
@@ -1089,19 +1025,20 @@
             const checked = document.getElementById('themeToggleCheckbox').checked;
             document.body.classList.toggle('light-theme', checked);
             drawAttitudeGraphics();
+            drawAxleOverlay();
         }
 
         // ============================================================
-        // 8b. AXLE VISIBILITY TOGGLE
+        // 9. TRAILER OVERLAY TOGGLE (NEW)
         // ============================================================
-        function toggleAxleVisibility() {
-            const checked = document.getElementById('axleToggleCheckbox').checked;
-            const wrap = document.getElementById('tankGridWrap');
-            if (wrap) wrap.classList.toggle('axles-hidden', !checked);
+        function toggleTrailerOverlay() {
+            const checked = document.getElementById('trailerToggleCheckbox').checked;
+            showTrailer = checked;
+            drawAxleOverlay();  // immediately show/hide
         }
 
         // ============================================================
-        // 9. OFFICE INIT
+        // 10. OFFICE INIT
         // ============================================================
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
