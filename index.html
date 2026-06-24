@@ -205,18 +205,10 @@
             aspect-ratio: 320/110;
         }
 
-        /* ---- Tank grid + trailer axle overlay (same coordinate space, meters) ---- */
+        /* ---- Tank grid wrapper (tanks + inline trailer axle markers) ---- */
         .tank-grid-wrap {
             position: relative;
             min-width: 1100px;
-        }
-
-        .axle-overlay-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            pointer-events: none;
-            z-index: 20;
         }
 
         .tank-grid-container {
@@ -320,6 +312,15 @@
             border-top: 2px solid var(--tank-water-solid);
             z-index: 1;
             transition: height 0.4s ease-out;
+        }
+
+        .axle-marker {
+            position: absolute;
+            z-index: 2;
+            background: rgba(245,158,11,0.4);
+            border: 1.5px solid #fbbf24;
+            border-radius: 1px;
+            pointer-events: none;
         }
 
         .tank-header {
@@ -486,7 +487,6 @@
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
-                <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
             </div>
         </div>
     </div>
@@ -663,8 +663,14 @@
                 dot.style.background = borderColor;
                 box.appendChild(dot);
 
+                // Trailer axle marker(s) that fall within this tank's footprint
+                const axleMarkersHtml = getAxleMarkersForTank(cfg).map(m => `
+                    <div class="axle-marker" style="left:${m.leftPct}%; top:${m.topPct}%; width:${m.widthPct}%; height:${m.heightPct}%;"></div>
+                `).join('');
+
                 box.innerHTML += `
                     <div class="tank-water-level" style="height: ${pct}%"></div>
+                    ${axleMarkersHtml}
                     <div class="tank-header">
                         <span class="tank-name">${cfg.name}</span>
                         <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
@@ -769,94 +775,53 @@
         }
 
         // ============================================================
-        // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank grid, in the
-        //     SAME real-world coordinate space (meters) as the tanks.
+        // 4b. TRAILER AXLE MARKERS — rendered INLINE inside each tank card
+        //     (not as a separate overlay layer), so they share that card's
+        //     own stacking context. This avoids cross-element z-index
+        //     issues entirely: the marker sits between the water-level
+        //     fill (z-index 1) and the header/input box (z-index 5),
+        //     guaranteed correct regardless of the card's transform/scale.
         // ============================================================
-        function drawAxleOverlay() {
-            const wrap = document.getElementById('tankGridWrap');
-            const gridEl = document.getElementById('tankContainer');
-            const canvas = document.getElementById('axleOverlayCanvas');
-            if (!wrap || !gridEl || !canvas) return;
 
-            // Match the overlay canvas to the tank grid's actual rendered box
-            const rect = gridEl.getBoundingClientRect();
-            const wrapRect = wrap.getBoundingClientRect();
-            const cssW = rect.width;
-            const cssH = rect.height;
-            if (cssW === 0 || cssH === 0) return; // not laid out yet (e.g. hidden tab)
-
-            const dpr = window.devicePixelRatio || 1;
-            canvas.style.width = cssW + 'px';
-            canvas.style.height = cssH + 'px';
-            canvas.style.left = (rect.left - wrapRect.left) + 'px';
-            canvas.style.top = (rect.top - wrapRect.top) + 'px';
-            canvas.width = cssW * dpr;
-            canvas.height = cssH * dpr;
-
-            const ctx = canvas.getContext('2d');
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.clearRect(0, 0, cssW, cssH);
-
-            // Tank grid layout constants (must match .tank-grid CSS):
-            // 90px label column, then 9 equal 1fr tank columns, 15px gaps.
-            const labelColPx = 90;
-            const gapPx = 15;
-            const plottableW = cssW - labelColPx - gapPx;
-
-            // World X spans the full barge length (BARGE_X_MIN..BARGE_X_MAX),
-            // mapped left(AFT)->right(FWD) across the 9 tank columns, matching
-            // the existing visual order (aft tanks on the left).
-            // World Y spans the full barge beam (BARGE_Y_MIN..BARGE_Y_MAX),
-            // mapped top(PORT, +)->bottom(STBD, -) across the full grid height.
-            function worldToScreen(x, y) {
-                const xFrac = (x - BARGE_X_MIN) / (BARGE_X_MAX - BARGE_X_MIN);
-                const sx = labelColPx + gapPx + xFrac * plottableW;
-                const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
-                const sy = yFrac * cssH;
-                return { sx, sy };
-            }
-
-            const isLight = document.body.classList.contains('light-theme');
-
-            // Pixel-per-meter scale, independent per axis (X and Y tracks are
-            // sized differently), so the axle footprint reads at true scale.
-            const scaleX = plottableW / (BARGE_X_MAX - BARGE_X_MIN);
-            const scaleY = cssH / (BARGE_Y_MAX - BARGE_Y_MIN);
-
-            const halfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 3);
-            const halfH = Math.max((AXLE_HEIGHT_Y / 2) * scaleY, 3);
+        // Returns axles whose center point falls within this tank's
+        // real-world footprint (x_start..x_end, y_start..y_end), each
+        // expressed as a percentage box relative to the tank's own
+        // width/height in meters (so it scales correctly with the card).
+        function getAxleMarkersForTank(cfg) {
+            const tankW = cfg.x_end - cfg.x_start;
+            const tankH = cfg.y_end - cfg.y_start;
+            const markers = [];
 
             trailerAxles.forEach((axle) => {
-                const p = worldToScreen(axle.x, axle.y);
-                const x0 = p.sx - halfW;
-                const y0 = p.sy - halfH;
-                const w = halfW * 2;
-                const h = halfH * 2;
+                const withinX = axle.x >= cfg.x_start && axle.x <= cfg.x_end;
+                const withinY = axle.y >= cfg.y_start && axle.y <= cfg.y_end;
+                if (!withinX || !withinY) return;
 
-                // Solid fill, but semi-transparent: sits visually above the
-                // tank card (water level, label, input box all still show
-                // through), while clearly marking the axle's true footprint.
-                ctx.save();
-                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
-                ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.rect(x0, y0, w, h);
-                ctx.fill();
-                ctx.stroke();
-                ctx.restore();
+                // Axle footprint as a % of this tank's own meter dimensions
+                const wPct = (AXLE_WIDTH_X / tankW) * 100;
+                const hPct = (AXLE_HEIGHT_Y / tankH) * 100;
+
+                // Axle center position as a % across the tank (X: left->right
+                // follows aft->fwd already, since tank x_start/x_end increase
+                // toward FWD; Y: top->bottom should show PORT(+) at top).
+                const xCenterPct = ((axle.x - cfg.x_start) / tankW) * 100;
+                const yCenterPct = ((cfg.y_end - axle.y) / tankH) * 100;
+
+                markers.push({
+                    leftPct: xCenterPct - wPct / 2,
+                    topPct: yCenterPct - hPct / 2,
+                    widthPct: wPct,
+                    heightPct: hPct
+                });
             });
+
+            return markers;
         }
 
         function refreshPlanView() {
-            drawAxleOverlay();
-            // Re-measure one frame later too, in case fonts/scrollbars shift
-            // the grid's rendered box right after the initial paint.
-            requestAnimationFrame(() => drawAxleOverlay());
+            // No-op placeholder retained for call-site compatibility; axle
+            // markers are now built directly inside initTankMatrix().
         }
-
-        // Recompute overlay alignment whenever the layout reflows
-        window.addEventListener('resize', () => drawAxleOverlay());
 
         // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
@@ -997,7 +962,6 @@
             const checked = document.getElementById('themeToggleCheckbox').checked;
             document.body.classList.toggle('light-theme', checked);
             drawAttitudeGraphics();
-            drawAxleOverlay();
         }
 
         // ============================================================
