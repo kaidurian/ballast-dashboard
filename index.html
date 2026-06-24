@@ -3,626 +3,876 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CREST_301 · Barge Ballast</title>
+    <title>Barge Ballast · Custom Tank Dimensions</title>
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
     <style>
+        :root {
+            --bg-dark: #0f141c;
+            --panel-bg: #161d26;
+            --panel-border: #242f41;
+            --tank-box-bg: #1c2532;
+            --input-bg: rgba(15,20,28,0.9);
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --tank-water: rgba(56,189,248,0.25);
+            --tank-water-solid: #38bdf8;
+            --quay-bg: #2d3748;
+            --quay-border: #4a5568;
+            --quay-text: #cbd5e1;
+        }
+
+        body.light-theme {
+            --bg-dark: #f1f5f9;
+            --panel-bg: #ffffff;
+            --panel-border: #cbd5e1;
+            --tank-box-bg: #f8fafc;
+            --input-bg: rgba(255,255,255,0.95);
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --accent-blue: #0284c7;
+            --accent-green: #16a34a;
+            --tank-water: rgba(2,132,199,0.15);
+            --tank-water-solid: #0284c7;
+            --quay-bg: #e2e8f0;
+            --quay-border: #cbd5e1;
+            --quay-text: #475569;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+            font-family: 'Calibri','Segoe UI',sans-serif;
+            transition: background-color 0.2s, border-color 0.2s, color 0.2s;
         }
 
         body {
-            background: #0b1119;
-            color: #e2e8f0;
-            padding: 16px;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
             min-height: 100vh;
+        }
+
+        header {
             display: flex;
-            flex-direction: column;
-            transition: background 0.2s, color 0.2s;
-        }
-
-            body.light {
-                background: #f1f5f9;
-                color: #0b1a2a;
-            }
-
-        .panel {
-            background: #141c26;
-            border: 1px solid #26303f;
-            border-radius: 14px;
-            padding: 18px 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 6px 14px rgba(0,0,0,0.5);
-            transition: background 0.2s, border 0.2s;
-        }
-
-        body.light .panel {
-            background: #ffffff;
-            border-color: #cbd5e1;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        }
-
-        .flex-row {
-            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--panel-border);
             flex-wrap: wrap;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
+            gap: 10px;
         }
 
-        .badge {
-            background: #1f2a3a;
-            padding: 4px 12px;
-            border-radius: 30px;
-            font-size: 13px;
-            font-weight: 500;
-            color: #94a3b8;
-            border: 1px solid #2d384a;
-        }
-
-        body.light .badge {
-            background: #eef2f6;
-            border-color: #d1d9e6;
-            color: #334155;
-        }
-
-        .btn-sync {
-            background: transparent;
-            border: 1px solid #3b82f6;
-            color: #60a5fa;
-            padding: 5px 18px;
-            border-radius: 30px;
-            font-weight: 600;
-            font-size: 13px;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-
-            .btn-sync:hover {
-                background: #3b82f620;
-                border-color: #60a5fa;
+            header h1 {
+                font-size: 16px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                color: var(--text-main);
             }
 
-        .toggle-group {
+        .header-controls {
             display: flex;
             align-items: center;
-            gap: 12px;
-            font-size: 13px;
-            color: #94a3b8;
+            gap: 20px;
+            flex-wrap: wrap;
         }
 
-            .toggle-group label {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                cursor: pointer;
-            }
-
-        .grid-wrap {
-            position: relative;
-            width: 100%;
-            overflow-x: auto;
-            padding-bottom: 4px;
-        }
-
-        .tank-grid {
-            display: grid;
-            grid-template-columns: 90px repeat(9, 1fr);
-            grid-template-rows: repeat(3, 110px);
-            gap: 16px;
-            min-width: 1100px;
-            margin-top: 6px;
-        }
-
-        .quay {
-            grid-column: 1;
-            grid-row: 1 / span 3;
-            background: #1f2a3a;
-            border: 2px dashed #3d4c62;
-            border-radius: 12px;
+        .theme-toggle-container {
             display: flex;
-            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            color: #94a3b8;
-            box-shadow: inset 0 0 20px rgba(0,0,0,0.3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        body.light .quay {
-            background: #e9edf3;
-            border-color: #b7c4d4;
-            color: #334155;
-        }
-
-        .tank-card {
-            background: #1b2533;
-            border: 2px solid #2d3a4f;
-            border-radius: 12px;
-            padding: 8px 10px;
-            position: relative;
-            overflow: hidden;
-            transition: border 0.15s, transform 0.2s, box-shadow 0.2s;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            min-height: 110px;
-        }
-
-        body.light .tank-card {
-            background: #f8fafc;
-            border-color: #d1d9e6;
-        }
-
-        .tank-card:hover {
-            border-color: #38bdf8;
-            box-shadow: 0 0 0 2px #38bdf855;
-            z-index: 5;
-        }
-
-        .water-fill {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background: #38bdf830;
-            border-top: 2px solid #38bdf8;
-            transition: height 0.4s ease;
-            pointer-events: none;
-        }
-
-        .tank-header {
-            display: flex;
-            justify-content: space-between;
+            gap: 8px;
             font-size: 11px;
-            font-weight: 600;
-            color: #94a3b8;
-            z-index: 2;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .switch {
             position: relative;
+            display: inline-block;
+            width: 38px;
+            height: 20px;
         }
 
-        .tank-coord {
-            font-family: monospace;
-            background: #0b1119cc;
-            padding: 0 6px;
-            border-radius: 4px;
-            color: #60a5fa;
-            font-size: 9px;
-        }
-
-        .tank-input-area {
-            z-index: 2;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-            .tank-input-area input {
-                width: 100%;
-                background: #0b1119cc;
-                border: 1px solid #2d3a4f;
-                color: #e2e8f0;
-                text-align: center;
-                font-size: 12px;
-                padding: 3px 0;
-                border-radius: 6px;
-                font-weight: 500;
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
             }
 
-        body.light .tank-input-area input {
-            background: #ffffffcc;
-            border-color: #cbd5e1;
-            color: #0b1a2a;
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #242f41;
+            transition: .3s;
+            border-radius: 20px;
+            border: 1px solid var(--panel-border);
         }
 
-        .tank-input-area input:focus {
-            outline: 2px solid #3b82f6;
-            border-color: transparent;
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 12px;
+                width: 12px;
+                left: 3px;
+                bottom: 3px;
+                background-color: #38bdf8;
+                transition: .3s;
+                border-radius: 50%;
+            }
+
+        input:checked + .slider {
+            background-color: #cbd5e1;
         }
 
-        .pct-label {
-            font-size: 10px;
-            color: #60a5fa;
-            text-align: center;
+            input:checked + .slider:before {
+                transform: translateX(18px);
+                background-color: #0284c7;
+            }
+
+        .main-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            flex-grow: 1;
         }
 
-        .cap-badge {
-            font-size: 9px;
-            background: #0b1119cc;
-            padding: 0 6px;
-            border-radius: 10px;
-            color: #34d399;
-            font-weight: 600;
+        .attitude-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
         }
 
-        .dot-size {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 4px;
-            flex-shrink: 0;
-        }
-
-        .excel-row-tag {
-            font-size: 8px;
-            background: #1f2a3a;
-            padding: 0 6px;
-            border-radius: 10px;
-            color: #f59e0b;
-        }
-
-        .attitude-canvas-wrap {
+        .attitude-display-container {
             display: flex;
             flex-wrap: wrap;
-            gap: 30px;
-            margin: 8px 0 4px 0;
-            justify-content: center;
+            gap: 20px;
+            justify-content: space-around;
         }
 
-        .attitude-box {
-            background: #101a26;
-            border-radius: 12px;
-            padding: 12px 16px 10px 16px;
-            border: 1px solid #26303f;
-            text-align: center;
-            flex: 1 1 220px;
-            min-width: 180px;
+        .visual-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0,0,0,0.15);
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            flex: 1;
+            min-width: 280px;
         }
 
-        body.light .attitude-box {
-            background: #f1f5f9;
-            border-color: #d1d9e6;
+        .visual-title {
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
         }
 
-        .attitude-box canvas {
+        .attitude-value-badge {
+            font-size: 13px;
+            font-weight: bold;
+            color: var(--accent-green);
+            background: rgba(0,0,0,0.3);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-family: monospace;
+        }
+
+        .attitude-canvas {
+            background: #0b0f19;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
             width: 100%;
             height: auto;
-            max-width: 280px;
-            aspect-ratio: 280/80;
-            background: #0b1119;
-            border-radius: 8px;
-            border: 1px solid #26303f;
-            margin-top: 6px;
+            max-width: 320px;
+            aspect-ratio: 320/110;
         }
 
-        body.light .attitude-box canvas {
-            background: #ffffff;
-            border-color: #cbd5e1;
+        /* ---- Tank grid + trailer axle overlay (same coordinate space, meters) ---- */
+        .tank-grid-wrap {
+            position: relative;
+            min-width: 1100px;
         }
 
-        .attitude-value {
-            font-weight: 700;
-            font-size: 14px;
-            color: #34d399;
-        }
-
-        .trailer-overlay-canvas {
+        .axle-overlay-canvas {
             position: absolute;
             top: 0;
             left: 0;
             pointer-events: none;
             z-index: 20;
-            width: 100%;
-            height: 100%;
         }
 
-        .status-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 4px;
-        }
-
-        .status-online {
-            background: #34d399;
-        }
-
-        .status-offline {
-            background: #f87171;
-        }
-
-        .status-mock {
-            background: #fbbf24;
+        .tank-grid-container {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-x: auto;
         }
 
         .section-title {
-            font-size: 13px;
-            font-weight: 600;
-            letter-spacing: 0.3px;
-            color: #94a3b8;
-            border-left: 4px solid #3b82f6;
-            padding-left: 12px;
-            margin-bottom: 10px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            border-left: 3px solid var(--accent-blue);
+            padding-left: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
-        body.light .section-title {
-            color: #1e293b;
+        .tank-grid {
+            display: grid;
+            grid-template-columns: 90px repeat(9,1fr);
+            grid-auto-rows: 105px;
+            gap: 15px;
         }
+
+        .quay-structure-box {
+            grid-column: 1;
+            grid-row: 1 / span 3;
+            background: var(--quay-bg);
+            border: 2px dashed var(--quay-border);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            text-align: center;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.2);
+        }
+
+        .quay-title {
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--quay-text);
+        }
+
+        .quay-dims {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .quay-coords-badge {
+            font-size: 9px;
+            margin-top: 8px;
+            background: rgba(0,0,0,0.4);
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #f43f5e;
+            font-family: monospace;
+        }
+
+        .tank-control-box {
+            background: var(--tank-box-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            position: relative;
+            height: 105px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 8px;
+            overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+        }
+
+            .tank-control-box:hover {
+                z-index: 10;
+                box-shadow: 0 0 25px rgba(56,189,248,0.25);
+            }
+
+        .tank-water-level {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: var(--tank-water);
+            border-top: 2px solid var(--tank-water-solid);
+            z-index: 1;
+            transition: height 0.4s ease-out;
+        }
+
+        .tank-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 5;
+            flex-wrap: wrap;
+            gap: 2px;
+        }
+
+        .tank-name {
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--text-muted);
+        }
+
+        .tank-coords-badge {
+            font-size: 8px;
+            background: rgba(0,0,0,0.35);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: var(--accent-blue);
+            font-family: monospace;
+        }
+
+        .tank-inputs {
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .weight-input {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            text-align: center;
+            font-size: 11px;
+            padding: 2px 0;
+            border-radius: 4px;
+        }
+
+            .weight-input:focus {
+                outline: none;
+                border-color: var(--accent-blue);
+            }
+
+        .load-percentage-label {
+            font-size: 9px;
+            text-align: center;
+            color: var(--accent-blue);
+            font-weight: 500;
+        }
+
+        .tank-capacity-badge {
+            font-size: 8px;
+            background: rgba(0,0,0,0.4);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: var(--accent-green);
+            font-family: monospace;
+        }
+
+        .sync-btn {
+            background: transparent;
+            border: 1px solid var(--panel-border);
+            color: var(--accent-blue);
+            padding: 2px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+            .sync-btn:hover {
+                background: rgba(56,189,248,0.1);
+            }
+
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--panel-border);
+            border-radius: 3px;
+        }
+
+        @media (max-width: 700px) {
+            .tank-grid {
+                min-width: 700px;
+            }
+        }
+
+        .coords-note {
+            font-size: 10px;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+            display: inline-block;
+            margin-left: 8px;
+        }
+
+        .tank-size-indicator {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            z-index: 10;
+        }
+
+        .excel-row-badge {
+            font-size: 8px;
+            background: rgba(0,0,0,0.3);
+            padding: 1px 4px;
+            border-radius: 3px;
+            color: #f59e0b;
+            font-family: monospace;
+        }
+
+        /* new toggle for trailer overlay */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+            .toggle-container input {
+                margin-right: 4px;
+                accent-color: var(--accent-blue);
+                width: 16px;
+                height: 16px;
+                cursor: pointer;
+            }
     </style>
 </head>
 <body>
-    <div class="panel">
-        <div class="flex-row">
-            <div style="display:flex; align-items:center; gap:10px;">
-                <span style="font-size:20px;">⛴️</span>
-                <h2 style="font-weight:600; font-size:18px;">CREST_301 · Barge Ballast</h2>
-                <span class="badge">custom tank geometry</span>
+    <header>
+        <h1>⚓ BARGE BALLAST · custom tank dimensions</h1>
+        <div class="header-controls">
+            <div class="theme-toggle-container">
+                <span>Day</span>
+                <label class="switch"><input type="checkbox" id="themeToggleCheckbox" onchange="toggleDashboardTheme()"><span class="slider"></span></label>
             </div>
-            <div class="flex-row" style="gap:8px;">
-                <div class="toggle-group">
-                    <label><input type="checkbox" id="trailerToggle" checked onchange="toggleTrailer()"> 🚛 Trailer axles</label>
-                    <label><input type="checkbox" id="themeToggle" onchange="toggleTheme()"> ☀️ Light</label>
+            <!-- new toggle for trailer overlay -->
+            <div class="toggle-container">
+                <span>🚛 Trailer</span>
+                <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
+            </div>
+            <div id="connectionStatus" style="font-size: 11px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
+            <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
+        </div>
+    </header>
+    <div class="main-layout">
+        <div class="attitude-panel">
+            <div class="section-title">Barge attitude · real coordinates</div>
+            <div class="attitude-display-container">
+                <div class="visual-container">
+                    <div class="visual-title">Trim (longitudinal)</div>
+                    <div class="attitude-value-badge" id="lbl_TrimValue">0.00°</div>
+                    <canvas id="trimCanvas" class="attitude-canvas" width="320" height="110"></canvas>
                 </div>
-                <button class="btn-sync" onclick="pullExcelData()">↻ Sync</button>
-                <span id="connStatus" style="font-size:12px; color:#94a3b8; display:flex; align-items:center;">
-                    <span class="status-dot status-offline" id="statusDot"></span> <span id="statusLabel">Offline</span>
-                </span>
+                <div class="visual-container">
+                    <div class="visual-title">Heel (transverse)</div>
+                    <div class="attitude-value-badge" id="lbl_HeelValue">0.00°</div>
+                    <canvas id="heelCanvas" class="attitude-canvas" width="320" height="110"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="tank-grid-container">
+            <div class="section-title">
+                <span>🔹 Custom tank layout · each tank has unique size & position</span>
+                <span class="coords-note">dimensions in meters · 🚛 amber overlay = trailer axle (0.86×0.945m)</span>
+            </div>
+            <div class="tank-grid-wrap" id="tankGridWrap">
+                <div class="tank-grid" id="tankContainer"></div>
+                <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
             </div>
         </div>
     </div>
-
-    <!-- attitude -->
-    <div class="panel">
-        <div class="section-title">⚓ Barge attitude (real coordinates)</div>
-        <div class="attitude-canvas-wrap">
-            <div class="attitude-box">
-                <div>Trim <span class="attitude-value" id="trimValue">0.00°</span></div>
-                <canvas id="trimCanvas" width="280" height="80"></canvas>
-            </div>
-            <div class="attitude-box">
-                <div>Heel <span class="attitude-value" id="heelValue">0.00°</span></div>
-                <canvas id="heelCanvas" width="280" height="80"></canvas>
-            </div>
-        </div>
-    </div>
-
-    <!-- tank grid -->
-    <div class="panel" style="padding-bottom:12px;">
-        <div class="flex-row" style="margin-bottom:4px;">
-            <div class="section-title" style="margin-bottom:0;">📦 Tank layout · dimensions (m) · position from Q–T (CREST_301)</div>
-            <span style="font-size:11px; color:#94a3b8;">🔹 width = R–Q &nbsp; height = S–T &nbsp; X = Q+½(R–Q) &nbsp; Y = (S–T)</span>
-        </div>
-        <div class="grid-wrap" id="gridWrap">
-            <div class="tank-grid" id="tankGrid"></div>
-            <canvas id="axleCanvas" class="trailer-overlay-canvas"></canvas>
-        </div>
-    </div>
-
     <script>
-        // --------------------------------------------------------------
-        //  CONFIG : tank geometry from CREST_301, column Q..T, row 30..blank
-        //  Excel column mapping : Q = x_start, R = x_end, S = y_start, T = y_end
-        //  width  = R - Q, height = S - T, X = Q + (R-Q)/2, Y = S - T
-        //  We use Q/R as x-axis (longitudinal), S/T as y-axis (transverse)
-        //  Rows: 30,31,32 ... until blank  (we define 27 tanks: 9 cols × 3 rows)
-        // --------------------------------------------------------------
-        const TANK_ROWS = [];
-        // generate from row 30 .. 56 (9 columns * 3 rows = 27)
-        for (let i = 0; i < 27; i++) {
-            const row = 30 + i;
-            // column index 0..8 (aft → fwd)
-            const colIdx = Math.floor(i / 3);
-            const rowIdx = i % 3; // 0=top,1=middle,2=bottom
-            // define real-world geometry (meters) based on typical barge
-            // aft (col0) x:0..14,  col1:15.5..29,  ... col8:105.5..113
-            const xStart = colIdx * 14.5 + (colIdx > 0 ? 1.5 : 0);
-            const xEnd = xStart + (colIdx === 0 ? 14 : (colIdx === 8 ? 7.5 : 13.5));
-            // y spread: top row +4..+14, middle -4..+4, bottom -14..-4
-            let yStart, yEnd;
-            if (rowIdx === 0) { yStart = 4.5; yEnd = 14.0; }
-            else if (rowIdx === 1) { yStart = -3.8; yEnd = 3.8; }
-            else { yStart = -14.0; yEnd = -4.5; }
-            // capacity (rough)
-            const cap = Math.round((xEnd - xStart) * (yEnd - yStart) * 1.2);
-            TANK_ROWS.push({
-                row: row,
-                col: colIdx,
-                rowIdx: rowIdx,
-                x_start: xStart,
-                x_end: xEnd,
-                y_start: yStart,
-                y_end: yEnd,
-                capacity: cap < 50 ? 50 : cap,
-                name: `T${row}`
-            });
-        }
+        // ============================================================
+        // 1. CUSTOM TANK CONFIGURATION — each tank with unique size
+        //    Ordered: Column 9 (aft) → Column 1 (fwd), Top → Middle → Bottom
+        //    Excel rows: 14-16 = Col 9, 17-19 = Col 8, ..., 38-40 = Col 1
+        // ============================================================
+        let TANK_CONFIG = [];
 
-        // derived world limits
-        const WORLD_X_MIN = Math.min(...TANK_ROWS.map(t => t.x_start));
-        const WORLD_X_MAX = Math.max(...TANK_ROWS.map(t => t.x_end));
-        const WORLD_Y_MIN = Math.min(...TANK_ROWS.map(t => t.y_start));
-        const WORLD_Y_MAX = Math.max(...TANK_ROWS.map(t => t.y_end));
+        // ---- derived constants ----
+        let totalTanks = 0;
+        const GRID_COLS = 9;      // visual grid columns (2-10)
+        const GRID_ROWS = 3;      // visual grid rows (1-3)
+        const EXCEL_START_ROW = 30;
 
-        // state
-        let isExcelReady = false;
-        let trimDeg = 0.0;
-        let heelDeg = 0.0;
-        let trailerAxles = []; // [{x, y}]
-        let showTrailer = true;
-        let tankWeights = {};  // key: row, value: weight (tonnes)
+        // ---- trailer axle constants ----
+        const AXLE_WIDTH_X = 0.86;
+        const AXLE_HEIGHT_Y = 0.945;
+        const AXLE_START_ROW = 124;
+        const AXLE_MAX_ROWS = 60;
 
-        // init weights
-        TANK_ROWS.forEach(t => { tankWeights[t.row] = 0; });
+        // Reference origin (0,0) = center of AFT-C tank (Excel row 15), per spec.
+        let BARGE_X_MIN = 0;
+        let BARGE_X_MAX = 100;
 
-        // --------------------------------------------------------------
-        //  RENDER TANK GRID
-        // --------------------------------------------------------------
-        function renderTanks() {
-            const grid = document.getElementById('tankGrid');
-            grid.innerHTML = '';
+        let BARGE_Y_MIN = -10;
+        let BARGE_Y_MAX = 10;
 
-            // quay wall
-            const quay = document.createElement('div');
-            quay.className = 'quay';
-            quay.innerHTML = `<div>QUAY</div><div style="font-size:10px; font-weight:400;">X: -1.2 .. -21.2</div>`;
-            grid.appendChild(quay);
+        // ---- state ----
+        let isOfficeInitialized = false;
+        let currentTrimDegrees = 0.0;
+        let currentHeelDegrees = 0.0;
+        let trailerAxles = []; // [{ name, x, y }]
+        let showTrailer = true;  // new state for trailer toggle
 
-            TANK_ROWS.forEach((t, idx) => {
-                const card = document.createElement('div');
-                card.className = 'tank-card';
-                card.id = `tank_${t.row}`;
-                // grid position: col = 10 - colIdx (aft left), row = rowIdx+1
-                const gridCol = 10 - t.col;
-                const gridRow = t.rowIdx + 1;
-                card.style.gridColumn = gridCol;
-                card.style.gridRow = gridRow;
+        // tank data store (synced with config)
+        let tankData = TANK_CONFIG.map(cfg => ({
+            row: cfg.id,
+            name: cfg.name,
+            weight: 0,
+            percent: 0.0,
+            capacity: cfg.capacity,
+            geometry: getTankGeometry(cfg.id)
+        }));
 
-                const w = t.x_end - t.x_start;
-                const h = t.y_end - t.y_start;
-                const centerX = t.x_start + w / 2;
-                const centerY = t.y_start + h / 2; // Y coordinate (positive up)
-                // capacity color
-                const cap = t.capacity;
-                let borderColor = '#38bdf8';
-                if (cap > 300) borderColor = '#34d399';
-                else if (cap > 180) borderColor = '#60a5fa';
-                else if (cap > 80) borderColor = '#fbbf24';
-                else borderColor = '#f87171';
-                card.style.borderColor = borderColor;
+        // ============================================================
+        // 2. GEOMETRY HELPERS
+        // ============================================================
+        async function loadTankConfiguration(context) {
 
-                const weight = tankWeights[t.row] || 0;
-                const pct = t.capacity > 0 ? Math.min(weight / t.capacity, 1.0) : 0;
+            const sheet = context.workbook.worksheets.getItem("CREST_301");
 
-                card.innerHTML = `
-                        <div class="water-fill" style="height:${pct * 100}%;"></div>
-                        <div class="tank-header">
-                            <span><span class="dot-size" style="background:${borderColor};"></span>${t.name}</span>
-                            <span class="tank-coord">${w.toFixed(1)}×${h.toFixed(1)}</span>
-                        </div>
-                        <div class="tank-header" style="font-size:9px; color:#64748b; margin-top:-2px;">
-                            <span>X:${centerX.toFixed(1)} Y:${(t.y_start + h / 2).toFixed(1)}</span>
-                            <span class="excel-row-tag">row ${t.row}</span>
-                        </div>
-                        <div class="tank-input-area">
-                            <input type="number" step="0.1" value="${weight.toFixed(1)}"
-                                   onchange="updateWeight(${t.row}, this.value)"
-                                   placeholder="t">
-                            <div class="pct-label">${weight.toFixed(1)} t (${(pct * 100).toFixed(0)}%)</div>
-                            <div style="display:flex; justify-content:flex-end; font-size:8px; color:#64748b; gap:6px;">
-                                <span>cap ${t.capacity}t</span>
-                                <span>R-Q:${w.toFixed(1)} S-T:${h.toFixed(1)}</span>
-                            </div>
-                        </div>
-                    `;
-                grid.appendChild(card);
-            });
+            const range = sheet.getRange("P30:T300");
 
-            // re-draw overlay after render
-            requestAnimationFrame(() => drawAxleOverlay());
-        }
+            range.load("values");
 
-        // --------------------------------------------------------------
-        //  UPDATE WEIGHT (local + excel write)
-        // --------------------------------------------------------------
-        async function updateWeight(row, val) {
-            const num = parseFloat(val);
-            if (isNaN(num) || num < 0) return;
-            tankWeights[row] = num;
-            // update card
-            const card = document.getElementById(`tank_${row}`);
-            if (!card) return;
-            const t = TANK_ROWS.find(t => t.row === row);
-            if (!t) return;
-            const pct = t.capacity > 0 ? Math.min(num / t.capacity, 1.0) : 0;
-            const fill = card.querySelector('.water-fill');
-            if (fill) fill.style.height = `${pct * 100}%`;
-            const label = card.querySelector('.pct-label');
-            if (label) label.textContent = `${num.toFixed(1)} t (${(pct * 100).toFixed(0)}%)`;
-            // update input
-            const inp = card.querySelector('input');
-            if (inp) inp.value = num.toFixed(1);
+            await context.sync();
 
-            // write to excel if connected
-            if (isExcelReady) {
-                try {
-                    await Excel.run(async (context) => {
-                        const sheet = context.workbook.worksheets.getItem("CREST_301");
-                        const cell = sheet.getRange(`D${row}`); // weight column
-                        cell.values = [[num]];
-                        await context.sync();
-                    });
-                } catch (e) { console.warn('Excel write error', e); }
+            const values = range.values;
+
+            TANK_CONFIG = [];
+
+            let tankCounter = 0;
+
+            for (let i = 0; i < values.length; i++) {
+
+                const row = values[i];
+
+                const tankName = row[0];
+
+                const q = parseFloat(row[1]);
+                const r = parseFloat(row[2]);
+                const s = parseFloat(row[3]);
+                const t = parseFloat(row[4]);
+
+                if (
+                    isNaN(q) &&
+                    isNaN(r) &&
+                    isNaN(s) &&
+                    isNaN(t)
+                ) {
+                    break;
+                }
+
+                const width = r - q;
+                const height = s - t;
+
+                const centerX = q + width / 2;
+                const centerY = t + height / 2;
+
+                TANK_CONFIG.push({
+                    id: 30 + i,
+
+                    name:
+                        tankName && tankName !== ""
+                            ? tankName
+                            : `Tank ${30 + i}`,
+
+                    x_start: q,
+                    x_end: r,
+
+                    y_start: t,
+                    y_end: s,
+
+                    centerX: centerX,
+                    centerY: centerY,
+
+                    width: width,
+                    height: height,
+
+                    capacity: Math.round(width * height)
+                });
+
+                tankCounter++;
             }
+
+            totalTanks = tankCounter;
+
+            BARGE_X_MIN =
+                Math.min(...TANK_CONFIG.map(t => t.x_start));
+
+            BARGE_X_MAX =
+                Math.max(...TANK_CONFIG.map(t => t.x_end));
+
+            BARGE_Y_MIN =
+                Math.min(...TANK_CONFIG.map(t => t.y_start));
+
+            BARGE_Y_MAX =
+                Math.max(...TANK_CONFIG.map(t => t.y_end));
+
+            tankData = TANK_CONFIG.map(cfg => ({
+                row: cfg.id,
+                name: cfg.name,
+                weight: 0,
+                percent: 0,
+                capacity: cfg.capacity,
+                geometry: null
+            }));
+        }
+        function getTankGeometry(tankId) {
+
+            const cfg =
+                TANK_CONFIG.find(t => t.id === tankId);
+
+            if (!cfg) return null;
+
+            return {
+
+                x: cfg.centerX,
+
+                y: cfg.centerY,
+
+                width: cfg.width,
+
+                height: cfg.height,
+
+                capacity: cfg.capacity
+            };
         }
 
-        // --------------------------------------------------------------
-        //  ATTITUDE CANVAS
-        // --------------------------------------------------------------
-        function drawAttitude() {
-            const isLight = document.body.classList.contains('light');
-            const bg = isLight ? '#f8fafc' : '#0b1119';
-            const fg = isLight ? '#1e293b' : '#e2e8f0';
-            const water = '#34d399';
-            const hull = isLight ? '#0f172a' : '#60a5fa';
+        // Map tank index to visual grid column/row
+        function getTankGridPosition(index) {
 
-            function drawCanvas(id, angleDeg, label) {
-                const c = document.getElementById(id);
-                if (!c) return;
-                const ctx = c.getContext('2d');
-                const w = c.width, h = c.height;
-                ctx.clearRect(0, 0, w, h);
-                ctx.fillStyle = bg;
-                ctx.fillRect(0, 0, w, h);
-                // waterline
-                const midY = h / 2;
-                ctx.strokeStyle = water;
+            const cols = 9;
+
+            return {
+
+                gridCol: (index % cols) + 2,
+
+                gridRow:
+                    Math.floor(index / cols) + 1,
+
+                excelRow:
+                    TANK_CONFIG[index].id
+            };
+        }
+
+        // Colour based on capacity
+        function getTankColor(capacity) {
+            if (capacity > 250) return '#10b981';   // green - large
+            if (capacity > 150) return '#38bdf8';   // blue - medium
+            if (capacity > 50) return '#f59e0b';   // amber - small
+            return '#94a3b8';                       // grey - void / special
+        }
+
+        // ============================================================
+        // 3. RENDER TANKS
+        // ============================================================
+        function initTankMatrix() {
+            const container = document.getElementById('tankContainer');
+            container.innerHTML = '';
+
+            // Quay wall
+            const quayBox = document.createElement('div');
+            quayBox.className = 'quay-structure-box';
+            quayBox.innerHTML = `
+                        <div class="quay-title">QUAY WALL</div>
+                        <div class="quay-dims">L=20m · W=60m</div>
+                        <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+                    `;
+            container.appendChild(quayBox);
+
+            // Render each tank from config (in order: col9→col1, top→bottom)
+            TANK_CONFIG.forEach((cfg, index) => {
+                const geo = getTankGeometry(cfg.id);
+                if (!geo) return;
+                const { gridCol, gridRow, excelRow } = getTankGridPosition(index);
+
+                // find data
+                const tank = tankData.find(t => t.row === cfg.id);
+                const pct = tank ? tank.percent * 100 : 0;
+                const pctString = pct.toFixed(0) + '%';
+                const weight = tank ? tank.weight : 0;
+
+                const box = document.createElement('div');
+                box.className = 'tank-control-box';
+                box.id = `tank_card_${cfg.id}`;
+                box.style.gridColumn = gridCol;
+                box.style.gridRow = gridRow;
+
+                // visual size hint: scale based on actual area relative to average
+                const avgArea = 15 * 9; // ~135 m²
+                const area = geo.width * geo.height;
+                const scaleFactor = 0.75 + (area / avgArea) * 0.5;
+                const finalScale = Math.min(Math.max(scaleFactor, 0.7), 1.4);
+                box.style.transform = `scale(${finalScale})`;
+                box.style.transformOrigin = 'center center';
+
+                // border colour by capacity
+                const borderColor = getTankColor(cfg.capacity);
+                box.style.borderColor = borderColor;
+                box.style.borderWidth = '2px';
+
+                // capacity dot
+                const dot = document.createElement('span');
+                dot.className = 'tank-size-indicator';
+                dot.style.background = borderColor;
+                box.appendChild(dot);
+
+                box.innerHTML += `
+                            <div class="tank-water-level" style="height: ${pct}%"></div>
+                            <div class="tank-header">
+                                <span class="tank-name">${cfg.name}</span>
+                                <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
+                            </div>
+                            <div class="tank-inputs">
+                                <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
+                                    <span>Row ${excelRow}</span>
+                                    <span class="tank-capacity-badge">${cfg.capacity}t</span>
+                                </div>
+                                <input type="number" step="any" class="weight-input"
+                                       id="txt_Row${cfg.id}" value="${weight}"
+                                       onchange="updateTankFill(${cfg.id}, this.value)">
+                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                    ${weight} (${pctString})
+                                </div>
+                            </div>
+                        `;
+                container.appendChild(box);
+            });
+        }
+
+        // ============================================================
+        // 4. ATTITUDE CANVASES
+        // ============================================================
+        function drawAttitudeGraphics() {
+            const isLight = document.body.classList.contains('light-theme');
+            const hullColor = isLight ? '#0284c7' : '#38bdf8';
+            const waterlineColor = '#10b981';
+            const textColor = isLight ? '#0f172a' : '#94a3b8';
+
+            // Trim
+            const trimCanvas = document.getElementById('trimCanvas');
+            if (trimCanvas) {
+                const ctx = trimCanvas.getContext('2d');
+                ctx.clearRect(0, 0, trimCanvas.width, trimCanvas.height);
+                ctx.fillStyle = isLight ? 'rgba(2,132,199,0.05)' : 'rgba(14,116,144,0.2)';
+                ctx.fillRect(0, 55, trimCanvas.width, 55);
+                ctx.strokeStyle = waterlineColor;
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
-                ctx.moveTo(10, midY);
-                ctx.lineTo(w - 10, midY);
+                ctx.moveTo(10, 55);
+                ctx.lineTo(310, 55);
                 ctx.stroke();
-                // hull
                 ctx.save();
-                ctx.translate(w / 2, midY);
-                const rad = angleDeg * Math.PI / 180;
-                ctx.rotate(-rad);
-                ctx.fillStyle = hull;
-                ctx.shadowColor = 'rgba(0,0,0,0.3)';
-                ctx.shadowBlur = 6;
+                ctx.translate(160, 55);
+                const trimRad = (currentTrimDegrees * Math.PI / 180) * -1;
+                ctx.rotate(trimRad);
+                ctx.strokeStyle = hullColor;
+                ctx.lineWidth = 3;
+                ctx.fillStyle = isLight ? '#cbd5e1' : '#1e293b';
                 ctx.beginPath();
-                ctx.rect(-80, -16, 160, 32);
+                ctx.rect(-100, -15, 200, 30);
                 ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = fg;
-                ctx.font = 'bold 10px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(label, 0, 4);
+                ctx.stroke();
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 9px sans-serif';
+                ctx.fillText("AFT", -90, -4);
+                ctx.fillText("FWD", 70, -4);
                 ctx.restore();
-                // angle text
-                ctx.fillStyle = fg;
-                ctx.font = 'bold 11px monospace';
-                ctx.textAlign = 'right';
-                ctx.fillText(angleDeg.toFixed(2) + '°', w - 12, 18);
+                let trimText = `${Math.abs(currentTrimDegrees).toFixed(2)}° `;
+                if (currentTrimDegrees > 0) trimText += "AFT TRIM";
+                else if (currentTrimDegrees < 0) trimText += "FWD TRIM";
+                else trimText += "EVEN KEEL";
+                document.getElementById('lbl_TrimValue').textContent = trimText;
             }
 
-            drawCanvas('trimCanvas', trimDeg, 'AFT ← → FWD');
-            drawCanvas('heelCanvas', heelDeg, 'PORT ← → STBD');
-
-            document.getElementById('trimValue').textContent = trimDeg.toFixed(2) + '°';
-            document.getElementById('heelValue').textContent = heelDeg.toFixed(2) + '°';
+            // Heel
+            const heelCanvas = document.getElementById('heelCanvas');
+            if (heelCanvas) {
+                const ctx = heelCanvas.getContext('2d');
+                ctx.clearRect(0, 0, heelCanvas.width, heelCanvas.height);
+                ctx.fillStyle = isLight ? 'rgba(2,132,199,0.05)' : 'rgba(14,116,144,0.2)';
+                ctx.fillRect(0, 55, heelCanvas.width, 55);
+                ctx.strokeStyle = waterlineColor;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(10, 55);
+                ctx.lineTo(310, 55);
+                ctx.stroke();
+                ctx.save();
+                ctx.translate(160, 55);
+                const heelRad = (currentHeelDegrees * Math.PI / 180) * -1;
+                ctx.rotate(heelRad);
+                ctx.strokeStyle = hullColor;
+                ctx.lineWidth = 3;
+                ctx.fillStyle = isLight ? '#cbd5e1' : '#1e293b';
+                ctx.beginPath();
+                ctx.rect(-70, -18, 140, 36);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 9px sans-serif';
+                ctx.fillText("PORT (P)", -62, -4);
+                ctx.fillText("STBD (S)", 18, -4);
+                ctx.restore();
+                let heelText = `${Math.abs(currentHeelDegrees).toFixed(2)}° `;
+                if (currentHeelDegrees > 0) heelText += "PORT HEEL";
+                else if (currentHeelDegrees < 0) heelText += "STBD HEEL";
+                else heelText += "UPRIGHT";
+                document.getElementById('lbl_HeelValue').textContent = heelText;
+            }
         }
 
-        // --------------------------------------------------------------
-        //  TRAILER AXLE OVERLAY (from Excel E124:F... until blank)
-        // --------------------------------------------------------------
+        // ============================================================
+        // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank grid, in the
+        //     SAME real-world coordinate space (meters) as the tanks.
+        //     Respects showTrailer flag.
+        // ============================================================
         function drawAxleOverlay() {
-            const canvas = document.getElementById('axleCanvas');
-            const grid = document.getElementById('tankGrid');
-            const wrap = document.getElementById('gridWrap');
-            if (!canvas || !grid || !wrap) return;
+            const wrap = document.getElementById('tankGridWrap');
+            const gridEl = document.getElementById('tankContainer');
+            const canvas = document.getElementById('axleOverlayCanvas');
+            if (!wrap || !gridEl || !canvas) return;
 
-            const rect = grid.getBoundingClientRect();
+            // Match the overlay canvas to the tank grid's actual rendered box
+            const rect = gridEl.getBoundingClientRect();
             const wrapRect = wrap.getBoundingClientRect();
             const cssW = rect.width;
             const cssH = rect.height;
-            if (cssW === 0 || cssH === 0) return;
+            if (cssW === 0 || cssH === 0) return; // not laid out yet (e.g. hidden tab)
 
             const dpr = window.devicePixelRatio || 1;
             canvas.style.width = cssW + 'px';
@@ -631,189 +881,255 @@
             canvas.style.top = (rect.top - wrapRect.top) + 'px';
             canvas.width = cssW * dpr;
             canvas.height = cssH * dpr;
+
             const ctx = canvas.getContext('2d');
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, cssW, cssH);
 
-            if (!showTrailer || !trailerAxles.length) return;
+            // if trailer overlay is hidden, just return (canvas cleared)
+            if (!showTrailer) return;
 
-            const labelCol = 90;
-            const gap = 16;
-            const plotW = cssW - labelCol - gap;
-            const plotH = cssH;
+            // Tank grid layout constants (must match .tank-grid CSS):
+            // 90px label column, then 9 equal 1fr tank columns, 15px gaps.
+            const labelColPx = 90;
+            const gapPx = 15;
+            const plottableW = cssW - labelColPx - gapPx;
 
+            // World X spans the full barge length (BARGE_X_MIN..BARGE_X_MAX),
+            // mapped left(AFT)->right(FWD) across the 9 tank columns, matching
+            // the existing visual order (aft tanks on the left).
+            // World Y spans the full barge beam (BARGE_Y_MIN..BARGE_Y_MAX),
+            // mapped top(PORT, +)->bottom(STBD, -) across the full grid height.
             function worldToScreen(x, y) {
-                const xf = (x - WORLD_X_MIN) / (WORLD_X_MAX - WORLD_X_MIN);
-                const sx = labelCol + gap + xf * plotW;
-                const yf = (WORLD_Y_MAX - y) / (WORLD_Y_MAX - WORLD_Y_MIN);
-                const sy = yf * plotH;
+                const xFrac = (x - BARGE_X_MIN) / (BARGE_X_MAX - BARGE_X_MIN);
+                const sx = labelColPx + gapPx + xFrac * plottableW;
+                const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
+                const sy = yFrac * cssH;
                 return { sx, sy };
             }
 
-            const scaleX = plotW / (WORLD_X_MAX - WORLD_X_MIN);
-            const scaleY = plotH / (WORLD_Y_MAX - WORLD_Y_MIN);
-            const axleW = 0.86 * scaleX;
-            const axleH = 0.945 * scaleY;
-            const halfW = Math.max(axleW / 2, 2);
-            const halfH = Math.max(axleH / 2, 2);
+            const isLight = document.body.classList.contains('light-theme');
 
-            const isLight = document.body.classList.contains('light');
-            ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
-            ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
-            ctx.lineWidth = 1.5;
+            // Pixel-per-meter scale, independent per axis (X and Y tracks are
+            // sized differently), so the axle footprint reads at true scale.
+            const scaleX = plottableW / (BARGE_X_MAX - BARGE_X_MIN);
+            const scaleY = cssH / (BARGE_Y_MAX - BARGE_Y_MIN);
 
-            trailerAxles.forEach(a => {
-                const p = worldToScreen(a.x, a.y);
+            const halfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 3);
+            const halfH = Math.max((AXLE_HEIGHT_Y / 2) * scaleY, 3);
+
+            trailerAxles.forEach((axle) => {
+                const p = worldToScreen(axle.x, axle.y);
                 const x0 = p.sx - halfW;
                 const y0 = p.sy - halfH;
+                const w = halfW * 2;
+                const h = halfH * 2;
+
+                // Solid fill, but semi-transparent: sits visually above the
+                // tank card (water level, label, input box all still show
+                // through), while clearly marking the axle's true footprint.
+                ctx.save();
+                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
+                ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
+                ctx.lineWidth = 1.5;
                 ctx.beginPath();
-                ctx.rect(x0, y0, halfW * 2, halfH * 2);
+                ctx.rect(x0, y0, w, h);
                 ctx.fill();
                 ctx.stroke();
+                ctx.restore();
             });
         }
 
-        // --------------------------------------------------------------
-        //  EXCEL SYNC
-        // --------------------------------------------------------------
-        async function pullExcelData() {
-            if (!isExcelReady) {
-                generateMockData();
+        function refreshPlanView() {
+            drawAxleOverlay();
+            // Re-measure one frame later too, in case fonts/scrollbars shift
+            // the grid's rendered box right after the initial paint.
+            requestAnimationFrame(() => drawAxleOverlay());
+        }
+
+        // Recompute overlay alignment whenever the layout reflows
+        window.addEventListener('resize', () => drawAxleOverlay());
+
+        // ============================================================
+        // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
+        // ============================================================
+        async function pullExcelTankData() {
+            if (!isOfficeInitialized) {
+                generateMockSystemValues();
                 return;
             }
             try {
                 await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem("CREST_301");
-                    // tank weights: column D, row 30..56
-                    const startRow = 30;
-                    const endRow = 30 + TANK_ROWS.length - 1;
-                    const weightRange = sheet.getRange(`D${startRow}:D${endRow}`);
-                    const trimCell = sheet.getRange("E8");
-                    const heelCell = sheet.getRange("E9");
-                    // trailer axles: E124:F... until blank (max 60 rows)
-                    const axleRange = sheet.getRange("E124:F183");
-                    weightRange.load("values");
-                    trimCell.load("values");
-                    heelCell.load("values");
-                    axleRange.load("values");
+                    await loadTankConfiguration(context);
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    // use config length to determine range
+                    const rangeTanks =
+                        sheet.getRange(`B30:E${29 + TANK_CONFIG.length}`);
+                    const cellTrim = sheet.getRange("E8");
+                    const cellHeel = sheet.getRange("E9");
+                    rangeTanks.load("values");
+                    cellTrim.load("values");
+                    cellHeel.load("values");
+
+                    // Trailer axle X/Y block: E124:F(124+N), read a generous fixed
+                    // block then trim trailing blanks (Excel.run can't do a true
+                    // "until blank" scan without sequential round-trips, so we
+                    // over-read and stop at the first fully-blank row).
+                    const axleEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
+                    const rangeAxles = sheet.getRange(`E${AXLE_START_ROW}:F${axleEndRow}`);
+                    rangeAxles.load("values");
+
                     await context.sync();
 
-                    // weights
-                    const wVals = weightRange.values;
-                    TANK_ROWS.forEach((t, idx) => {
-                        if (wVals[idx] && wVals[idx][0] !== undefined) {
-                            const v = parseFloat(wVals[idx][0]);
-                            if (!isNaN(v) && v >= 0) tankWeights[t.row] = v;
+                    currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
+                    currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
+
+                    const tankValues = rangeTanks.values;
+                    tankData.forEach((tank, idx) => {
+                        if (tankValues[idx]) {
+                            tank.name = tankValues[idx][0] || tank.name;
+                            tank.weight = parseFloat(tankValues[idx][2] || 0).toFixed(2);
+                            let rawPct = tankValues[idx][3] || 0;
+                            tank.percent = rawPct > 1 ? rawPct / 100 : rawPct;
                         }
                     });
 
-                    // trim/heel
-                    const trimVal = parseFloat(trimCell.values[0][0]);
-                    const heelVal = parseFloat(heelCell.values[0][0]);
-                    if (!isNaN(trimVal)) trimDeg = trimVal;
-                    if (!isNaN(heelVal)) heelDeg = heelVal;
-
-                    // trailer axles
-                    const axVals = axleRange.values;
-                    const parsed = [];
-                    for (let i = 0; i < axVals.length; i++) {
-                        const xv = axVals[i][0];
-                        const yv = axVals[i][1];
-                        if ((xv === '' || xv === null || xv === undefined) &&
-                            (yv === '' || yv === null || yv === undefined)) break;
-                        const x = parseFloat(xv);
-                        const y = parseFloat(yv);
-                        if (!isNaN(x) && !isNaN(y)) parsed.push({ x, y });
+                    // Parse trailer axle rows until first blank pair (E and F both empty)
+                    const axleValues = rangeAxles.values;
+                    const parsedAxles = [];
+                    for (let i = 0; i < axleValues.length; i++) {
+                        const rawX = axleValues[i][0];
+                        const rawY = axleValues[i][1];
+                        const xEmpty = (rawX === '' || rawX === null || rawX === undefined);
+                        const yEmpty = (rawY === '' || rawY === null || rawY === undefined);
+                        if (xEmpty && yEmpty) break; // stop at first fully blank row
+                        const x = parseFloat(rawX);
+                        const y = parseFloat(rawY);
+                        if (isNaN(x) || isNaN(y)) continue; // skip malformed row, keep scanning
+                        parsedAxles.push({ row: AXLE_START_ROW + i, x, y });
                     }
-                    trailerAxles = parsed;
+                    trailerAxles = parsedAxles;
 
-                    renderTanks();
-                    drawAttitude();
-                    drawAxleOverlay();
-                    updateStatus(true);
+                    initTankMatrix();
+                    drawAttitudeGraphics();
+                    refreshPlanView();
                 });
             } catch (e) {
-                console.warn('Excel sync error, using mock', e);
-                generateMockData();
+                console.warn("Excel sync error, using mock", e);
+                generateMockSystemValues();
             }
         }
 
-        function generateMockData() {
-            TANK_ROWS.forEach((t, i) => {
-                tankWeights[t.row] = 20 + (i * 5) + (i % 3) * 2;
+        // ============================================================
+        // 6. MOCK DATA
+        // ============================================================
+        function generateMockSystemValues() {
+            tankData.forEach((tank, i) => {
+                const base = 60 + (i * 7);
+                tank.weight = (base + (i % 5) * 1.8).toFixed(2);
+                tank.percent = Math.min(0.10 + (i * 0.025), 0.90);
             });
-            trimDeg = 1.8;
-            heelDeg = -0.7;
+            currentTrimDegrees = 2.8;
+            currentHeelDegrees = -1.9;
+
+            // Mock trailer axle layout: a typical multi-axle trailer footprint
+            // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
             trailerAxles = [
-                { x: 20, y: 3.0 }, { x: 20, y: -3.0 },
-                { x: 45, y: 3.2 }, { x: 45, y: -3.2 },
-                { x: 70, y: 2.8 }, { x: 70, y: -2.8 },
-                { x: 90, y: 2.5 }, { x: 90, y: -2.5 }
+                { row: AXLE_START_ROW, x: 30, y: 3.2 },
+                { row: AXLE_START_ROW + 1, x: 30, y: -3.2 },
+                { row: AXLE_START_ROW + 2, x: 45, y: 3.2 },
+                { row: AXLE_START_ROW + 3, x: 45, y: -3.2 },
+                { row: AXLE_START_ROW + 4, x: 60, y: 3.2 },
+                { row: AXLE_START_ROW + 5, x: 60, y: -3.2 }
             ];
-            renderTanks();
-            drawAttitude();
-            drawAxleOverlay();
-            updateStatus(false);
+
+            initTankMatrix();
+            drawAttitudeGraphics();
+            refreshPlanView();
+            document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span>';
         }
 
-        function updateStatus(online) {
-            const dot = document.getElementById('statusDot');
-            const label = document.getElementById('statusLabel');
-            if (online) {
-                dot.className = 'status-dot status-online';
-                label.textContent = 'Excel';
-            } else {
-                dot.className = 'status-dot status-mock';
-                label.textContent = 'Mock';
+        // ============================================================
+        // 7. UPDATE TANK FILL (with Excel write)
+        // ============================================================
+        async function updateTankFill(row, value) {
+            const parsed = parseFloat(value);
+            if (isNaN(parsed)) return;
+            const cfg = TANK_CONFIG.find(t => t.id === row);
+            if (!cfg) return;
+            const mockMax = cfg.capacity || 1000;
+            let targetPct = Math.max(0, Math.min(parsed / mockMax, 1.0));
+
+            const card = document.getElementById(`tank_card_${row}`);
+            if (!card) return;
+            const water = card.querySelector('.tank-water-level');
+            const label = document.getElementById(`lbl_Load${row}`);
+            if (water) water.style.height = `${targetPct * 100}%`;
+            if (label) {
+                const pctStr = (targetPct * 100).toFixed(0) + '%';
+                label.textContent = `${parsed.toFixed(2)} (${pctStr})`;
             }
+
+            if (!isOfficeInitialized) return;
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const cell = sheet.getRange(`D${row}`);
+                    cell.values = [[parsed]];
+                    await context.sync();
+                    setTimeout(pullExcelTankData, 300);
+                });
+            } catch (e) { console.warn("Excel write error", e); }
         }
 
-        // --------------------------------------------------------------
-        //  TOGGLES
-        // --------------------------------------------------------------
-        function toggleTrailer() {
-            showTrailer = document.getElementById('trailerToggle').checked;
+        // ============================================================
+        // 8. THEME TOGGLE
+        // ============================================================
+        function toggleDashboardTheme() {
+            const checked = document.getElementById('themeToggleCheckbox').checked;
+            document.body.classList.toggle('light-theme', checked);
+            drawAttitudeGraphics();
             drawAxleOverlay();
         }
 
-        function toggleTheme() {
-            document.body.classList.toggle('light');
-            drawAttitude();
-            drawAxleOverlay();
+        // ============================================================
+        // 9. TRAILER OVERLAY TOGGLE (NEW)
+        // ============================================================
+        function toggleTrailerOverlay() {
+            const checked = document.getElementById('trailerToggleCheckbox').checked;
+            showTrailer = checked;
+            drawAxleOverlay();  // immediately show/hide
         }
 
-        // --------------------------------------------------------------
-        //  OFFICE.JS INIT
-        // --------------------------------------------------------------
+        // ============================================================
+        // 10. OFFICE INIT
+        // ============================================================
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
-                isExcelReady = true;
-                updateStatus(true);
-                pullExcelData();
-                // auto-sync on change
-                Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem("CREST_301");
-                    sheet.onChanged.add(() => { pullExcelData(); });
-                    await context.sync();
-                }).catch(() => { });
+                isOfficeInitialized = true;
+                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
+                pullExcelTankData();
+                registerExcelAutoTrack();
             } else {
-                isExcelReady = false;
-                generateMockData();
+                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
+                generateMockSystemValues();
             }
         });
 
-        // fallback if Office not loaded
-        window.addEventListener('load', () => {
-            if (!isExcelReady) generateMockData();
-            // redraw overlay on resize
-            window.addEventListener('resize', () => drawAxleOverlay());
-        });
+        async function registerExcelAutoTrack() {
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    sheet.onChanged.add(async () => { await pullExcelTankData(); });
+                    await context.sync();
+                });
+            } catch (e) { /* ignore */ }
+        }
 
-        // expose to HTML
-        window.pullExcelData = pullExcelData;
-        window.updateWeight = updateWeight;
-        window.toggleTrailer = toggleTrailer;
-        window.toggleTheme = toggleTheme;
+        // initial render fallback
+        window.addEventListener('load', () => {
+            if (!isOfficeInitialized) generateMockSystemValues();
+        });
     </script>
 </body>
 </html>
