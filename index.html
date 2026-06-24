@@ -482,7 +482,7 @@
         <div class="tank-grid-container">
             <div class="section-title">
                 <span>🔹 Custom tank layout · each tank has unique size & position</span>
-                <span class="coords-note">dimensions in meters · 🚛 dashed amber outline = trailer axle (0.86×0.945m)</span>
+                <span class="coords-note">dimensions in meters · 🚛 amber overlay = trailer axle (0.86×0.945m)</span>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
@@ -833,27 +833,17 @@
                 const w = halfW * 2;
                 const h = halfH * 2;
 
-                // Outline-only rectangle: marks the axle's position clearly
-                // without a solid fill, so the tank's water level, label,
-                // and input box underneath stay fully visible/readable.
+                // Solid fill, but semi-transparent: sits visually above the
+                // tank card (water level, label, input box all still show
+                // through), while clearly marking the axle's true footprint.
                 ctx.save();
+                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
                 ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([4, 3]);
-                ctx.strokeRect(x0, y0, w, h);
-                ctx.setLineDash([]);
-
-                // Small corner ticks in solid line for extra clarity at tiny sizes
-                const tick = Math.min(w, h) * 0.3;
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
-                [[x0, y0, 1, 1], [x0 + w, y0, -1, 1], [x0, y0 + h, 1, -1], [x0 + w, y0 + h, -1, -1]].forEach(([cx, cy, dx, dy]) => {
-                    ctx.beginPath();
-                    ctx.moveTo(cx, cy + tick * dy);
-                    ctx.lineTo(cx, cy);
-                    ctx.lineTo(cx + tick * dx, cy);
-                    ctx.stroke();
-                });
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.rect(x0, y0, w, h);
+                ctx.fill();
+                ctx.stroke();
                 ctx.restore();
             });
         }
