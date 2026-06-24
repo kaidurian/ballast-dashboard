@@ -246,9 +246,11 @@
 
         .tank-grid {
             display: grid;
-            grid-template-columns: 90px repeat(9,1fr);
-            grid-auto-rows: 105px;
+            grid-template-columns: 90px repeat(9, 1fr);
+            grid-template-rows: repeat(3, 105px);
+            min-width: 1100px;
             gap: 15px;
+            padding-right: 5px;
         }
 
         .quay-structure-box {
@@ -519,13 +521,58 @@
         //    Ordered: Column 9 (aft) → Column 1 (fwd), Top → Middle → Bottom
         //    Excel rows: 14-16 = Col 9, 17-19 = Col 8, ..., 38-40 = Col 1
         // ============================================================
-        let TANK_CONFIG = [];
+        const TANK_CONFIG = [
+            // === COLUMN 9 (Aft) — Excel Rows 14, 15, 16 ===
+            { id: 14, name: "AFT P", x_start: 0, x_end: 14, y_start: 5, y_end: 14.5, capacity: 280 },
+            { id: 15, name: "AFT C", x_start: 0, x_end: 14, y_start: -4.5, y_end: 4.5, capacity: 380 },
+            { id: 16, name: "AFT S", x_start: 0, x_end: 14, y_start: -14.5, y_end: -5, capacity: 280 },
+
+            // === COLUMN 8 — Excel Rows 17, 18, 19 ===
+            { id: 17, name: "C8 P", x_start: 15.5, x_end: 29, y_start: 5, y_end: 14, capacity: 240 },
+            { id: 18, name: "C8 C", x_start: 15.5, x_end: 29, y_start: -4, y_end: 4, capacity: 320 },
+            { id: 19, name: "C8 S", x_start: 15.5, x_end: 29, y_start: -14, y_end: -5, capacity: 240 },
+
+            // === COLUMN 7 — Excel Rows 20, 21, 22 ===
+            { id: 20, name: "C7 P", x_start: 30.5, x_end: 44, y_start: 5.5, y_end: 14, capacity: 220 },
+            { id: 21, name: "C7 C", x_start: 30.5, x_end: 44, y_start: -4, y_end: 4, capacity: 300 },
+            { id: 22, name: "C7 S", x_start: 30.5, x_end: 44, y_start: -14, y_end: -5.5, capacity: 220 },
+
+            // === COLUMN 6 — Excel Rows 23, 24, 25 ===
+            { id: 23, name: "C6 P", x_start: 45.5, x_end: 58, y_start: 5, y_end: 13.5, capacity: 200 },
+            { id: 24, name: "C6 C", x_start: 45.5, x_end: 58, y_start: -3.5, y_end: 3.5, capacity: 270 },
+            { id: 25, name: "C6 S", x_start: 45.5, x_end: 58, y_start: -13.5, y_end: -5, capacity: 200 },
+
+            // === COLUMN 5 — Excel Rows 26, 27, 28 ===
+            { id: 26, name: "C5 P", x_start: 59.5, x_end: 71, y_start: 4.5, y_end: 13, capacity: 180 },
+            { id: 27, name: "C5 C", x_start: 59.5, x_end: 71, y_start: -3.5, y_end: 3.5, capacity: 250 },
+            { id: 28, name: "C5 S", x_start: 59.5, x_end: 71, y_start: -13, y_end: -4.5, capacity: 180 },
+
+            // === COLUMN 4 — Excel Rows 29, 30, 31 ===
+            { id: 29, name: "C4 P", x_start: 72.5, x_end: 83, y_start: 4, y_end: 12, capacity: 150 },
+            { id: 30, name: "C4 C", x_start: 72.5, x_end: 83, y_start: -3, y_end: 3, capacity: 210 },
+            { id: 31, name: "C4 S", x_start: 72.5, x_end: 83, y_start: -12, y_end: -4, capacity: 150 },
+
+            // === COLUMN 3 — Excel Rows 32, 33, 34 ===
+            { id: 32, name: "C3 P", x_start: 84.5, x_end: 94, y_start: 3.5, y_end: 11, capacity: 130 },
+            { id: 33, name: "C3 C", x_start: 84.5, x_end: 94, y_start: -2.5, y_end: 2.5, capacity: 180 },
+            { id: 34, name: "C3 S", x_start: 84.5, x_end: 94, y_start: -11, y_end: -3.5, capacity: 130 },
+
+            // === COLUMN 2 — Excel Rows 35, 36, 37 ===
+            { id: 35, name: "C2 P", x_start: 95.5, x_end: 104, y_start: 3, y_end: 10, capacity: 110 },
+            { id: 36, name: "C2 C", x_start: 95.5, x_end: 104, y_start: -2.5, y_end: 2.5, capacity: 150 },
+            { id: 37, name: "C2 S", x_start: 95.5, x_end: 104, y_start: -10, y_end: -3, capacity: 110 },
+
+            // === COLUMN 1 (Fwd) — Excel Rows 38, 39, 40 ===
+            { id: 38, name: "FWD P", x_start: 105.5, x_end: 113, y_start: 2.5, y_end: 9, capacity: 90 },
+            { id: 39, name: "FWD C", x_start: 105.5, x_end: 113, y_start: -2, y_end: 2, capacity: 120 },
+            { id: 40, name: "FWD S", x_start: 105.5, x_end: 113, y_start: -9, y_end: -2.5, capacity: 90 },
+        ];
 
         // ---- derived constants ----
-        let totalTanks = 0;
+        const totalTanks = TANK_CONFIG.length;
         const GRID_COLS = 9;      // visual grid columns (2-10)
         const GRID_ROWS = 3;      // visual grid rows (1-3)
-        const EXCEL_START_ROW = 30;
+        const EXCEL_START_ROW = 14;
 
         // ---- trailer axle constants ----
         const AXLE_WIDTH_X = 0.86;
@@ -534,11 +581,10 @@
         const AXLE_MAX_ROWS = 60;
 
         // Reference origin (0,0) = center of AFT-C tank (Excel row 15), per spec.
-        let BARGE_X_MIN = 0;
-        let BARGE_X_MAX = 100;
-
-        let BARGE_Y_MIN = -10;
-        let BARGE_Y_MAX = 10;
+        const BARGE_X_MIN = Math.min(...TANK_CONFIG.map(t => t.x_start)); // 0
+        const BARGE_X_MAX = Math.max(...TANK_CONFIG.map(t => t.x_end));  // 113
+        const BARGE_Y_MIN = Math.min(...TANK_CONFIG.map(t => t.y_start)); // -14.5
+        const BARGE_Y_MAX = Math.max(...TANK_CONFIG.map(t => t.y_end));  // 14.5
 
         // ---- state ----
         let isOfficeInitialized = false;
@@ -560,133 +606,23 @@
         // ============================================================
         // 2. GEOMETRY HELPERS
         // ============================================================
-        async function loadTankConfiguration(context) {
-
-            const sheet = context.workbook.worksheets.getItem("CREST_301");
-
-            const range = sheet.getRange("P30:T300");
-
-            range.load("values");
-
-            await context.sync();
-
-            const values = range.values;
-
-            TANK_CONFIG = [];
-
-            let tankCounter = 0;
-
-            for (let i = 0; i < values.length; i++) {
-
-                const row = values[i];
-
-                const tankName = row[0];
-
-                const q = parseFloat(row[1]);
-                const r = parseFloat(row[2]);
-                const s = parseFloat(row[3]);
-                const t = parseFloat(row[4]);
-
-                if (
-                    isNaN(q) &&
-                    isNaN(r) &&
-                    isNaN(s) &&
-                    isNaN(t)
-                ) {
-                    break;
-                }
-
-                const width = r - q;
-                const height = s - t;
-
-                const centerX = q + width / 2;
-                const centerY = t + height / 2;
-
-                TANK_CONFIG.push({
-                    id: 30 + i,
-
-                    name:
-                        tankName && tankName !== ""
-                            ? tankName
-                            : `Tank ${30 + i}`,
-
-                    x_start: q,
-                    x_end: r,
-
-                    y_start: t,
-                    y_end: s,
-
-                    centerX: centerX,
-                    centerY: centerY,
-
-                    width: width,
-                    height: height,
-
-                    capacity: Math.round(width * height)
-                });
-
-                tankCounter++;
-            }
-
-            totalTanks = tankCounter;
-
-            BARGE_X_MIN =
-                Math.min(...TANK_CONFIG.map(t => t.x_start));
-
-            BARGE_X_MAX =
-                Math.max(...TANK_CONFIG.map(t => t.x_end));
-
-            BARGE_Y_MIN =
-                Math.min(...TANK_CONFIG.map(t => t.y_start));
-
-            BARGE_Y_MAX =
-                Math.max(...TANK_CONFIG.map(t => t.y_end));
-
-            tankData = TANK_CONFIG.map(cfg => ({
-                row: cfg.id,
-                name: cfg.name,
-                weight: 0,
-                percent: 0,
-                capacity: cfg.capacity,
-                geometry: null
-            }));
-        }
         function getTankGeometry(tankId) {
-
-            const cfg =
-                TANK_CONFIG.find(t => t.id === tankId);
-
+            const cfg = TANK_CONFIG.find(t => t.id === tankId);
             if (!cfg) return null;
-
-            return {
-
-                x: cfg.centerX,
-
-                y: cfg.centerY,
-
-                width: cfg.width,
-
-                height: cfg.height,
-
-                capacity: cfg.capacity
-            };
+            const cx = (cfg.x_start + cfg.x_end) / 2;
+            const cy = (cfg.y_start + cfg.y_end) / 2;
+            const w = cfg.x_end - cfg.x_start;
+            const h = cfg.y_end - cfg.y_start;
+            return { x: cx, y: cy, width: w, height: h, capacity: cfg.capacity };
         }
 
         // Map tank index to visual grid column/row
         function getTankGridPosition(index) {
-
-            const cols = 9;
-
-            return {
-
-                gridCol: (index % cols) + 2,
-
-                gridRow:
-                    Math.floor(index / cols) + 1,
-
-                excelRow:
-                    TANK_CONFIG[index].id
-            };
+            const colIndex = Math.floor(index / GRID_ROWS);      // 0=col9, 1=col8, ..., 8=col1
+            const rowIndex = index % GRID_ROWS;                  // 0=top, 1=middle, 2=bottom
+            const gridCol = 10 - colIndex;
+            const gridRow = rowIndex + 1;
+            return { gridCol, gridRow, excelRow: EXCEL_START_ROW + index };
         }
 
         // Colour based on capacity
@@ -708,10 +644,10 @@
             const quayBox = document.createElement('div');
             quayBox.className = 'quay-structure-box';
             quayBox.innerHTML = `
-                        <div class="quay-title">QUAY WALL</div>
-                        <div class="quay-dims">L=20m · W=60m</div>
-                        <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
-                    `;
+                    <div class="quay-title">QUAY WALL</div>
+                    <div class="quay-dims">L=20m · W=60m</div>
+                    <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+                `;
             container.appendChild(quayBox);
 
             // Render each tank from config (in order: col9→col1, top→bottom)
@@ -752,24 +688,24 @@
                 box.appendChild(dot);
 
                 box.innerHTML += `
-                            <div class="tank-water-level" style="height: ${pct}%"></div>
-                            <div class="tank-header">
-                                <span class="tank-name">${cfg.name}</span>
-                                <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
+                        <div class="tank-water-level" style="height: ${pct}%"></div>
+                        <div class="tank-header">
+                            <span class="tank-name">${cfg.name}</span>
+                            <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
+                        </div>
+                        <div class="tank-inputs">
+                            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
+                                <span>Row ${excelRow}</span>
+                                <span class="tank-capacity-badge">${cfg.capacity}t</span>
                             </div>
-                            <div class="tank-inputs">
-                                <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
-                                    <span>Row ${excelRow}</span>
-                                    <span class="tank-capacity-badge">${cfg.capacity}t</span>
-                                </div>
-                                <input type="number" step="any" class="weight-input"
-                                       id="txt_Row${cfg.id}" value="${weight}"
-                                       onchange="updateTankFill(${cfg.id}, this.value)">
-                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                    ${weight} (${pctString})
-                                </div>
+                            <input type="number" step="any" class="weight-input"
+                                   id="txt_Row${cfg.id}" value="${weight}"
+                                   onchange="updateTankFill(${cfg.id}, this.value)">
+                            <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                ${weight} (${pctString})
                             </div>
-                        `;
+                        </div>
+                    `;
                 container.appendChild(box);
             });
         }
@@ -960,11 +896,11 @@
             }
             try {
                 await Excel.run(async (context) => {
-                    await loadTankConfiguration(context);
                     const sheet = context.workbook.worksheets.getItem("Load_Editor");
                     // use config length to determine range
-                    const rangeTanks =
-                        sheet.getRange(`B30:E${29 + TANK_CONFIG.length}`);
+                    const startRow = EXCEL_START_ROW;
+                    const endRow = startRow + TANK_CONFIG.length - 1;
+                    const rangeTanks = sheet.getRange(`B${startRow}:E${endRow}`);
                     const cellTrim = sheet.getRange("E8");
                     const cellHeel = sheet.getRange("E9");
                     rangeTanks.load("values");
