@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Barge Ballast · Custom Tank Dimensions</title>
+    <title>Barge Ballast · Axle below input</title>
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
     <style>
         :root {
@@ -448,11 +448,40 @@
             color: #f59e0b;
             font-family: monospace;
         }
+
+        /* NEW: container for each tank card’s axle rectangle – sits UNDER the inputs */
+        .axle-under-input {
+            position: relative;
+            z-index: 2;
+            margin-top: 2px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(245,158,11,0.15);
+            border-radius: 3px;
+            border: 1px dashed rgba(245,158,11,0.4);
+            min-height: 12px;
+            font-size: 8px;
+            color: var(--text-muted);
+            padding: 2px 0;
+            pointer-events: none;
+            transition: all 0.15s;
+        }
+
+            .axle-under-input span {
+                opacity: 0.5;
+                letter-spacing: 0.3px;
+            }
+
+        .tank-control-box .axle-under-input {
+            background: rgba(245,158,11,0.18);
+            border-color: #f59e0b;
+        }
     </style>
 </head>
 <body>
     <header>
-        <h1>⚓ BARGE BALLAST · custom tank dimensions</h1>
+        <h1>⚓ BARGE BALLAST · axle below input</h1>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -482,94 +511,67 @@
         <div class="tank-grid-container">
             <div class="section-title">
                 <span>🔹 Custom tank layout · each tank has unique size & position</span>
-                <span class="coords-note">dimensions in meters · 🚛 amber overlay = trailer axle (0.86×0.945m)</span>
+                <span class="coords-note">dimensions in meters · 🚛 orange bar = axle (under input)</span>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
-                <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
+                <!-- overlay canvas removed – now axle drawn per tank card below input -->
             </div>
         </div>
     </div>
     <script>
         // ============================================================
         // 1. CUSTOM TANK CONFIGURATION — each tank with unique size
-        //    Ordered: Column 9 (aft) → Column 1 (fwd), Top → Middle → Bottom
-        //    Excel rows: 14-16 = Col 9, 17-19 = Col 8, ..., 38-40 = Col 1
         // ============================================================
         const TANK_CONFIG = [
-            // === COLUMN 9 (Aft) — Excel Rows 14, 15, 16 ===
             { id: 14, name: "AFT P", x_start: 0, x_end: 14, y_start: 5, y_end: 14.5, capacity: 280 },
             { id: 15, name: "AFT C", x_start: 0, x_end: 14, y_start: -4.5, y_end: 4.5, capacity: 380 },
             { id: 16, name: "AFT S", x_start: 0, x_end: 14, y_start: -14.5, y_end: -5, capacity: 280 },
-
-            // === COLUMN 8 — Excel Rows 17, 18, 19 ===
             { id: 17, name: "C8 P", x_start: 15.5, x_end: 29, y_start: 5, y_end: 14, capacity: 240 },
             { id: 18, name: "C8 C", x_start: 15.5, x_end: 29, y_start: -4, y_end: 4, capacity: 320 },
             { id: 19, name: "C8 S", x_start: 15.5, x_end: 29, y_start: -14, y_end: -5, capacity: 240 },
-
-            // === COLUMN 7 — Excel Rows 20, 21, 22 ===
             { id: 20, name: "C7 P", x_start: 30.5, x_end: 44, y_start: 5.5, y_end: 14, capacity: 220 },
             { id: 21, name: "C7 C", x_start: 30.5, x_end: 44, y_start: -4, y_end: 4, capacity: 300 },
             { id: 22, name: "C7 S", x_start: 30.5, x_end: 44, y_start: -14, y_end: -5.5, capacity: 220 },
-
-            // === COLUMN 6 — Excel Rows 23, 24, 25 ===
             { id: 23, name: "C6 P", x_start: 45.5, x_end: 58, y_start: 5, y_end: 13.5, capacity: 200 },
             { id: 24, name: "C6 C", x_start: 45.5, x_end: 58, y_start: -3.5, y_end: 3.5, capacity: 270 },
             { id: 25, name: "C6 S", x_start: 45.5, x_end: 58, y_start: -13.5, y_end: -5, capacity: 200 },
-
-            // === COLUMN 5 — Excel Rows 26, 27, 28 ===
             { id: 26, name: "C5 P", x_start: 59.5, x_end: 71, y_start: 4.5, y_end: 13, capacity: 180 },
             { id: 27, name: "C5 C", x_start: 59.5, x_end: 71, y_start: -3.5, y_end: 3.5, capacity: 250 },
             { id: 28, name: "C5 S", x_start: 59.5, x_end: 71, y_start: -13, y_end: -4.5, capacity: 180 },
-
-            // === COLUMN 4 — Excel Rows 29, 30, 31 ===
             { id: 29, name: "C4 P", x_start: 72.5, x_end: 83, y_start: 4, y_end: 12, capacity: 150 },
             { id: 30, name: "C4 C", x_start: 72.5, x_end: 83, y_start: -3, y_end: 3, capacity: 210 },
             { id: 31, name: "C4 S", x_start: 72.5, x_end: 83, y_start: -12, y_end: -4, capacity: 150 },
-
-            // === COLUMN 3 — Excel Rows 32, 33, 34 ===
             { id: 32, name: "C3 P", x_start: 84.5, x_end: 94, y_start: 3.5, y_end: 11, capacity: 130 },
             { id: 33, name: "C3 C", x_start: 84.5, x_end: 94, y_start: -2.5, y_end: 2.5, capacity: 180 },
             { id: 34, name: "C3 S", x_start: 84.5, x_end: 94, y_start: -11, y_end: -3.5, capacity: 130 },
-
-            // === COLUMN 2 — Excel Rows 35, 36, 37 ===
             { id: 35, name: "C2 P", x_start: 95.5, x_end: 104, y_start: 3, y_end: 10, capacity: 110 },
             { id: 36, name: "C2 C", x_start: 95.5, x_end: 104, y_start: -2.5, y_end: 2.5, capacity: 150 },
             { id: 37, name: "C2 S", x_start: 95.5, x_end: 104, y_start: -10, y_end: -3, capacity: 110 },
-
-            // === COLUMN 1 (Fwd) — Excel Rows 38, 39, 40 ===
             { id: 38, name: "FWD P", x_start: 105.5, x_end: 113, y_start: 2.5, y_end: 9, capacity: 90 },
             { id: 39, name: "FWD C", x_start: 105.5, x_end: 113, y_start: -2, y_end: 2, capacity: 120 },
             { id: 40, name: "FWD S", x_start: 105.5, x_end: 113, y_start: -9, y_end: -2.5, capacity: 90 },
         ];
 
-        // ---- derived constants ----
         const totalTanks = TANK_CONFIG.length;
-        const GRID_COLS = 9;      // visual grid columns (2-10)
-        const GRID_ROWS = 3;      // visual grid rows (1-3)
+        const GRID_ROWS = 3;
         const EXCEL_START_ROW = 14;
 
-        // ---- trailer axle constants ----
-        // Axle footprint: width along X = 0.86m, height along Y = 0.945m
-        const AXLE_WIDTH_X = 0.86;
-        const AXLE_HEIGHT_Y = 0.945;
-        const AXLE_START_ROW = 124; // Excel rows E124/F124 downward until blank
-        const AXLE_MAX_ROWS = 60;   // safety cap on how far down we scan
-
-        // Reference origin (0,0) = center of AFT-C tank (Excel row 15), per spec.
-        // Overall barge extents (for drawing the hull outline) derived from tank config.
-        const BARGE_X_MIN = Math.min(...TANK_CONFIG.map(t => t.x_start)); // 0
-        const BARGE_X_MAX = Math.max(...TANK_CONFIG.map(t => t.x_end));  // 113
-        const BARGE_Y_MIN = Math.min(...TANK_CONFIG.map(t => t.y_start)); // -14.5
-        const BARGE_Y_MAX = Math.max(...TANK_CONFIG.map(t => t.y_end));  // 14.5
+        // ---- trailer axle data (mock) ----
+        let trailerAxles = [
+            { row: 124, x: 30, y: 3.2 },
+            { row: 125, x: 30, y: -3.2 },
+            { row: 126, x: 45, y: 3.2 },
+            { row: 127, x: 45, y: -3.2 },
+            { row: 128, x: 60, y: 3.2 },
+            { row: 129, x: 60, y: -3.2 }
+        ];
 
         // ---- state ----
         let isOfficeInitialized = false;
-        let currentTrimDegrees = 0.0;
-        let currentHeelDegrees = 0.0;
-        let trailerAxles = []; // [{ name, x, y }]
+        let currentTrimDegrees = 2.8;
+        let currentHeelDegrees = -1.9;
 
-        // tank data store (synced with config)
         let tankData = TANK_CONFIG.map(cfg => ({
             row: cfg.id,
             name: cfg.name,
@@ -592,25 +594,23 @@
             return { x: cx, y: cy, width: w, height: h, capacity: cfg.capacity };
         }
 
-        // Map tank index to visual grid column/row
         function getTankGridPosition(index) {
-            const colIndex = Math.floor(index / GRID_ROWS);      // 0=col9, 1=col8, ..., 8=col1
-            const rowIndex = index % GRID_ROWS;                  // 0=top, 1=middle, 2=bottom
+            const colIndex = Math.floor(index / GRID_ROWS);
+            const rowIndex = index % GRID_ROWS;
             const gridCol = 10 - colIndex;
             const gridRow = rowIndex + 1;
             return { gridCol, gridRow, excelRow: EXCEL_START_ROW + index };
         }
 
-        // Colour based on capacity
         function getTankColor(capacity) {
-            if (capacity > 250) return '#10b981';   // green - large
-            if (capacity > 150) return '#38bdf8';   // blue - medium
-            if (capacity > 50) return '#f59e0b';   // amber - small
-            return '#94a3b8';                       // grey - void / special
+            if (capacity > 250) return '#10b981';
+            if (capacity > 150) return '#38bdf8';
+            if (capacity > 50) return '#f59e0b';
+            return '#94a3b8';
         }
 
         // ============================================================
-        // 3. RENDER TANKS
+        // 3. RENDER TANKS — with orange axle bar UNDER the input
         // ============================================================
         function initTankMatrix() {
             const container = document.getElementById('tankContainer');
@@ -620,22 +620,19 @@
             const quayBox = document.createElement('div');
             quayBox.className = 'quay-structure-box';
             quayBox.innerHTML = `
-                <div class="quay-title">QUAY WALL</div>
-                <div class="quay-dims">L=20m · W=60m</div>
-                <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
-            `;
+                    <div class="quay-title">QUAY WALL</div>
+                    <div class="quay-dims">L=20m · W=60m</div>
+                    <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+                `;
             container.appendChild(quayBox);
 
-            // Render each tank from config (in order: col9→col1, top→bottom)
+            // Render each tank
             TANK_CONFIG.forEach((cfg, index) => {
                 const geo = getTankGeometry(cfg.id);
                 if (!geo) return;
                 const { gridCol, gridRow, excelRow } = getTankGridPosition(index);
-
-                // find data
                 const tank = tankData.find(t => t.row === cfg.id);
                 const pct = tank ? tank.percent * 100 : 0;
-                const pctString = pct.toFixed(0) + '%';
                 const weight = tank ? tank.weight : 0;
 
                 const box = document.createElement('div');
@@ -644,32 +641,29 @@
                 box.style.gridColumn = gridCol;
                 box.style.gridRow = gridRow;
 
-                // visual size hint: scale based on actual area relative to average
-                const avgArea = 15 * 9; // ~135 m²
-                const area = geo.width * geo.height;
-                const scaleFactor = 0.75 + (area / avgArea) * 0.5;
-                const finalScale = Math.min(Math.max(scaleFactor, 0.7), 1.4);
-                box.style.transform = `scale(${finalScale})`;
-                box.style.transformOrigin = 'center center';
-
-                // border colour by capacity
                 const borderColor = getTankColor(cfg.capacity);
                 box.style.borderColor = borderColor;
                 box.style.borderWidth = '2px';
 
-                // capacity dot
-                const dot = document.createElement('span');
-                dot.className = 'tank-size-indicator';
-                dot.style.background = borderColor;
-                box.appendChild(dot);
+                // water level
+                const water = document.createElement('div');
+                water.className = 'tank-water-level';
+                water.style.height = `${pct}%`;
+                box.appendChild(water);
 
-                box.innerHTML += `
-                    <div class="tank-water-level" style="height: ${pct}%"></div>
-                    <div class="tank-header">
+                // header
+                const header = document.createElement('div');
+                header.className = 'tank-header';
+                header.innerHTML = `
                         <span class="tank-name">${cfg.name}</span>
                         <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
-                    </div>
-                    <div class="tank-inputs">
+                    `;
+                box.appendChild(header);
+
+                // inputs + capacity row
+                const inputs = document.createElement('div');
+                inputs.className = 'tank-inputs';
+                inputs.innerHTML = `
                         <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
                             <span>Row ${excelRow}</span>
                             <span class="tank-capacity-badge">${cfg.capacity}t</span>
@@ -678,10 +672,36 @@
                                id="txt_Row${cfg.id}" value="${weight}"
                                onchange="updateTankFill(${cfg.id}, this.value)">
                         <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                            ${weight} (${pctString})
+                            ${weight} (${pct.toFixed(0)}%)
                         </div>
-                    </div>
-                `;
+                    `;
+                box.appendChild(inputs);
+
+                // ---- AXLE RECTANGLE (ORANGE) directly under the input box ----
+                // We check if any axle is positioned inside this tank's footprint.
+                // If yes, we draw a small orange bar.
+                const axleDiv = document.createElement('div');
+                axleDiv.className = 'axle-under-input';
+                // Check if any trailer axle falls within this tank's X/Y range
+                const inside = trailerAxles.some(a =>
+                    a.x >= cfg.x_start && a.x <= cfg.x_end &&
+                    a.y >= cfg.y_start && a.y <= cfg.y_end
+                );
+                if (inside) {
+                    axleDiv.style.background = 'rgba(245,158,11,0.35)';
+                    axleDiv.style.border = '1px solid #f59e0b';
+                    axleDiv.innerHTML = '<span>⬡ axle</span>';
+                } else {
+                    axleDiv.innerHTML = '<span style="opacity:0.2;">—</span>';
+                }
+                box.appendChild(axleDiv);
+
+                // capacity dot
+                const dot = document.createElement('span');
+                dot.className = 'tank-size-indicator';
+                dot.style.background = borderColor;
+                box.appendChild(dot);
+
                 container.appendChild(box);
             });
         }
@@ -769,163 +789,11 @@
         }
 
         // ============================================================
-        // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank grid, in the
-        //     SAME real-world coordinate space (meters) as the tanks.
-        // ============================================================
-        function drawAxleOverlay() {
-            const wrap = document.getElementById('tankGridWrap');
-            const gridEl = document.getElementById('tankContainer');
-            const canvas = document.getElementById('axleOverlayCanvas');
-            if (!wrap || !gridEl || !canvas) return;
-
-            // Match the overlay canvas to the tank grid's actual rendered box
-            const rect = gridEl.getBoundingClientRect();
-            const wrapRect = wrap.getBoundingClientRect();
-            const cssW = rect.width;
-            const cssH = rect.height;
-            if (cssW === 0 || cssH === 0) return; // not laid out yet (e.g. hidden tab)
-
-            const dpr = window.devicePixelRatio || 1;
-            canvas.style.width = cssW + 'px';
-            canvas.style.height = cssH + 'px';
-            canvas.style.left = (rect.left - wrapRect.left) + 'px';
-            canvas.style.top = (rect.top - wrapRect.top) + 'px';
-            canvas.width = cssW * dpr;
-            canvas.height = cssH * dpr;
-
-            const ctx = canvas.getContext('2d');
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.clearRect(0, 0, cssW, cssH);
-
-            // Tank grid layout constants (must match .tank-grid CSS):
-            // 90px label column, then 9 equal 1fr tank columns, 15px gaps.
-            const labelColPx = 90;
-            const gapPx = 15;
-            const plottableW = cssW - labelColPx - gapPx;
-
-            // World X spans the full barge length (BARGE_X_MIN..BARGE_X_MAX),
-            // mapped left(AFT)->right(FWD) across the 9 tank columns, matching
-            // the existing visual order (aft tanks on the left).
-            // World Y spans the full barge beam (BARGE_Y_MIN..BARGE_Y_MAX),
-            // mapped top(PORT, +)->bottom(STBD, -) across the full grid height.
-            function worldToScreen(x, y) {
-                const xFrac = (x - BARGE_X_MIN) / (BARGE_X_MAX - BARGE_X_MIN);
-                const sx = labelColPx + gapPx + xFrac * plottableW;
-                const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
-                const sy = yFrac * cssH;
-                return { sx, sy };
-            }
-
-            const isLight = document.body.classList.contains('light-theme');
-
-            // Pixel-per-meter scale, independent per axis (X and Y tracks are
-            // sized differently), so the axle footprint reads at true scale.
-            const scaleX = plottableW / (BARGE_X_MAX - BARGE_X_MIN);
-            const scaleY = cssH / (BARGE_Y_MAX - BARGE_Y_MIN);
-
-            const halfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 3);
-            const halfH = Math.max((AXLE_HEIGHT_Y / 2) * scaleY, 3);
-
-            trailerAxles.forEach((axle) => {
-                const p = worldToScreen(axle.x, axle.y);
-                const x0 = p.sx - halfW;
-                const y0 = p.sy - halfH;
-                const w = halfW * 2;
-                const h = halfH * 2;
-
-                // Solid fill, but semi-transparent: sits visually above the
-                // tank card (water level, label, input box all still show
-                // through), while clearly marking the axle's true footprint.
-                ctx.save();
-                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
-                ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.rect(x0, y0, w, h);
-                ctx.fill();
-                ctx.stroke();
-                ctx.restore();
-            });
-        }
-
-        function refreshPlanView() {
-            drawAxleOverlay();
-            // Re-measure one frame later too, in case fonts/scrollbars shift
-            // the grid's rendered box right after the initial paint.
-            requestAnimationFrame(() => drawAxleOverlay());
-        }
-
-        // Recompute overlay alignment whenever the layout reflows
-        window.addEventListener('resize', () => drawAxleOverlay());
-
-        // ============================================================
-        // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
+        // 5. EXCEL SYNC (mock for demo)
         // ============================================================
         async function pullExcelTankData() {
-            if (!isOfficeInitialized) {
-                generateMockSystemValues();
-                return;
-            }
-            try {
-                await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
-                    // use config length to determine range
-                    const startRow = EXCEL_START_ROW;
-                    const endRow = startRow + TANK_CONFIG.length - 1;
-                    const rangeTanks = sheet.getRange(`B${startRow}:E${endRow}`);
-                    const cellTrim = sheet.getRange("E8");
-                    const cellHeel = sheet.getRange("E9");
-                    rangeTanks.load("values");
-                    cellTrim.load("values");
-                    cellHeel.load("values");
-
-                    // Trailer axle X/Y block: E124:F(124+N), read a generous fixed
-                    // block then trim trailing blanks (Excel.run can't do a true
-                    // "until blank" scan without sequential round-trips, so we
-                    // over-read and stop at the first fully-blank row).
-                    const axleEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
-                    const rangeAxles = sheet.getRange(`E${AXLE_START_ROW}:F${axleEndRow}`);
-                    rangeAxles.load("values");
-
-                    await context.sync();
-
-                    currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
-                    currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
-
-                    const tankValues = rangeTanks.values;
-                    tankData.forEach((tank, idx) => {
-                        if (tankValues[idx]) {
-                            tank.name = tankValues[idx][0] || tank.name;
-                            tank.weight = parseFloat(tankValues[idx][2] || 0).toFixed(2);
-                            let rawPct = tankValues[idx][3] || 0;
-                            tank.percent = rawPct > 1 ? rawPct / 100 : rawPct;
-                        }
-                    });
-
-                    // Parse trailer axle rows until first blank pair (E and F both empty)
-                    const axleValues = rangeAxles.values;
-                    const parsedAxles = [];
-                    for (let i = 0; i < axleValues.length; i++) {
-                        const rawX = axleValues[i][0];
-                        const rawY = axleValues[i][1];
-                        const xEmpty = (rawX === '' || rawX === null || rawX === undefined);
-                        const yEmpty = (rawY === '' || rawY === null || rawY === undefined);
-                        if (xEmpty && yEmpty) break; // stop at first fully blank row
-                        const x = parseFloat(rawX);
-                        const y = parseFloat(rawY);
-                        if (isNaN(x) || isNaN(y)) continue; // skip malformed row, keep scanning
-                        parsedAxles.push({ row: AXLE_START_ROW + i, x, y });
-                    }
-                    trailerAxles = parsedAxles;
-
-                    initTankMatrix();
-                    drawAttitudeGraphics();
-                    refreshPlanView();
-                });
-            } catch (e) {
-                console.warn("Excel sync error, using mock", e);
-                generateMockSystemValues();
-            }
+            // For demo we just regenerate mock data
+            generateMockSystemValues();
         }
 
         // ============================================================
@@ -934,31 +802,20 @@
         function generateMockSystemValues() {
             tankData.forEach((tank, i) => {
                 const base = 60 + (i * 7);
-                tank.weight = (base + (i % 5) * 1.8).toFixed(2);
+                tank.weight = parseFloat((base + (i % 5) * 1.8).toFixed(2));
                 tank.percent = Math.min(0.10 + (i * 0.025), 0.90);
             });
             currentTrimDegrees = 2.8;
             currentHeelDegrees = -1.9;
 
-            // Mock trailer axle layout: a typical multi-axle trailer footprint
-            // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
-            trailerAxles = [
-                { row: AXLE_START_ROW, x: 30, y: 3.2 },
-                { row: AXLE_START_ROW + 1, x: 30, y: -3.2 },
-                { row: AXLE_START_ROW + 2, x: 45, y: 3.2 },
-                { row: AXLE_START_ROW + 3, x: 45, y: -3.2 },
-                { row: AXLE_START_ROW + 4, x: 60, y: 3.2 },
-                { row: AXLE_START_ROW + 5, x: 60, y: -3.2 }
-            ];
-
+            // Keep trailer axles as defined
             initTankMatrix();
             drawAttitudeGraphics();
-            refreshPlanView();
-            document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span>';
+            document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
         }
 
         // ============================================================
-        // 7. UPDATE TANK FILL (with Excel write)
+        // 7. UPDATE TANK FILL
         // ============================================================
         async function updateTankFill(row, value) {
             const parsed = parseFloat(value);
@@ -978,16 +835,12 @@
                 label.textContent = `${parsed.toFixed(2)} (${pctStr})`;
             }
 
-            if (!isOfficeInitialized) return;
-            try {
-                await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
-                    const cell = sheet.getRange(`D${row}`);
-                    cell.values = [[parsed]];
-                    await context.sync();
-                    setTimeout(pullExcelTankData, 300);
-                });
-            } catch (e) { console.warn("Excel write error", e); }
+            // Update stored data
+            const tank = tankData.find(t => t.row === row);
+            if (tank) {
+                tank.weight = parsed;
+                tank.percent = targetPct;
+            }
         }
 
         // ============================================================
@@ -997,7 +850,6 @@
             const checked = document.getElementById('themeToggleCheckbox').checked;
             document.body.classList.toggle('light-theme', checked);
             drawAttitudeGraphics();
-            drawAxleOverlay();
         }
 
         // ============================================================
@@ -1008,24 +860,13 @@
                 isOfficeInitialized = true;
                 document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
                 pullExcelTankData();
-                registerExcelAutoTrack();
             } else {
                 document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
                 generateMockSystemValues();
             }
         });
 
-        async function registerExcelAutoTrack() {
-            try {
-                await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
-                    sheet.onChanged.add(async () => { await pullExcelTankData(); });
-                    await context.sync();
-                });
-            } catch (e) { /* ignore */ }
-        }
-
-        // initial render fallback
+        // fallback
         window.addEventListener('load', () => {
             if (!isOfficeInitialized) generateMockSystemValues();
         });
