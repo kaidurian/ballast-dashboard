@@ -888,6 +888,56 @@
                 });
             });
 
+            return enforceMarkerSpacing(markers);
+        }
+
+        // Ensures markers never touch or merge into one continuous block.
+        // When several axles land close together in the same tank, their
+        // true-scale rectangles would overlap/abut; this keeps each one
+        // individually visible by inserting a small visual gap and, if a
+        // row is too crowded for everyone to fit at true scale, shrinking
+        // that row's markers just enough so the gaps still fit.
+        function enforceMarkerSpacing(markers) {
+            if (markers.length < 2) return markers;
+
+            const GAP_PCT = 3; // minimum visual gap between adjacent markers, as % of tank width
+
+            // Group markers into horizontal "rows" when their vertical
+            // spans overlap (so axles at different heights aren't forced
+            // to avoid each other unnecessarily).
+            const sorted = markers.slice().sort((a, b) => a.leftPct - b.leftPct);
+            const rows = [];
+            sorted.forEach(m => {
+                const row = rows.find(r => r.some(existing =>
+                    m.topPct < existing.topPct + existing.heightPct &&
+                    existing.topPct < m.topPct + m.heightPct
+                ));
+                if (row) row.push(m); else rows.push([m]);
+            });
+
+            rows.forEach(row => {
+                if (row.length < 2) return;
+                row.sort((a, b) => a.leftPct - b.leftPct);
+
+                // Total width needed (markers + mandatory gaps) vs. available span
+                const naturalWidth = row.reduce((sum, m) => sum + m.widthPct, 0);
+                const totalGap = GAP_PCT * (row.length - 1);
+                const span = (row[row.length - 1].leftPct + row[row.length - 1].widthPct) - row[0].leftPct;
+                const needed = naturalWidth + totalGap;
+
+                // Shrink each marker proportionally if they can't all fit
+                // with gaps inside the row's own footprint span.
+                const shrink = needed > span && naturalWidth > 0 ? Math.max((span - totalGap) / naturalWidth, 0.25) : 1;
+
+                let cursor = row[0].leftPct;
+                row.forEach(m => {
+                    const w = m.widthPct * shrink;
+                    m.leftPct = cursor;
+                    m.widthPct = w;
+                    cursor += w + GAP_PCT;
+                });
+            });
+
             return markers;
         }
 
