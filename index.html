@@ -448,6 +448,26 @@
             color: #f59e0b;
             font-family: monospace;
         }
+
+        /* new toggle for trailer overlay */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+            .toggle-container input {
+                margin-right: 4px;
+                accent-color: var(--accent-blue);
+                width: 16px;
+                height: 16px;
+                cursor: pointer;
+            }
     </style>
 </head>
 <body>
@@ -457,6 +477,11 @@
             <div class="theme-toggle-container">
                 <span>Day</span>
                 <label class="switch"><input type="checkbox" id="themeToggleCheckbox" onchange="toggleDashboardTheme()"><span class="slider"></span></label>
+            </div>
+            <!-- new toggle for trailer overlay -->
+            <div class="toggle-container">
+                <span>🚛 Trailer</span>
+                <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
             </div>
             <div id="connectionStatus" style="font-size: 11px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
@@ -550,14 +575,12 @@
         const EXCEL_START_ROW = 14;
 
         // ---- trailer axle constants ----
-        // Axle footprint: width along X = 0.86m, height along Y = 0.945m
         const AXLE_WIDTH_X = 0.86;
         const AXLE_HEIGHT_Y = 0.945;
-        const AXLE_START_ROW = 124; // Excel rows E124/F124 downward until blank
-        const AXLE_MAX_ROWS = 60;   // safety cap on how far down we scan
+        const AXLE_START_ROW = 124;
+        const AXLE_MAX_ROWS = 60;
 
         // Reference origin (0,0) = center of AFT-C tank (Excel row 15), per spec.
-        // Overall barge extents (for drawing the hull outline) derived from tank config.
         const BARGE_X_MIN = Math.min(...TANK_CONFIG.map(t => t.x_start)); // 0
         const BARGE_X_MAX = Math.max(...TANK_CONFIG.map(t => t.x_end));  // 113
         const BARGE_Y_MIN = Math.min(...TANK_CONFIG.map(t => t.y_start)); // -14.5
@@ -568,6 +591,7 @@
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
         let trailerAxles = []; // [{ name, x, y }]
+        let showTrailer = true;  // new state for trailer toggle
 
         // tank data store (synced with config)
         let tankData = TANK_CONFIG.map(cfg => ({
@@ -620,10 +644,10 @@
             const quayBox = document.createElement('div');
             quayBox.className = 'quay-structure-box';
             quayBox.innerHTML = `
-                <div class="quay-title">QUAY WALL</div>
-                <div class="quay-dims">L=20m · W=60m</div>
-                <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
-            `;
+                    <div class="quay-title">QUAY WALL</div>
+                    <div class="quay-dims">L=20m · W=60m</div>
+                    <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+                `;
             container.appendChild(quayBox);
 
             // Render each tank from config (in order: col9→col1, top→bottom)
@@ -664,24 +688,24 @@
                 box.appendChild(dot);
 
                 box.innerHTML += `
-                    <div class="tank-water-level" style="height: ${pct}%"></div>
-                    <div class="tank-header">
-                        <span class="tank-name">${cfg.name}</span>
-                        <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
-                    </div>
-                    <div class="tank-inputs">
-                        <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
-                            <span>Row ${excelRow}</span>
-                            <span class="tank-capacity-badge">${cfg.capacity}t</span>
+                        <div class="tank-water-level" style="height: ${pct}%"></div>
+                        <div class="tank-header">
+                            <span class="tank-name">${cfg.name}</span>
+                            <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
                         </div>
-                        <input type="number" step="any" class="weight-input"
-                               id="txt_Row${cfg.id}" value="${weight}"
-                               onchange="updateTankFill(${cfg.id}, this.value)">
-                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                            ${weight} (${pctString})
+                        <div class="tank-inputs">
+                            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
+                                <span>Row ${excelRow}</span>
+                                <span class="tank-capacity-badge">${cfg.capacity}t</span>
+                            </div>
+                            <input type="number" step="any" class="weight-input"
+                                   id="txt_Row${cfg.id}" value="${weight}"
+                                   onchange="updateTankFill(${cfg.id}, this.value)">
+                            <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                ${weight} (${pctString})
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
                 container.appendChild(box);
             });
         }
@@ -771,6 +795,7 @@
         // ============================================================
         // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank grid, in the
         //     SAME real-world coordinate space (meters) as the tanks.
+        //     Respects showTrailer flag.
         // ============================================================
         function drawAxleOverlay() {
             const wrap = document.getElementById('tankGridWrap');
@@ -796,6 +821,9 @@
             const ctx = canvas.getContext('2d');
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, cssW, cssH);
+
+            // if trailer overlay is hidden, just return (canvas cleared)
+            if (!showTrailer) return;
 
             // Tank grid layout constants (must match .tank-grid CSS):
             // 90px label column, then 9 equal 1fr tank columns, 15px gaps.
@@ -1001,7 +1029,16 @@
         }
 
         // ============================================================
-        // 9. OFFICE INIT
+        // 9. TRAILER OVERLAY TOGGLE (NEW)
+        // ============================================================
+        function toggleTrailerOverlay() {
+            const checked = document.getElementById('trailerToggleCheckbox').checked;
+            showTrailer = checked;
+            drawAxleOverlay();  // immediately show/hide
+        }
+
+        // ============================================================
+        // 10. OFFICE INIT
         // ============================================================
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
