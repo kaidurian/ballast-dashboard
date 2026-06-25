@@ -21,6 +21,11 @@
             --quay-bg: #2d3748;
             --quay-border: #4a5568;
             --quay-text: #cbd5e1;
+            /* Gap between tank cards in the grid (both row + column gap).
+               Change this ONE value to make tanks sit closer together or
+               further apart. Increase for more breathing room, decrease
+               (even down to 0) to pack tanks tightly. */
+            --tank-gap: 15px;
         }
 
         body.light-theme {
@@ -249,7 +254,7 @@
             grid-template-columns: 90px repeat(9, 1fr);
             grid-template-rows: repeat(3, 105px);
             min-width: 1100px;
-            gap: 15px;
+            gap: var(--tank-gap);
             padding-right: 5px;
         }
 
@@ -507,7 +512,7 @@
         <div class="tank-grid-container">
             <div class="section-title">
                 <span>🔹 Custom tank layout · each tank has unique size & position</span>
-                <span class="coords-note">dimensions in meters · geometry linked to CREST_301!Q30:T (until blank) · 🚛 amber overlay = trailer axle (0.86×0.945m)</span>
+                <span class="coords-note" id="bargeInfoNote">dimensions in meters · geometry linked to CREST_301!Q30:T (until blank)</span>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
@@ -569,12 +574,37 @@
         let BARGE_Y_MIN = -14.5;
         let BARGE_Y_MAX = 14.5;
 
+        // Barge identity: name = the source worksheet name (CREST_301, or
+        // whatever sheet the geometry actually came from).
+        let BARGE_NAME = CREST_SHEET_NAME;
+
         function recomputeBargeExtents() {
             if (!TANK_CONFIG.length) return;
             BARGE_X_MIN = Math.min(...TANK_CONFIG.map(t => t.x_start));
             BARGE_X_MAX = Math.max(...TANK_CONFIG.map(t => t.x_end));
             BARGE_Y_MIN = Math.min(...TANK_CONFIG.map(t => t.y_start));
             BARGE_Y_MAX = Math.max(...TANK_CONFIG.map(t => t.y_end));
+        }
+
+        // Total barge length = sum of each tank's own width (the X-direction
+        // span of every tank, added together) — NOT just the outer bounding
+        // box, since tanks may have gaps between them.
+        // Total barge width = sum of each tank's own height (Y-direction span).
+        function computeTotalTankSpan() {
+            const totalLength = TANK_CONFIG.reduce((sum, t) => sum + Math.abs(t.width), 0);
+            const totalWidth = TANK_CONFIG.reduce((sum, t) => sum + Math.abs(t.height), 0);
+            return { totalLength, totalWidth };
+        }
+
+        // Update the on-screen note: "<Barge Name> · total length X m ×
+        // total width Y m (sum of all tank dimensions) · geometry source"
+        function updateBargeInfoNote() {
+            const note = document.getElementById('bargeInfoNote');
+            if (!note) return;
+            const { totalLength, totalWidth } = computeTotalTankSpan();
+            note.textContent =
+                `${BARGE_NAME} · total tank length ${totalLength.toFixed(1)}m × total tank width ${totalWidth.toFixed(1)}m ` +
+                `· geometry linked to ${CREST_SHEET_NAME}!Q${CREST_START_ROW}:T (until blank)`;
         }
 
         // ---- state ----
@@ -721,12 +751,21 @@
                 box.style.gridColumn = gridCol;
                 box.style.gridRow = gridRow;
 
-                // visual size hint: scale based on actual area relative to average
-                const avgArea = 15 * 9; // ~135 m²
-                const area = geo.width * geo.height;
-                const scaleFactor = 0.75 + (area / avgArea) * 0.5;
-                const finalScale = Math.min(Math.max(scaleFactor, 0.7), 1.4);
-                box.style.transform = `scale(${finalScale})`;
+                // Visual size hint: scale width and height INDEPENDENTLY,
+                // each against the average of its own axis across all tanks.
+                // (Previously this used a single combined-area scale, which
+                // meant a tank with an unusual WIDTH also changed its
+                // apparent HEIGHT and vice versa — e.g. WB-01-PS.P /
+                // WB-01-C.C / WB-01-SB.S looked a different height than
+                // their row-mates purely because their footprint area
+                // differed, even when their real height was similar.
+                // Scaling each axis on its own keeps height comparisons
+                // honest and keeps every tank in a row visually level.)
+                const avgWidth = TANK_CONFIG.reduce((s, t) => s + Math.abs(t.width), 0) / TANK_CONFIG.length;
+                const avgHeight = TANK_CONFIG.reduce((s, t) => s + Math.abs(t.height), 0) / TANK_CONFIG.length;
+                const widthScale = Math.min(Math.max(0.25 + (geo.width / avgWidth) * 0.75, 0.7), 1.4);
+                const heightScale = Math.min(Math.max(0.25 + (geo.height / avgHeight) * 0.75, 0.7), 1.4);
+                box.style.transform = `scale(${widthScale}, ${heightScale})`;
                 box.style.transformOrigin = 'center center';
 
                 // border colour by capacity
@@ -879,9 +918,12 @@
             if (!showTrailer) return;
 
             // Tank grid layout constants (must match .tank-grid CSS):
-            // 90px label column, then 9 equal 1fr tank columns, 15px gaps.
+            // 90px label column, then 9 equal 1fr tank columns, gap read
+            // live from --tank-gap so this stays correct if that's tuned.
             const labelColPx = 90;
-            const gapPx = 15;
+            const gapPx = parseFloat(
+                getComputedStyle(gridEl).getPropertyValue('--tank-gap')
+            ) || 15;
             const plottableW = cssW - labelColPx - gapPx;
 
             // World X spans the full barge length (BARGE_X_MIN..BARGE_X_MAX),
@@ -952,6 +994,8 @@
                     const crestSheet = context.workbook.worksheets.getItem(CREST_SHEET_NAME);
                     const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
 
+                    crestSheet.load("name");
+
                     // --- 1) Geometry source: CREST_301, Q:T, rows 30..30+N ---
                     const crestEndRow = CREST_START_ROW + CREST_MAX_ROWS - 1;
                     const rangeCrest = crestSheet.getRange(`Q${CREST_START_ROW}:T${crestEndRow}`);
@@ -969,6 +1013,7 @@
 
                     await context.sync();
 
+                    BARGE_NAME = crestSheet.name || CREST_SHEET_NAME;
                     currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
 
@@ -1007,6 +1052,7 @@
                     TANK_CONFIG = buildTankConfigFromCrest(geometryRows, nameWeightRows);
                     recomputeBargeExtents();
                     rebuildTankDataFromConfig();
+                    updateBargeInfoNote();
 
                     tankData.forEach((tank, idx) => {
                         const extra = nameWeightRows[idx];
@@ -1118,9 +1164,11 @@
                 capacity: mockCapacities[i] || 0
             }));
 
+            BARGE_NAME = CREST_SHEET_NAME; // demo mode: same name as the real source sheet
             TANK_CONFIG = buildTankConfigFromCrest(mockCrestRows, mockNameWeightRows);
             recomputeBargeExtents();
             rebuildTankDataFromConfig();
+            updateBargeInfoNote();
 
             tankData.forEach((tank, i) => {
                 const base = 60 + (i * 7);
