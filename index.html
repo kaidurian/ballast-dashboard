@@ -250,17 +250,18 @@
         }
 
         .tank-grid {
-            display: grid;
-            grid-template-columns: 90px repeat(9, 1fr);
-            grid-template-rows: repeat(3, 105px);
+            position: relative;
+            /* Sized in JS to match the real barge length:width aspect ratio
+               at a chosen pixel-per-meter scale — see PLAN_PX_PER_METER and
+               sizeTankPlanView(). min-width/height are just safe fallbacks
+               before the first render. */
             min-width: 1100px;
-            gap: var(--tank-gap);
+            min-height: 320px;
             padding-right: 5px;
         }
 
         .quay-structure-box {
-            grid-column: 1;
-            grid-row: 1 / span 3;
+            position: absolute;
             background: var(--quay-bg);
             border: 2px dashed var(--quay-border);
             border-radius: 6px;
@@ -271,6 +272,7 @@
             padding: 10px;
             text-align: center;
             box-shadow: inset 0 0 15px rgba(0,0,0,0.2);
+            overflow: hidden;
         }
 
         .quay-title {
@@ -298,18 +300,14 @@
         }
 
         .tank-control-box {
+            position: absolute;
             background: var(--tank-box-bg);
             border: 1px solid var(--panel-border);
             border-radius: 6px;
-            position: relative;
-            height: 105px;
-            width: 100%;
-            align-self: stretch;
-            justify-self: stretch;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 8px;
+            padding: 6px;
             overflow: hidden;
             transition: box-shadow 0.3s, border-color 0.3s;
         }
@@ -738,22 +736,11 @@
             return { x: cx, y: cy, width: w, height: h, capacity: cfg.capacity };
         }
 
-        // Map tank index to visual grid column/row.
-        // Adapts to however many tanks CREST_301 actually defines: lays
-        // tanks out in groups of GRID_ROWS per visual column, aft-most
-        // group on the left-most usable column, working toward the front.
-        function getTankGridPosition(index) {
-            const numGroups = Math.max(1, Math.ceil(totalTanks / GRID_ROWS));
-            const colIndex = Math.floor(index / GRID_ROWS);      // 0 = first (aft) group
-            const rowIndex = index % GRID_ROWS;                  // 0=top, 1=middle, 2=bottom
-            // Column 1 of the grid is the quay box; tank groups occupy
-            // columns 2..(1+numGroups). Group 0 (aft-most) goes in the
-            // right-most tank column, working leftward toward the bow,
-            // matching the original aft-on-the-left / fwd-on-the-right reading.
-            const gridCol = (1 + numGroups) - colIndex;
-            const gridRow = rowIndex + 1;
-            return { gridCol, gridRow, excelRow: EXCEL_START_ROW + index };
-        }
+        // (getTankGridPosition removed — tanks are no longer placed into
+        // discrete CSS grid cells. Position is now computed directly from
+        // real-world X/Y via worldToScreen(), the same mapping the trailer
+        // axle overlay uses. excelRow is now just EXCEL_START_ROW + index,
+        // computed inline where needed.)
 
         // Colour based on capacity
         function getTankColor(capacity) {
@@ -764,34 +751,129 @@
         }
 
         // ============================================================
-        // 3. RENDER TANKS
+        // 2c. SHARED WORLD <-> SCREEN MAPPING
+        //     ONE function used by BOTH the tank plan view and the
+        //     trailer axle overlay, so they are always pixel-aligned to
+        //     each other and to the real CREST_301 coordinates. Replaces
+        //     the old approach where the tank grid used CSS Grid cells
+        //     and the axle overlay had its own separate pixel math.
+        // ============================================================
+
+        // Pixels-per-meter target for the plan view at default zoom. The
+        // actual container size is derived from this times the real barge
+        // length/width, so the drawing is always literally to scale.
+        const PLAN_PX_PER_METER = 9;
+        const PLAN_LABEL_COL_PX = 90;   // reserved space for nothing now (kept for quay wall margin)
+        const PLAN_MARGIN_PX = 10;      // breathing room around the whole plan
+
+        // Quay wall real-world footprint (meters), positioned just aft/port
+        // of the barge origin — matches the original "X: -1.2..-21.2" badge.
+        const QUAY_X_START = -21.2;
+        const QUAY_X_END = -1.2;
+        const QUAY_LENGTH = 20;   // m
+        const QUAY_WIDTH = 60;    // m (drawn clipped to the plan height)
+
+        // Sets the tank-grid container's actual pixel size to match the
+        // real barge length × width at PLAN_PX_PER_METER, so every tank
+        // placed inside it via worldToScreen() is genuinely to scale.
+        function sizeTankPlanView() {
+            const container = document.getElementById('tankContainer');
+            if (!container || !TANK_CONFIG.length) return;
+            const worldW = (BARGE_X_MAX - BARGE_X_MIN) + (QUAY_X_END - QUAY_X_START);
+            const worldH = (BARGE_Y_MAX - BARGE_Y_MIN);
+            const pxW = Math.max(700, Math.round(worldW * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2);
+            const pxH = Math.max(260, Math.round(worldH * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2);
+            container.style.width = pxW + 'px';
+            container.style.height = pxH + 'px';
+        }
+
+        // Maps a real-world (x, y) in meters to a screen pixel (sx, sy)
+        // within the #tankContainer plan view. X grows AFT->FWD, mapped
+        // left->right (quay wall occupies the left margin). Y grows
+        // PORT(+)->STBD(-), mapped top->bottom.
+        function worldToScreen(x, y) {
+            const container = document.getElementById('tankContainer');
+            const cssW = container ? container.clientWidth : 1100;
+            const cssH = container ? container.clientHeight : 320;
+
+            const worldXMin = QUAY_X_START;
+            const worldXMax = BARGE_X_MAX;
+            const worldW = worldXMax - worldXMin;
+            const plottableW = cssW - PLAN_MARGIN_PX * 2;
+            const plottableH = cssH - PLAN_MARGIN_PX * 2;
+
+            const xFrac = (x - worldXMin) / worldW;
+            const sx = PLAN_MARGIN_PX + xFrac * plottableW;
+
+            const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
+            const sy = PLAN_MARGIN_PX + yFrac * plottableH;
+
+            return { sx, sy };
+        }
+
+        // Pixels-per-meter actually achieved on screen right now, per axis
+        // (depends on the container's current rendered size).
+        function getPlanScale() {
+            const container = document.getElementById('tankContainer');
+            const cssW = container ? container.clientWidth : 1100;
+            const cssH = container ? container.clientHeight : 320;
+            const worldW = BARGE_X_MAX - QUAY_X_START;
+            const plottableW = cssW - PLAN_MARGIN_PX * 2;
+            const plottableH = cssH - PLAN_MARGIN_PX * 2;
+            return {
+                scaleX: plottableW / worldW,
+                scaleY: plottableH / (BARGE_Y_MAX - BARGE_Y_MIN)
+            };
+        }
+
+        // ============================================================
+        // 3. RENDER TANKS — TRUE-TO-SCALE PLAN VIEW
+        //    Every tank is absolutely positioned via worldToScreen() from
+        //    its REAL x/y/width/height (sourced from CREST_301 Q:T). This
+        //    is the same mapping the trailer axle overlay uses, so tanks
+        //    and axles are always pixel-aligned to one shared coordinate
+        //    system. Dimension AND position both now genuinely follow
+        //    the Excel data — not just the on-card label text.
         // ============================================================
         function initTankMatrix() {
             totalTanks = TANK_CONFIG.length;
             const container = document.getElementById('tankContainer');
             container.innerHTML = '';
+            if (!totalTanks) return;
 
-            // Adjust the visual grid's column template to fit however many
-            // tank-groups CREST_301 actually produced (label column + one
-            // column per group of up to GRID_ROWS tanks).
-            const numGroups = Math.max(1, Math.ceil(totalTanks / GRID_ROWS));
-            container.style.gridTemplateColumns = `90px repeat(${numGroups}, 1fr)`;
+            sizeTankPlanView();
 
-            // Quay wall
+            const { scaleX, scaleY } = getPlanScale();
+            // --tank-gap is now a visual INSET (in px) applied to every side
+            // of each tank's true rectangle — shrinks the drawn box slightly
+            // so adjacent/flush tanks still show a visible seam, without
+            // changing their real modeled position or size.
+            const gapPx = parseFloat(
+                getComputedStyle(container).getPropertyValue('--tank-gap')
+            ) || 15;
+            const inset = Math.min(gapPx / 4, 6); // keep insets modest regardless of --tank-gap's old larger default
+
+            // Quay wall — drawn to scale at its real X footprint, full plan height
             const quayBox = document.createElement('div');
             quayBox.className = 'quay-structure-box';
+            const qTopLeft = worldToScreen(QUAY_X_START, BARGE_Y_MAX);
+            const qBotRight = worldToScreen(QUAY_X_END, BARGE_Y_MIN);
+            quayBox.style.left = qTopLeft.sx + 'px';
+            quayBox.style.top = qTopLeft.sy + 'px';
+            quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
+            quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
                     <div class="quay-title">QUAY WALL</div>
-                    <div class="quay-dims">L=20m · W=60m</div>
-                    <div class="quay-coords-badge">X: -1.2 .. -21.2</div>
+                    <div class="quay-dims">L=${QUAY_LENGTH}m · W=${QUAY_WIDTH}m</div>
+                    <div class="quay-coords-badge">X: ${QUAY_X_START.toFixed(1)} .. ${QUAY_X_END.toFixed(1)}</div>
                 `;
             container.appendChild(quayBox);
 
-            // Render each tank from config (in order: col9→col1, top→bottom)
+            // Render each tank at its TRUE real-world position and size
             TANK_CONFIG.forEach((cfg, index) => {
                 const geo = getTankGeometry(cfg.id);
                 if (!geo) return;
-                const { gridCol, gridRow, excelRow } = getTankGridPosition(index);
+                const excelRow = EXCEL_START_ROW + index;
 
                 // find data
                 const tank = tankData.find(t => t.row === cfg.id);
@@ -799,29 +881,26 @@
                 const pctString = pct.toFixed(0) + '%';
                 const weight = tank ? tank.weight : 0;
 
+                // True rectangle corners from real-world geometry
+                const xStart = geo.x - geo.width / 2;
+                const xEnd = geo.x + geo.width / 2;
+                const yTop = geo.y + geo.height / 2;   // PORT side (higher Y)
+                const yBot = geo.y - geo.height / 2;   // STBD side (lower Y)
+                const topLeft = worldToScreen(xStart, yTop);
+                const botRight = worldToScreen(xEnd, yBot);
+
+                const pxLeft = topLeft.sx + inset;
+                const pxTop = topLeft.sy + inset;
+                const pxW = Math.max(botRight.sx - topLeft.sx - inset * 2, 24);
+                const pxH = Math.max(botRight.sy - topLeft.sy - inset * 2, 18);
+
                 const box = document.createElement('div');
                 box.className = 'tank-control-box';
                 box.id = `tank_card_${cfg.id}`;
-                box.style.gridColumn = gridCol;
-                box.style.gridRow = gridRow;
-
-                // Each card simply fills its own grid cell at 100% width and
-                // the grid's row height — NO per-tank scale-by-area sizing.
-                //
-                // (Previously, a card's width was set as a PERCENTAGE of its
-                // own grid cell, scaled against the AVERAGE width across all
-                // tanks. A narrower-than-average tank — e.g. a 6.1m column
-                // next to a run of 10.7m columns — would then only fill
-                // ~73% of its cell, leaving real estate empty inside that
-                // cell. That empty space sat right next to the normal
-                // --tank-gap, so the gap AFTER that narrow column looked
-                // noticeably bigger than every other gap, even though the
-                // actual CSS gap value never changed. Filling every cell at
-                // 100% removes that illusion — every gap you see is exactly
-                // --tank-gap, nothing more. Each tank's true real-world size
-                // is still shown honestly via the W×H label on the card.)
-                box.style.width = '100%';
-                box.style.height = '100%';
+                box.style.left = pxLeft + 'px';
+                box.style.top = pxTop + 'px';
+                box.style.width = pxW + 'px';
+                box.style.height = pxH + 'px';
 
                 // border colour by capacity
                 const borderColor = getTankColor(cfg.capacity);
@@ -834,7 +913,17 @@
                 dot.style.background = borderColor;
                 box.appendChild(dot);
 
-                box.innerHTML += `
+                // Below a certain rendered size, the full input UI won't
+                // fit — fall back to a compact label-only view, but the
+                // box's drawn footprint stays exactly true-to-scale.
+                const compact = pxW < 60 || pxH < 50;
+
+                box.innerHTML += compact ? `
+                        <div class="tank-water-level" style="height: ${pct}%"></div>
+                        <div class="tank-header" style="font-size:7px;">
+                            <span class="tank-name" style="font-size:7px;">${cfg.name}</span>
+                        </div>
+                    ` : `
                         <div class="tank-water-level" style="height: ${pct}%"></div>
                         <div class="tank-header">
                             <span class="tank-name">${cfg.name}</span>
@@ -853,6 +942,7 @@
                             </div>
                         </div>
                     `;
+                box.title = `${cfg.name} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
         }
@@ -940,8 +1030,10 @@
         }
 
         // ============================================================
-        // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank grid, in the
-        //     SAME real-world coordinate space (meters) as the tanks.
+        // 4b. TRAILER AXLE OVERLAY — drawn on top of the tank plan view,
+        //     using the SAME worldToScreen()/getPlanScale() mapping as the
+        //     tanks themselves (see section 2c above), so axles are always
+        //     pixel-aligned to the tanks' real CREST_301 coordinates.
         //     Respects showTrailer flag.
         // ============================================================
         function drawAxleOverlay() {
@@ -950,7 +1042,7 @@
             const canvas = document.getElementById('axleOverlayCanvas');
             if (!wrap || !gridEl || !canvas) return;
 
-            // Match the overlay canvas to the tank grid's actual rendered box
+            // Match the overlay canvas to the tank plan view's actual rendered box
             const rect = gridEl.getBoundingClientRect();
             const wrapRect = wrap.getBoundingClientRect();
             const cssW = rect.width;
@@ -971,36 +1063,12 @@
 
             // if trailer overlay is hidden, just return (canvas cleared)
             if (!showTrailer) return;
-
-            // Tank grid layout constants (must match .tank-grid CSS):
-            // 90px label column, then 9 equal 1fr tank columns, gap read
-            // live from --tank-gap so this stays correct if that's tuned.
-            const labelColPx = 90;
-            const gapPx = parseFloat(
-                getComputedStyle(gridEl).getPropertyValue('--tank-gap')
-            ) || 15;
-            const plottableW = cssW - labelColPx - gapPx;
-
-            // World X spans the full barge length (BARGE_X_MIN..BARGE_X_MAX),
-            // mapped left(AFT)->right(FWD) across the 9 tank columns, matching
-            // the existing visual order (aft tanks on the left).
-            // World Y spans the full barge beam (BARGE_Y_MIN..BARGE_Y_MAX),
-            // mapped top(PORT, +)->bottom(STBD, -) across the full grid height.
-            function worldToScreen(x, y) {
-                const xFrac = (x - BARGE_X_MIN) / (BARGE_X_MAX - BARGE_X_MIN);
-                const sx = labelColPx + gapPx + xFrac * plottableW;
-                const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
-                const sy = yFrac * cssH;
-                return { sx, sy };
-            }
+            if (!TANK_CONFIG.length) return; // no geometry loaded yet
 
             const isLight = document.body.classList.contains('light-theme');
 
-            // Pixel-per-meter scale, independent per axis (X and Y tracks are
-            // sized differently), so the axle footprint reads at true scale.
-            const scaleX = plottableW / (BARGE_X_MAX - BARGE_X_MIN);
-            const scaleY = cssH / (BARGE_Y_MAX - BARGE_Y_MIN);
-
+            // SAME mapping the tanks use — guarantees pixel alignment.
+            const { scaleX, scaleY } = getPlanScale();
             const halfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 3);
             const halfH = Math.max((AXLE_HEIGHT_Y / 2) * scaleY, 3);
 
