@@ -299,6 +299,32 @@
             font-family: monospace;
         }
 
+        /* 6 free-text labels positioned around the barge's real bounding
+           box, sourced from Load_Editor!I1:I6 (see renderBargeCornerLabels). */
+        .barge-corner-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-main);
+            background: rgba(0,0,0,0.35);
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            z-index: 15;
+            pointer-events: none;
+        }
+
+        /* AFT / FWD tags at each end of the barge */
+        .barge-end-label {
+            position: absolute;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            z-index: 15;
+            pointer-events: none;
+        }
+
         .tank-control-box {
             position: absolute;
             background: var(--tank-box-bg);
@@ -307,7 +333,7 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 6px;
+            padding: 3px 4px;
             overflow: hidden;
             transition: box-shadow 0.3s, border-color 0.3s;
         }
@@ -335,12 +361,17 @@
             z-index: 5;
             flex-wrap: wrap;
             gap: 2px;
+            min-width: 0;
         }
 
         .tank-name {
             font-size: 10px;
             font-weight: bold;
             color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
         }
 
         .tank-coords-badge {
@@ -350,23 +381,29 @@
             border-radius: 3px;
             color: var(--accent-blue);
             font-family: monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
         }
 
         .tank-inputs {
             z-index: 5;
             display: flex;
             flex-direction: column;
-            gap: 3px;
+            gap: 2px;
+            min-width: 0;
         }
 
         .weight-input {
             width: 100%;
+            min-width: 0;
             background: var(--input-bg);
             border: 1px solid var(--panel-border);
             color: var(--text-main);
             text-align: center;
             font-size: 11px;
-            padding: 2px 0;
+            padding: 1px 0;
             border-radius: 4px;
         }
 
@@ -380,6 +417,9 @@
             text-align: center;
             color: var(--accent-blue);
             font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .tank-capacity-badge {
@@ -437,6 +477,9 @@
         }
 
         .tank-size-indicator {
+            /* Unused now — the capacity dot was removed since the card's
+               border colour already encodes the same capacity tier.
+               Rule kept commented for reference / quick revert.
             position: absolute;
             top: 2px;
             right: 2px;
@@ -444,6 +487,7 @@
             height: 8px;
             border-radius: 50%;
             z-index: 10;
+            */
         }
 
         .excel-row-badge {
@@ -494,8 +538,20 @@
         </div>
     </header>
     <div class="main-layout">
+        <div class="tank-grid-container">
+            <div class="section-title" style="justify-content: flex-end;">
+                <span class="toggle-container">
+                    <span>📐 Dimensions</span>
+                    <input type="checkbox" id="dimensionToggleCheckbox" checked onchange="toggleDimensionLabels()">
+                </span>
+            </div>
+            <div class="tank-grid-wrap" id="tankGridWrap">
+                <div class="tank-grid" id="tankContainer"></div>
+                <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
+            </div>
+        </div>
+
         <div class="attitude-panel">
-            <div class="section-title">Barge attitude · real coordinates</div>
             <div class="attitude-display-container">
                 <div class="visual-container">
                     <div class="visual-title">Trim (longitudinal)</div>
@@ -507,17 +563,6 @@
                     <div class="attitude-value-badge" id="lbl_HeelValue">0.00°</div>
                     <canvas id="heelCanvas" class="attitude-canvas" width="320" height="110"></canvas>
                 </div>
-            </div>
-        </div>
-
-        <div class="tank-grid-container">
-            <div class="section-title">
-                <span>🔹 Custom tank layout · each tank has unique size & position</span>
-                <span class="coords-note" id="bargeInfoNote">dimensions in meters · geometry linked to CREST_301!Q30:T (until blank)</span>
-            </div>
-            <div class="tank-grid-wrap" id="tankGridWrap">
-                <div class="tank-grid" id="tankContainer"></div>
-                <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
             </div>
         </div>
     </div>
@@ -583,11 +628,11 @@
         const AXLE_STYLE = {
             fillColorDark: '245,158,11',   // RGB for dark theme fill (amber)
             fillColorLight: '245,158,11',  // RGB for light theme fill
-            fillOpacityDark: 0.1,          // 0 = fully transparent, 1 = solid, Defaule 0.4
-            fillOpacityLight: 0.15,        // 0 = fully transparent, 1 = solid, Defaule 0.45
+            fillOpacityDark: 0.4,          // 0 = fully transparent, 1 = solid
+            fillOpacityLight: 0.45,
             borderColorDark: '#fbbf24',    // border/stroke colour, dark theme
             borderColorLight: '#b45309',   // border/stroke colour, light theme
-            borderWidth: 0.1               // border thickness in px, Default 1.5
+            borderWidth: 1.5               // border thickness in px
         };
 
         // Barge extents (derived from TANK_CONFIG once loaded). Default to a
@@ -665,6 +710,15 @@
         let currentHeelDegrees = 0.0;
         let trailerAxles = []; // [{ name, x, y }]
         let showTrailer = true;  // new state for trailer toggle
+
+        // 6 free-text labels positioned around the barge, sourced from
+        // Load_Editor!I1:I6:
+        //   I1 = top-left, I2 = top-center, I3 = top-right,
+        //   I4 = bottom-left, I5 = bottom-center, I6 = bottom-right
+        // "Top/bottom" = PORT/STBD edges (Y axis), "left/center/right" =
+        // AFT/midship/FWD (X axis), matching the barge's real bounding box
+        // (not the quay wall).
+        let bargeCornerLabels = ['', '', '', '', '', ''];
 
         // tank data store (synced with config) — (re)built whenever
         // TANK_CONFIG is (re)built from CREST_301.
@@ -827,6 +881,68 @@
         }
 
         // ============================================================
+        // 2d. BARGE HULL OUTLINE (plan view)
+        //     Drawn as one SVG behind the tanks, sized/positioned via the
+        //     SAME worldToScreen() mapping. Shape per the reference plan
+        //     sketch: the TOP edge runs flat, full length, corner to
+        //     corner (no taper at all on top). Both bottom corners are
+        //     cut on a diagonal up to those same top corners — the bow
+        //     (FWD/right) cut is a sharp point with no rounding, while the
+        //     stern (AFT/left) cut has a small rounded fillet where it
+        //     meets the flat bottom edge.
+        // ============================================================
+        function renderBargeOutline(container) {
+            const old = container.querySelector('.barge-outline-svg');
+            if (old) old.remove();
+
+            const tl = worldToScreen(BARGE_X_MIN, BARGE_Y_MAX); // AFT/PORT corner
+            const br = worldToScreen(BARGE_X_MAX, BARGE_Y_MIN); // FWD/STBD corner
+            const left = tl.sx, top = tl.sy, right = br.sx, bottom = br.sy;
+            const w = right - left, h = bottom - top;
+            if (w <= 0 || h <= 0) return;
+
+            // How far along the BOTTOM edge each diagonal cut reaches,
+            // measured inward from its respective corner.
+            const bowTaper = w * 0.10;     // FWD/right: sharp diagonal cut
+            const sternCut = w * 0.09;     // AFT/left: diagonal cut...
+            const sternRound = h * 0.18;   // ...blended into this small fillet
+
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(svgNS, 'svg');
+            svg.setAttribute('class', 'barge-outline-svg');
+            svg.setAttribute('width', w);
+            svg.setAttribute('height', h);
+            svg.style.position = 'absolute';
+            svg.style.left = left + 'px';
+            svg.style.top = top + 'px';
+            svg.style.zIndex = '0';
+            svg.style.pointerEvents = 'none';
+            svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+            // Path: top-left -> top-right (flat) -> bow diagonal down to
+            // bottom (sharp) -> flat bottom back toward the stern ->
+            // rounded fillet -> stern diagonal back up to top-left (close).
+            const path = document.createElementNS(svgNS, 'path');
+            const d = [
+                `M 0 0`,
+                `L ${w} 0`,
+                `L ${w - bowTaper} ${h}`,
+                `L ${sternCut + sternRound} ${h}`,
+                `Q ${sternCut} ${h} ${sternCut * 0.3} ${h - sternRound * 0.8}`,
+                `L 0 0`,
+                'Z'
+            ].join(' ');
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'rgba(56,189,248,0.03)');
+            path.setAttribute('stroke', 'var(--accent-blue)');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-opacity', '0.55');
+            svg.appendChild(path);
+
+            container.appendChild(svg);
+        }
+
+        // ============================================================
         // 3. RENDER TANKS — TRUE-TO-SCALE PLAN VIEW
         //    Every tank is absolutely positioned via worldToScreen() from
         //    its REAL x/y/width/height (sourced from CREST_301 Q:T). This
@@ -842,6 +958,7 @@
             if (!totalTanks) return;
 
             sizeTankPlanView();
+            renderBargeOutline(container);
 
             const { scaleX, scaleY } = getPlanScale();
             // --tank-gap is now a visual INSET (in px) applied to every side
@@ -864,8 +981,6 @@
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
                     <div class="quay-title">QUAY WALL</div>
-                    <div class="quay-dims">L=${QUAY_LENGTH}m · W=${QUAY_WIDTH}m</div>
-                    <div class="quay-coords-badge">X: ${QUAY_X_START.toFixed(1)} .. ${QUAY_X_END.toFixed(1)}</div>
                 `;
             container.appendChild(quayBox);
 
@@ -902,49 +1017,127 @@
                 box.style.width = pxW + 'px';
                 box.style.height = pxH + 'px';
 
-                // border colour by capacity
+                // Border colour encodes capacity tier (see getTankColor).
+                // (A duplicate small dot used to repeat this same colour in
+                // the corner — removed since it carried no extra
+                // information beyond what the border already shows.)
                 const borderColor = getTankColor(cfg.capacity);
                 box.style.borderColor = borderColor;
                 box.style.borderWidth = '2px';
 
-                // capacity dot
-                const dot = document.createElement('span');
-                dot.className = 'tank-size-indicator';
-                dot.style.background = borderColor;
-                box.appendChild(dot);
-
-                // Below a certain rendered size, the full input UI won't
-                // fit — fall back to a compact label-only view, but the
-                // box's drawn footprint stays exactly true-to-scale.
-                const compact = pxW < 60 || pxH < 50;
-
-                box.innerHTML += compact ? `
-                        <div class="tank-water-level" style="height: ${pct}%"></div>
-                        <div class="tank-header" style="font-size:7px;">
-                            <span class="tank-name" style="font-size:7px;">${cfg.name}</span>
-                        </div>
-                    ` : `
+                // Every tank renders the SAME full-detail template
+                // regardless of its true-to-scale pixel size — no more
+                // compact/stripped-down fallback for narrow tanks (e.g.
+                // WB01-style bays). Font sizes are kept small and the box
+                // uses flex layout so content still fits at small sizes;
+                // the box's drawn footprint itself stays exactly to scale.
+                box.innerHTML += `
                         <div class="tank-water-level" style="height: ${pct}%"></div>
                         <div class="tank-header">
                             <span class="tank-name">${cfg.name}</span>
-                            <span class="tank-coords-badge">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m</span>
+                            <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(1)}×${geo.height.toFixed(1)}m · Row ${excelRow}</span>
                         </div>
                         <div class="tank-inputs">
-                            <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted);">
-                                <span>Row ${excelRow}</span>
-                                <span class="tank-capacity-badge">${cfg.capacity}t</span>
-                            </div>
                             <input type="number" step="any" class="weight-input"
                                    id="txt_Row${cfg.id}" value="${weight}"
                                    onchange="updateTankFill(${cfg.id}, this.value)">
                             <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                ${weight} (${pctString})
+                                ${weight} (${pctString}) · Cap ${cfg.capacity}t
                             </div>
                         </div>
                     `;
-                box.title = `${cfg.name} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
+                box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
+
+            renderBargeCornerLabels(container);
+            applyDimensionVisibility();
+        }
+
+        // ============================================================
+        // 3a2. BARGE CORNER/EDGE LABELS (Load_Editor!I1:I6) + AFT/FWD TAGS
+        //      Positioned against the barge's real bounding box (not the
+        //      quay), using the same worldToScreen() mapping as everything
+        //      else, so they stay aligned to the true geometry.
+        // ============================================================
+        function renderBargeCornerLabels(container) {
+            // Remove any previously-rendered labels before redrawing
+            container.querySelectorAll('.barge-corner-label, .barge-end-label').forEach(el => el.remove());
+
+            const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+
+            // Anchor points (x, y) for each of the 6 Load_Editor labels,
+            // using the barge's real extents as the reference frame.
+            const anchors = [
+                { text: bargeCornerLabels[0], x: BARGE_X_MIN, y: BARGE_Y_MAX, h: 'left',   v: 'top' },    // I1 top-left
+                { text: bargeCornerLabels[1], x: midX,        y: BARGE_Y_MAX, h: 'center', v: 'top' },    // I2 top-center
+                { text: bargeCornerLabels[2], x: BARGE_X_MAX, y: BARGE_Y_MAX, h: 'right',  v: 'top' },    // I3 top-right
+                { text: bargeCornerLabels[3], x: BARGE_X_MIN, y: BARGE_Y_MIN, h: 'left',   v: 'bottom' }, // I4 bottom-left
+                { text: bargeCornerLabels[4], x: midX,        y: BARGE_Y_MIN, h: 'center', v: 'bottom' }, // I5 bottom-center
+                { text: bargeCornerLabels[5], x: BARGE_X_MAX, y: BARGE_Y_MIN, h: 'right',  v: 'bottom' }  // I6 bottom-right
+            ];
+
+            anchors.forEach(a => {
+                if (!a.text) return; // skip empty Excel cells
+                const p = worldToScreen(a.x, a.y);
+                const lbl = document.createElement('div');
+                lbl.className = 'barge-corner-label';
+                lbl.textContent = a.text;
+                lbl.style.position = 'absolute';
+                lbl.style.top = p.sy + 'px';
+                lbl.style.left = p.sx + 'px';
+                // Nudge off the exact corner point and align text so the
+                // label sits just inside the barge outline rather than
+                // straddling the edge.
+                const padPx = 4;
+                if (a.h === 'left') { lbl.style.left = (p.sx + padPx) + 'px'; lbl.style.transform = 'translateX(0)'; lbl.style.textAlign = 'left'; }
+                else if (a.h === 'right') { lbl.style.left = (p.sx - padPx) + 'px'; lbl.style.transform = 'translateX(-100%)'; lbl.style.textAlign = 'right'; }
+                else { lbl.style.transform = 'translateX(-50%)'; lbl.style.textAlign = 'center'; }
+                if (a.v === 'top') { lbl.style.top = (p.sy + padPx) + 'px'; }
+                else { lbl.style.top = (p.sy - padPx) + 'px'; lbl.style.transform += ' translateY(-100%)'; }
+                container.appendChild(lbl);
+            });
+
+            // AFT / FWD tags at each end of the barge, vertically centered
+            const aftP = worldToScreen(BARGE_X_MIN, (BARGE_Y_MIN + BARGE_Y_MAX) / 2);
+            const fwdP = worldToScreen(BARGE_X_MAX, (BARGE_Y_MIN + BARGE_Y_MAX) / 2);
+
+            const aftLbl = document.createElement('div');
+            aftLbl.className = 'barge-end-label';
+            aftLbl.textContent = 'AFT';
+            aftLbl.style.left = (aftP.sx - 6) + 'px';
+            aftLbl.style.top = aftP.sy + 'px';
+            aftLbl.style.transform = 'translate(-100%, -50%) rotate(-90deg)';
+            container.appendChild(aftLbl);
+
+            const fwdLbl = document.createElement('div');
+            fwdLbl.className = 'barge-end-label';
+            fwdLbl.textContent = 'FWD';
+            fwdLbl.style.left = (fwdP.sx + 6) + 'px';
+            fwdLbl.style.top = fwdP.sy + 'px';
+            fwdLbl.style.transform = 'translate(0, -50%) rotate(90deg)';
+            container.appendChild(fwdLbl);
+        }
+
+        // ============================================================
+        // 3b. DIMENSION LABEL VISIBILITY TOGGLE
+        //     Shows/hides each tank's W×H badge (the on-card dimension
+        //     label). The Excel "Row 14..40" reference is in box.title
+        //     (hover tooltip) rather than a separate visible line, so
+        //     toggling dimensions hides/shows that info as one unit.
+        // ============================================================
+        let showDimensions = true;
+
+        function applyDimensionVisibility() {
+            document.querySelectorAll('.tank-dim-label').forEach(el => {
+                el.style.display = showDimensions ? '' : 'none';
+            });
+        }
+
+        function toggleDimensionLabels() {
+            const checked = document.getElementById('dimensionToggleCheckbox').checked;
+            showDimensions = checked;
+            applyDimensionVisibility();
         }
 
         // ============================================================
@@ -1130,6 +1323,10 @@
                     cellTrim.load("values");
                     cellHeel.load("values");
 
+                    // 6 barge corner/edge labels: Load_Editor!I1:I6
+                    const rangeCornerLabels = editorSheet.getRange("I1:I6");
+                    rangeCornerLabels.load("values");
+
                     // Trailer axle X/Y block: E124:F(124+N)
                     const axleEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
                     const rangeAxles = editorSheet.getRange(`E${AXLE_START_ROW}:F${axleEndRow}`);
@@ -1140,6 +1337,7 @@
                     BARGE_NAME = crestSheet.name || CREST_SHEET_NAME;
                     currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
+                    bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
 
                     // --- Parse CREST_301 geometry rows until first fully-blank row ---
                     const crestValues = rangeCrest.values;
@@ -1289,6 +1487,7 @@
             }));
 
             BARGE_NAME = CREST_SHEET_NAME; // demo mode: same name as the real source sheet
+            bargeCornerLabels = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6']; // demo placeholders for Load_Editor!I1:I6
             TANK_CONFIG = buildTankConfigFromCrest(mockCrestRows, mockNameWeightRows);
             recomputeBargeExtents();
             rebuildTankDataFromConfig();
