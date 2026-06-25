@@ -303,12 +303,15 @@
             border-radius: 6px;
             position: relative;
             height: 105px;
+            width: 100%;
+            align-self: stretch;
+            justify-self: stretch;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             padding: 8px;
             overflow: hidden;
-            transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+            transition: box-shadow 0.3s, border-color 0.3s;
         }
 
             .tank-control-box:hover {
@@ -567,6 +570,28 @@
         const AXLE_START_ROW = 124;
         const AXLE_MAX_ROWS = 60;
 
+        // Trailer axle rectangle appearance — edit these values to change
+        // colour, transparency, or border of the amber overlay rectangles.
+        // No other code needs to change; drawAxleOverlay() reads this object.
+        //
+        //   fillColorDark / fillColorLight : "R,G,B" string, e.g. "239,68,68" for red
+        //   fillOpacityDark / fillOpacityLight : 0 (invisible) .. 1 (solid fill)
+        //   borderColorDark / borderColorLight : any CSS colour, e.g. "#22d3ee"
+        //   borderWidth : stroke thickness in pixels (0 = no border at all)
+        //
+        // Example — solid red, no transparency, thicker cyan border:
+        //   fillColorDark: '239,68,68', fillOpacityDark: 1,
+        //   borderColorDark: '#22d3ee', borderWidth: 3
+        const AXLE_STYLE = {
+            fillColorDark: '245,158,11',   // RGB for dark theme fill (amber)
+            fillColorLight: '245,158,11',  // RGB for light theme fill
+            fillOpacityDark: 0.4,          // 0 = fully transparent, 1 = solid
+            fillOpacityLight: 0.45,
+            borderColorDark: '#fbbf24',    // border/stroke colour, dark theme
+            borderColorLight: '#b45309',   // border/stroke colour, light theme
+            borderWidth: 1.5               // border thickness in px
+        };
+
         // Barge extents (derived from TANK_CONFIG once loaded). Default to a
         // sane placeholder range until the real CREST_301 data arrives.
         let BARGE_X_MIN = 0;
@@ -586,14 +611,42 @@
             BARGE_Y_MAX = Math.max(...TANK_CONFIG.map(t => t.y_end));
         }
 
-        // Total barge length = sum of each tank's own width (the X-direction
-        // span of every tank, added together) — NOT just the outer bounding
-        // box, since tanks may have gaps between them.
-        // Total barge width = sum of each tank's own height (Y-direction span).
+        // Total barge length = sum of each DISTINCT COLUMN's width, counted
+        // ONCE per column — a "column" being a group of tanks that share the
+        // same X-span (x_start/x_end), e.g. Port/Centre/Starboard tanks in
+        // the same bay. We detect columns by clustering on (x_start, x_end)
+        // rather than assuming a fixed "every GRID_ROWS tanks = 1 column",
+        // since real CREST_301 data may not be perfectly grouped that way
+        // (e.g. 8 bays of one size + 1 different-sized bay).
+        //
+        // Total barge width = sum of each DISTINCT ROW's height, counted
+        // ONCE per row — a "row" being tanks that share the same Y-span
+        // (y_start/y_end) across the barge's beam (e.g. Port row, Centre
+        // row, Starboard row).
         function computeTotalTankSpan() {
-            const totalLength = TANK_CONFIG.reduce((sum, t) => sum + Math.abs(t.width), 0);
-            const totalWidth = TANK_CONFIG.reduce((sum, t) => sum + Math.abs(t.height), 0);
-            return { totalLength, totalWidth };
+            if (!TANK_CONFIG.length) return { totalLength: 0, totalWidth: 0, numCols: 0, numRows: 0 };
+
+            // Round to avoid floating-point near-duplicates creating false
+            // distinct groups (e.g. 9.143999999 vs 9.144).
+            const key = v => Math.round(v * 1000) / 1000;
+
+            // --- Columns: cluster by (x_start, x_end) ---
+            const colMap = new Map();
+            TANK_CONFIG.forEach(t => {
+                const k = `${key(t.x_start)}_${key(t.x_end)}`;
+                if (!colMap.has(k)) colMap.set(k, Math.abs(t.width));
+            });
+            const totalLength = [...colMap.values()].reduce((sum, w) => sum + w, 0);
+
+            // --- Rows: cluster by (y_start, y_end) ---
+            const rowMap = new Map();
+            TANK_CONFIG.forEach(t => {
+                const k = `${key(t.y_start)}_${key(t.y_end)}`;
+                if (!rowMap.has(k)) rowMap.set(k, Math.abs(t.height));
+            });
+            const totalWidth = [...rowMap.values()].reduce((sum, h) => sum + h, 0);
+
+            return { totalLength, totalWidth, numCols: colMap.size, numRows: rowMap.size };
         }
 
         // Update the on-screen note: "<Barge Name> · total length X m ×
@@ -601,9 +654,10 @@
         function updateBargeInfoNote() {
             const note = document.getElementById('bargeInfoNote');
             if (!note) return;
-            const { totalLength, totalWidth } = computeTotalTankSpan();
+            const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
             note.textContent =
-                `${BARGE_NAME} · total tank length ${totalLength.toFixed(1)}m × total tank width ${totalWidth.toFixed(1)}m ` +
+                `${BARGE_NAME} · total tank length ${totalLength.toFixed(1)}m (${numCols} cols) × ` +
+                `total tank width ${totalWidth.toFixed(1)}m (${numRows} rows) ` +
                 `· geometry linked to ${CREST_SHEET_NAME}!Q${CREST_START_ROW}:T (until blank)`;
         }
 
@@ -751,22 +805,23 @@
                 box.style.gridColumn = gridCol;
                 box.style.gridRow = gridRow;
 
-                // Visual size hint: scale width and height INDEPENDENTLY,
-                // each against the average of its own axis across all tanks.
-                // (Previously this used a single combined-area scale, which
-                // meant a tank with an unusual WIDTH also changed its
-                // apparent HEIGHT and vice versa — e.g. WB-01-PS.P /
-                // WB-01-C.C / WB-01-SB.S looked a different height than
-                // their row-mates purely because their footprint area
-                // differed, even when their real height was similar.
-                // Scaling each axis on its own keeps height comparisons
-                // honest and keeps every tank in a row visually level.)
-                const avgWidth = TANK_CONFIG.reduce((s, t) => s + Math.abs(t.width), 0) / TANK_CONFIG.length;
-                const avgHeight = TANK_CONFIG.reduce((s, t) => s + Math.abs(t.height), 0) / TANK_CONFIG.length;
-                const widthScale = Math.min(Math.max(0.25 + (geo.width / avgWidth) * 0.75, 0.7), 1.4);
-                const heightScale = Math.min(Math.max(0.25 + (geo.height / avgHeight) * 0.75, 0.7), 1.4);
-                box.style.transform = `scale(${widthScale}, ${heightScale})`;
-                box.style.transformOrigin = 'center center';
+                // Each card simply fills its own grid cell at 100% width and
+                // the grid's row height — NO per-tank scale-by-area sizing.
+                //
+                // (Previously, a card's width was set as a PERCENTAGE of its
+                // own grid cell, scaled against the AVERAGE width across all
+                // tanks. A narrower-than-average tank — e.g. a 6.1m column
+                // next to a run of 10.7m columns — would then only fill
+                // ~73% of its cell, leaving real estate empty inside that
+                // cell. That empty space sat right next to the normal
+                // --tank-gap, so the gap AFTER that narrow column looked
+                // noticeably bigger than every other gap, even though the
+                // actual CSS gap value never changed. Filling every cell at
+                // 100% removes that illusion — every gap you see is exactly
+                // --tank-gap, nothing more. Each tank's true real-world size
+                // is still shown honestly via the W×H label on the card.)
+                box.style.width = '100%';
+                box.style.height = '100%';
 
                 // border colour by capacity
                 const borderColor = getTankColor(cfg.capacity);
@@ -956,13 +1011,14 @@
                 const w = halfW * 2;
                 const h = halfH * 2;
 
-                // Solid fill, but semi-transparent: sits visually above the
-                // tank card (water level, label, input box all still show
-                // through), while clearly marking the axle's true footprint.
+                // Fill/border driven by AXLE_STYLE above — edit those
+                // constants to change colour, transparency, or border.
                 ctx.save();
-                ctx.fillStyle = isLight ? 'rgba(245,158,11,0.45)' : 'rgba(245,158,11,0.4)';
-                ctx.strokeStyle = isLight ? '#b45309' : '#fbbf24';
-                ctx.lineWidth = 1.5;
+                ctx.fillStyle = isLight
+                    ? `rgba(${AXLE_STYLE.fillColorLight},${AXLE_STYLE.fillOpacityLight})`
+                    : `rgba(${AXLE_STYLE.fillColorDark},${AXLE_STYLE.fillOpacityDark})`;
+                ctx.strokeStyle = isLight ? AXLE_STYLE.borderColorLight : AXLE_STYLE.borderColorDark;
+                ctx.lineWidth = AXLE_STYLE.borderWidth;
                 ctx.beginPath();
                 ctx.rect(x0, y0, w, h);
                 ctx.fill();
