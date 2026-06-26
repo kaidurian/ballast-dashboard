@@ -1241,7 +1241,7 @@
         // the label has no number, it's returned unchanged.
         function formatCornerLabelText(text) {
             if (text === null || text === undefined || text === '') return text;
-            return String(text).replace(/-?\d+(\.\d+)?/g, m => parseFloat(m).toFixed(1));
+            return String(text).replace(/-?\d+(\.\d+)?/g, m => parseFloat(m).toFixed(2));
         }
 
         // ============================================================
