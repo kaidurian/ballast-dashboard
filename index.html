@@ -323,20 +323,6 @@
         }
 
         /* PS (port side) / SB (starboard side) tags along the long edges */
-        .barge-side-label {
-            position: absolute;
-            font-size: 9px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            color: var(--accent-blue);
-            background: var(--badge-bg);
-            padding: 1px 5px;
-            border-radius: 3px;
-            white-space: nowrap;
-            z-index: 15;
-            pointer-events: none;
-        }
-
         /* Pump location marker — small dot + pump name, plotted at the
            matching tank's real-world location (see renderPumpMarkers). */
         .pump-marker {
@@ -456,6 +442,22 @@
             font-size: 11px;
             padding: 1px 0;
             border-radius: 4px;
+        }
+
+        /* Highlights the weight input when the entered value exceeds the
+           tank's rated capacity (see updateTankFill / isOverCapacity). */
+        .weight-input-over {
+            border-color: #ef4444 !important;
+            background: rgba(239,68,68,0.12) !important;
+            box-shadow: 0 0 0 1px rgba(239,68,68,0.5);
+        }
+
+        .tank-warning {
+            font-size: 8px;
+            font-weight: 700;
+            color: #ef4444;
+            text-align: center;
+            line-height: 1.2;
         }
 
             .weight-input:focus {
@@ -596,7 +598,7 @@
     </header>
     <div class="main-layout">
         <div class="tank-grid-container">
-            <div class="section-title" style="justify-content: space-between;">
+            <div class="section-title" style="justify-content: center; border-left: none; padding-left: 0;">
                 <div class="grid-attitude-mini">
                     <div class="grid-attitude-block">
                         <span class="grid-side-label" id="lbl_GridAFT">AFT</span>
@@ -678,11 +680,11 @@
         const AXLE_STYLE = {
             fillColorDark: '245,158,11',   // RGB for dark theme fill (amber)
             fillColorLight: '245,158,11',  // RGB for light theme fill
-            fillOpacityDark: 0.2,          // 0 = fully transparent, 1 = solid
-            fillOpacityLight: 0.25,
+            fillOpacityDark: 0.4,          // 0 = fully transparent, 1 = solid
+            fillOpacityLight: 0.45,
             borderColorDark: '#fbbf24',    // border/stroke colour, dark theme
             borderColorLight: '#b45309',   // border/stroke colour, light theme
-            borderWidth: 0.2               // border thickness in px
+            borderWidth: 1.5               // border thickness in px
         };
 
         // Barge extents (derived from TANK_CONFIG once loaded). Default to a
@@ -869,12 +871,20 @@
         // drops the "WB-" prefix and any trailing ".P"/".C"/".S" suffix.
         // Falls back to the original name unchanged if it doesn't match
         // this pattern, so other naming schemes still display correctly.
+        // Shortens long Excel tank names like "WB-01-PS.P" / "WB-01-C.C" /
+        // "WB-01-SB.S" down to "01-P" / "01-C" / "01-S" — keeps the bay
+        // number (with leading zero) and a single-letter Port/Centre/
+        // Starboard code, drops the "WB-" prefix and any trailing
+        // ".P"/".C"/".S" suffix. Falls back to the original name unchanged
+        // if it doesn't match this pattern, so other naming schemes still
+        // display correctly.
         function shortenTankName(name) {
             if (!name) return name;
             const m = String(name).match(/^WB-?(\d+)-(PS|SB|C)(?:\.[A-Z])?$/i);
             if (!m) return name;
             const num = m[1].padStart(2, '0');
-            const side = m[2].toUpperCase();
+            const sideMap = { PS: 'P', SB: 'S', C: 'C' };
+            const side = sideMap[m[2].toUpperCase()];
             return `${num}-${side}`;
         }
 
@@ -896,9 +906,9 @@
 
         // Quay wall real-world footprint (meters), positioned just aft/port
         // of the barge origin — matches the original "X: -1.2..-21.2" badge.
-        const QUAY_X_START = -11.2;
+        const QUAY_X_START = -21.2;
         const QUAY_X_END = -1.2;
-        const QUAY_LENGTH = 10;   // m
+        const QUAY_LENGTH = 20;   // m
         const QUAY_WIDTH = 60;    // m (drawn clipped to the plan height)
 
         // Sets the tank-grid container's actual pixel size to match the
@@ -1041,6 +1051,7 @@
                 const pct = tank ? tank.percent * 100 : 0;
                 const pctString = pct.toFixed(0) + '%';
                 const weight = tank ? tank.weight : 0;
+                const isOverCapacity = parseFloat(weight) > cfg.capacity;
 
                 // True rectangle corners from real-world geometry
                 const xStart = geo.x - geo.width / 2;
@@ -1086,12 +1097,13 @@
                             <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
                         </div>
                         <div class="tank-inputs">
-                            <input type="number" step="any" class="weight-input"
+                            <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
                                    id="txt_Row${cfg.id}" value="${weight}"
                                    onchange="updateTankFill(${cfg.id}, this.value)">
                             <div class="load-percentage-label" id="lbl_Load${cfg.id}">
                                 ${pctString} (Cap. ${cfg.capacity}t)
                             </div>
+                            <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
                         </div>
                     `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
@@ -1128,16 +1140,17 @@
 
             // Pushes labels fully OUTSIDE the barge's bounding box (above
             // the top edge, below the bottom edge) rather than inset just
-            // inside the corner — keeps them clear of the tanks and of the
-            // PS/SB side labels drawn just inside the hull edges.
-            const outsidePx = 16;
+            // inside the corner — keeps them clear of the tanks. Kept
+            // tight to the hull so there isn't a large dead gap between
+            // the label and the tank cards.
+            const outsidePx = 8;
 
             anchors.forEach(a => {
                 if (!a.text) return; // skip empty Excel cells
                 const p = worldToScreen(a.x, a.y);
                 const lbl = document.createElement('div');
                 lbl.className = 'barge-corner-label';
-                lbl.textContent = a.text;
+                lbl.textContent = formatCornerLabelText(a.text);
                 lbl.style.position = 'absolute';
                 lbl.style.left = p.sx + 'px';
                 if (a.h === 'left') { lbl.style.transform = 'translateX(0)'; lbl.style.textAlign = 'left'; }
@@ -1154,12 +1167,15 @@
                 container.appendChild(lbl);
             });
 
-            // AFT / FWD tags at each end of the barge, vertically centered
+            // AFT / FWD tags at each end of the barge, vertically centered.
+            // IDs let updateTrimHeelGridLabels() append the trim value
+            // after whichever end the trim is currently pulling down.
             const aftP = worldToScreen(BARGE_X_MIN, (BARGE_Y_MIN + BARGE_Y_MAX) / 2);
             const fwdP = worldToScreen(BARGE_X_MAX, (BARGE_Y_MIN + BARGE_Y_MAX) / 2);
 
             const aftLbl = document.createElement('div');
             aftLbl.className = 'barge-end-label';
+            aftLbl.id = 'lbl_PlanAFT';
             aftLbl.textContent = 'AFT';
             aftLbl.style.left = (aftP.sx - 6) + 'px';
             aftLbl.style.top = aftP.sy + 'px';
@@ -1168,32 +1184,38 @@
 
             const fwdLbl = document.createElement('div');
             fwdLbl.className = 'barge-end-label';
+            fwdLbl.id = 'lbl_PlanFWD';
             fwdLbl.textContent = 'FWD';
             fwdLbl.style.left = (fwdP.sx + 6) + 'px';
             fwdLbl.style.top = fwdP.sy + 'px';
             fwdLbl.style.transform = 'translate(0, -50%) rotate(90deg)';
             container.appendChild(fwdLbl);
 
-            // PS (port side) / SB (starboard side) labels along the long
-            // edges of the barge, centered along its length, sitting just
-            // inside the hull (PORT = +Y = top edge, STBD = -Y = bottom edge).
-            const psP = worldToScreen(midX, BARGE_Y_MAX);
-            const sbP = worldToScreen(midX, BARGE_Y_MIN);
+            // PS (port side) / SB (starboard side) — now placed OUTSIDE the
+            // hull in the SAME outside row as the I3 (top-right) and I6
+            // (bottom-right) corner labels, positioned just after them
+            // along that row, and styled identically to AFT/FWD (same
+            // class, same colour/font) rather than the old blue badge
+            // style. IDs let updateTrimHeelGridLabels() append the heel
+            // value after whichever side the heel is currently pulling down.
+            const psP = worldToScreen(BARGE_X_MAX, BARGE_Y_MAX);
+            const sbP = worldToScreen(BARGE_X_MAX, BARGE_Y_MIN);
 
             const psLbl = document.createElement('div');
-            psLbl.className = 'barge-side-label';
+            psLbl.className = 'barge-end-label';
+            psLbl.id = 'lbl_PlanPS';
             psLbl.textContent = 'PS';
-            psLbl.style.left = psP.sx + 'px';
-            psLbl.style.top = (psP.sy + 4) + 'px';
-            psLbl.style.transform = 'translate(-50%, 0)';
+            psLbl.style.left = (psP.sx + 28) + 'px';
+            psLbl.style.top = (psP.sy - outsidePx) + 'px';
+            psLbl.style.transform = 'translateY(-100%)';
             container.appendChild(psLbl);
 
             const sbLbl = document.createElement('div');
-            sbLbl.className = 'barge-side-label';
+            sbLbl.className = 'barge-end-label';
+            sbLbl.id = 'lbl_PlanSB';
             sbLbl.textContent = 'SB';
-            sbLbl.style.left = sbP.sx + 'px';
-            sbLbl.style.top = (sbP.sy - 4) + 'px';
-            sbLbl.style.transform = 'translate(-50%, -100%)';
+            sbLbl.style.left = (sbP.sx + 28) + 'px';
+            sbLbl.style.top = (sbP.sy + outsidePx) + 'px';
             container.appendChild(sbLbl);
         }
 
@@ -1202,6 +1224,15 @@
         // "01-PS" all compare equal regardless of separators/case.
         function normalizeTankName(name) {
             return String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        }
+
+        // Reduces any numeric value inside a Load_Editor!I1:I6 label to a
+        // single decimal place (e.g. "Draft 12.4567 m" -> "Draft 12.5 m",
+        // a bare "9.144" -> "9.1"), leaving any surrounding text as-is. If
+        // the label has no number, it's returned unchanged.
+        function formatCornerLabelText(text) {
+            if (text === null || text === undefined || text === '') return text;
+            return String(text).replace(/-?\d+(\.\d+)?/g, m => parseFloat(m).toFixed(1));
         }
 
         // ============================================================
@@ -1352,24 +1383,49 @@
             const fwdEl = document.getElementById('lbl_GridFWD');
             const psEl = document.getElementById('lbl_GridPS');
             const sbEl = document.getElementById('lbl_GridSB');
-            if (!aftEl || !fwdEl || !psEl || !sbEl) return;
 
             const trimAbs = Math.abs(currentTrimDegrees).toFixed(2) + '°';
             const heelAbs = Math.abs(currentHeelDegrees).toFixed(2) + '°';
 
             // Trim > 0 means AFT is down; trim < 0 means FWD is down
             // (matches the existing AFT TRIM / FWD TRIM text logic above).
-            aftEl.textContent = currentTrimDegrees > 0 ? `AFT ${trimAbs}` : 'AFT';
-            fwdEl.textContent = currentTrimDegrees < 0 ? `FWD ${trimAbs}` : 'FWD';
-            aftEl.classList.toggle('grid-side-label-active', currentTrimDegrees > 0);
-            fwdEl.classList.toggle('grid-side-label-active', currentTrimDegrees < 0);
+            if (aftEl && fwdEl) {
+                aftEl.textContent = currentTrimDegrees > 0 ? `AFT ${trimAbs}` : 'AFT';
+                fwdEl.textContent = currentTrimDegrees < 0 ? `FWD ${trimAbs}` : 'FWD';
+                aftEl.classList.toggle('grid-side-label-active', currentTrimDegrees > 0);
+                fwdEl.classList.toggle('grid-side-label-active', currentTrimDegrees < 0);
+            }
 
             // Heel > 0 means PORT (PS) is down; heel < 0 means STBD (SB) is down
             // (matches the existing PORT HEEL / STBD HEEL text logic above).
-            psEl.textContent = currentHeelDegrees > 0 ? `PS ${heelAbs}` : 'PS';
-            sbEl.textContent = currentHeelDegrees < 0 ? `SB ${heelAbs}` : 'SB';
-            psEl.classList.toggle('grid-side-label-active', currentHeelDegrees > 0);
-            sbEl.classList.toggle('grid-side-label-active', currentHeelDegrees < 0);
+            if (psEl && sbEl) {
+                psEl.textContent = currentHeelDegrees > 0 ? `PS ${heelAbs}` : 'PS';
+                sbEl.textContent = currentHeelDegrees < 0 ? `SB ${heelAbs}` : 'SB';
+                psEl.classList.toggle('grid-side-label-active', currentHeelDegrees > 0);
+                sbEl.classList.toggle('grid-side-label-active', currentHeelDegrees < 0);
+            }
+
+            // Same value-on-affected-side logic, applied to the plan-view
+            // AFT/FWD/PS/SB labels (rendered by renderBargeCornerLabels,
+            // which only exist once the tank grid has been drawn at least
+            // once — hence the null checks rather than an early return).
+            const planAft = document.getElementById('lbl_PlanAFT');
+            const planFwd = document.getElementById('lbl_PlanFWD');
+            const planPs = document.getElementById('lbl_PlanPS');
+            const planSb = document.getElementById('lbl_PlanSB');
+
+            if (planAft && planFwd) {
+                planAft.textContent = currentTrimDegrees > 0 ? `AFT ${trimAbs}` : 'AFT';
+                planFwd.textContent = currentTrimDegrees < 0 ? `FWD ${trimAbs}` : 'FWD';
+                planAft.classList.toggle('grid-side-label-active', currentTrimDegrees > 0);
+                planFwd.classList.toggle('grid-side-label-active', currentTrimDegrees < 0);
+            }
+            if (planPs && planSb) {
+                planPs.textContent = currentHeelDegrees > 0 ? `PS ${heelAbs}` : 'PS';
+                planSb.textContent = currentHeelDegrees < 0 ? `SB ${heelAbs}` : 'SB';
+                planPs.classList.toggle('grid-side-label-active', currentHeelDegrees > 0);
+                planSb.classList.toggle('grid-side-label-active', currentHeelDegrees < 0);
+            }
         }
 
         // ============================================================
@@ -1716,6 +1772,7 @@
             const cfg = TANK_CONFIG.find(t => t.id === row);
             if (!cfg) return;
             const mockMax = cfg.capacity || 1000;
+            const isOverCapacity = parsed > mockMax;
             let targetPct = Math.max(0, Math.min(parsed / mockMax, 1.0));
             const pctNum = targetPct * 100;
 
@@ -1723,6 +1780,8 @@
             if (!card) return;
             const water = card.querySelector('.tank-water-level');
             const label = document.getElementById(`lbl_Load${row}`);
+            const input = document.getElementById(`txt_Row${row}`);
+            const warning = document.getElementById(`warn_Row${row}`);
             if (water) {
                 water.style.height = `${pctNum}%`;
                 water.classList.toggle('tank-water-high', pctNum >= 85);
@@ -1730,6 +1789,18 @@
             if (label) {
                 const pctStr = pctNum.toFixed(0) + '%';
                 label.textContent = `${pctStr} (Cap. ${cfg.capacity}t)`;
+            }
+            // Over-capacity warning: flag the input itself and show an
+            // inline message, without silently hiding that the entered
+            // value exceeds the tank's rated capacity (the water level
+            // still visually caps at 100% since the tank can't physically
+            // hold more than that).
+            if (input) input.classList.toggle('weight-input-over', isOverCapacity);
+            if (warning) {
+                warning.style.display = isOverCapacity ? '' : 'none';
+                warning.textContent = isOverCapacity
+                    ? `⚠ Exceeds capacity (${cfg.capacity}t)`
+                    : '';
             }
 
             if (!isOfficeInitialized) return;
