@@ -74,12 +74,15 @@
 
         header {
             display: flex;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
             padding-bottom: 8px;
             border-bottom: 1px solid var(--panel-border);
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 16px;
+            max-width: 900px;
+            margin: 0 auto;
+            width: 100%;
         }
 
             header h1 {
@@ -194,7 +197,11 @@
         }
 
         .grid-side-label-active {
-            color: #f97316;
+            color: #fff7ed;
+            background: #f97316;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 800;
         }
 
         .attitude-canvas-mini {
@@ -680,11 +687,11 @@
         const AXLE_STYLE = {
             fillColorDark: '245,158,11',   // RGB for dark theme fill (amber)
             fillColorLight: '245,158,11',  // RGB for light theme fill
-            fillOpacityDark: 0.4,          // 0 = fully transparent, 1 = solid
-            fillOpacityLight: 0.45,
+            fillOpacityDark: 0.2,          // 0 = fully transparent, 1 = solid
+            fillOpacityLight: 0.25,
             borderColorDark: '#fbbf24',    // border/stroke colour, dark theme
             borderColorLight: '#b45309',   // border/stroke colour, light theme
-            borderWidth: 1.5               // border thickness in px
+            borderWidth: 0.2               // border thickness in px
         };
 
         // Barge extents (derived from TANK_CONFIG once loaded). Default to a
@@ -905,10 +912,10 @@
         const PLAN_MARGIN_PX = 10;      // breathing room around the whole plan
 
         // Quay wall real-world footprint (meters), positioned just aft/port
-        // of the barge origin — matches the original "X: -1.2..-21.2" badge.
-        const QUAY_X_START = -21.2;
+        // of the barge origin.
+        const QUAY_X_START = -11.2;
         const QUAY_X_END = -1.2;
-        const QUAY_LENGTH = 20;   // m
+        const QUAY_LENGTH = 10;   // m
         const QUAY_WIDTH = 60;    // m (drawn clipped to the plan height)
 
         // Sets the tank-grid container's actual pixel size to match the
@@ -1191,22 +1198,23 @@
             fwdLbl.style.transform = 'translate(0, -50%) rotate(90deg)';
             container.appendChild(fwdLbl);
 
-            // PS (port side) / SB (starboard side) — now placed OUTSIDE the
-            // hull in the SAME outside row as the I3 (top-right) and I6
-            // (bottom-right) corner labels, positioned just after them
+            // PS (port side) / SB (starboard side) — placed OUTSIDE the
+            // hull in the SAME outside row as the I2 (top-center) and I5
+            // (bottom-center) corner labels, positioned just after them
             // along that row, and styled identically to AFT/FWD (same
             // class, same colour/font) rather than the old blue badge
             // style. IDs let updateTrimHeelGridLabels() append the heel
             // value after whichever side the heel is currently pulling down.
-            const psP = worldToScreen(BARGE_X_MAX, BARGE_Y_MAX);
-            const sbP = worldToScreen(BARGE_X_MAX, BARGE_Y_MIN);
+            const psP = worldToScreen(midX, BARGE_Y_MAX);
+            const sbP = worldToScreen(midX, BARGE_Y_MIN);
 
             const psLbl = document.createElement('div');
             psLbl.className = 'barge-end-label';
             psLbl.id = 'lbl_PlanPS';
             psLbl.textContent = 'PS';
-            psLbl.style.left = (psP.sx + 28) + 'px';
+            psLbl.style.left = (psP.sx + 36) + 'px';
             psLbl.style.top = (psP.sy - outsidePx) + 'px';
+            psLbl.style.textAlign = 'left';
             psLbl.style.transform = 'translateY(-100%)';
             container.appendChild(psLbl);
 
@@ -1214,8 +1222,9 @@
             sbLbl.className = 'barge-end-label';
             sbLbl.id = 'lbl_PlanSB';
             sbLbl.textContent = 'SB';
-            sbLbl.style.left = (sbP.sx + 28) + 'px';
+            sbLbl.style.left = (sbP.sx + 36) + 'px';
             sbLbl.style.top = (sbP.sy + outsidePx) + 'px';
+            sbLbl.style.textAlign = 'left';
             container.appendChild(sbLbl);
         }
 
