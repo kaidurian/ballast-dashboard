@@ -598,7 +598,7 @@
             </div>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
-                <input type="checkbox" id="dimensionToggleCheckbox" checked onchange="toggleDimensionLabels()">
+                <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
             </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
@@ -1280,7 +1280,7 @@
         //     (hover tooltip) rather than a separate visible line, so
         //     toggling dimensions hides/shows that info as one unit.
         // ============================================================
-        let showDimensions = true;
+        let showDimensions = false;
 
         function applyDimensionVisibility() {
             document.querySelectorAll('.tank-dim-label').forEach(el => {
