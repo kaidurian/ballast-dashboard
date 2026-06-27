@@ -206,26 +206,21 @@
             border: 1px solid var(--panel-border);
         }
 
-        /* Combine both label styles */
-.grid-side-label,
-.barge-end-label {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    transition: all 0.3s ease;
-}
+        .grid-side-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
 
-/* Active state for both */
-.grid-side-label-active,
-.barge-end-label-active {
-    color: #fff7ed !important;
-    background: #f97316 !important;
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-weight: 800;
-}
+        .grid-side-label-active {
+            color: #fff7ed;
+            background: #f97316;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 800;
+        }
 
         .attitude-canvas-mini {
             background: #0b0f19;
@@ -340,7 +335,19 @@
             z-index: 15;
             pointer-events: none;
         }
-      
+
+        /* AFT / FWD tags at each end of the barge */
+        .barge-end-label {
+            position: absolute;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #ffffff;
+            white-space: nowrap;
+            z-index: 15;
+            pointer-events: none;
+        }
+
         /* PS (port side) / SB (starboard side) tags along the long edges */
         /* Pump location marker — small dot + pump name, plotted at the
            matching tank's real-world location (see renderPumpMarkers). */
