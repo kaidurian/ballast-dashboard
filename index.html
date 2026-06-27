@@ -598,60 +598,60 @@
     </style>
 </head>
 <body class="light-theme">
-    <header>
-    <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; width: 100%; justify-content: space-between;">
-        <!-- Left side: Title and barge info -->
-        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-            <div>
-                <h1 style="font-size: 13px; font-weight: 600; letter-spacing: 0.3px; color: var(--text-main); margin: 0;">
-                    ⚓ Barge Ballast
-                </h1>
+            <header style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--panel-border); max-width: 900px; margin: 0 auto; width: 100%;">
+            <!-- Title -->
+            <h1 style="font-size: 13px; font-weight: 600; color: var(--text-main); margin: 0; white-space: nowrap;">
+                ⚓ Barge Ballast
+            </h1>
+
+            <!-- Barge Info - Compact -->
+            <div id="bargeInfoNote" style="font-size: 10px; color: var(--text-muted); margin: 0; white-space: nowrap;">
+                CREST_301 · 91.44m × 27.43m (9×3)
             </div>
-            <div class="header-subtitle" id="bargeInfoNote" style="font-size: 10px; color: var(--text-muted); margin: 0;">
-                CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)
-            </div>
-        </div>
-        
-        <!-- Right side: Controls -->
-        <div class="header-controls" style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-            <!-- Day/Night Toggle -->
-            <div class="theme-toggle-container">
-                <span>Day</span>
-                <label class="switch">
-                    <input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()">
-                    <span class="slider"></span>
+
+            <div style="flex: 1; min-width: 10px;"></div>
+
+            <!-- Controls -->
+            <div class="header-controls" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10px;">
+                <!-- Day/Night Toggle -->
+                <div class="theme-toggle-container" style="display: flex; align-items: center; gap: 4px; font-size: 9px;">
+                    <span>Day</span>
+                    <label class="switch" style="width: 28px; height: 16px; margin: 0;">
+                        <input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()" style="opacity: 0; width: 0; height: 0;">
+                        <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #242f41; transition: .3s; border-radius: 20px; border: 1px solid var(--panel-border);"></span>
+                    </label>
+                    <span>Night</span>
+                </div>
+
+                <!-- Trailer Toggle -->
+                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: bold; color: var(--text-muted);">
+                    <span>🚛</span>
+                    <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()" style="accent-color: var(--accent-blue); width: 13px; height: 13px; cursor: pointer; margin: 0;">
                 </label>
-                <span>Night</span>
+
+                <!-- Dimensions Toggle -->
+                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: bold; color: var(--text-muted);">
+                    <span>📐</span>
+                    <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()" style="accent-color: var(--accent-blue); width: 13px; height: 13px; cursor: pointer; margin: 0;">
+                </label>
+
+                <!-- Pump Toggle -->
+                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: bold; color: var(--text-muted);">
+                    <span>⚡</span>
+                    <input type="checkbox" id="pumpToggleCheckbox" checked onchange="togglePumpMarkers()" style="accent-color: var(--accent-blue); width: 13px; height: 13px; cursor: pointer; margin: 0;">
+                </label>
+
+                <!-- Status -->
+                <div id="connectionStatus" style="display: flex; align-items: center; gap: 3px; font-size: 9px; color: var(--text-muted);">
+                    <span style="color: #ef4444;">●</span>
+                </div>
+
+                <!-- Sync Button -->
+                <button class="sync-btn" onclick="pullExcelTankData()" style="background: transparent; border: 1px solid var(--panel-border); color: var(--accent-blue); padding: 1px 8px; font-size: 10px; border-radius: 3px; cursor: pointer; transition: 0.2s; line-height: 1.4;">
+                    ↻
+                </button>
             </div>
-            
-            <!-- Trailer Toggle -->
-            <div class="toggle-container">
-                <span>🚛 Trailer</span>
-                <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
-            </div>
-            
-            <!-- Dimensions Toggle -->
-            <div class="toggle-container">
-                <span>📐 Dimensions</span>
-                <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
-            </div>
-            
-            <!-- Pump-only Toggle (NEW) -->
-            <div class="toggle-container">
-                <span>⚡ Pump-only</span>
-                <input type="checkbox" id="pumpToggleCheckbox" onchange="togglePumpMarkers()">
-            </div>
-            
-            <!-- Status -->
-            <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">
-                Status: <span style="color: #ef4444;">● Offline</span>
-            </div>
-            
-            <!-- Sync Button -->
-            <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
-        </div>
-    </div>
-</header>
+        </header>
     <div class="main-layout">
         <div class="tank-grid-container">
             <div class="section-title" style="justify-content: center; border-left: none; padding-left: 0;">
@@ -802,14 +802,23 @@
 
         // Update the on-screen header subtitle:
         // "<Barge Name> · total length X.XXm (N tanks) × total tank width Y.YYm (M tanks)"
-        const note = document.getElementById('bargeInfoNote');
-        if (note) {
-                     note.remove();           
+        function updateBargeInfoNote() {
+            const note = document.getElementById('bargeInfoNote');
+            if (!note) return;
+
+            const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
+            // Compact format: "CREST_301 · 91.44m × 27.43m (9×3)"
+            note.textContent = `${BARGE_NAME} · ${totalLength.toFixed(2)}m × ${totalWidth.toFixed(2)}m (${numCols}×${numRows})`;
+
+            // Also update window title if desired
+            updateWindowTitle();
         }
 
-        // Update window title
-        updateWindowTitle();
-}
+        // Add this function if you want to update the browser tab title too
+        function updateWindowTitle() {
+            const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
+            document.title = `⚓ Barge Ballast · ${BARGE_NAME} · ${totalLength.toFixed(2)}m × ${totalWidth.toFixed(2)}m (${numCols}×${numRows})`;
+        }
 
         // ---- state ----
         let isOfficeInitialized = false;
@@ -1957,15 +1966,6 @@
         window.addEventListener('load', () => {
             if (!isOfficeInitialized) generateMockSystemValues();
         });
-
-        // ============================================================
-        // 10. WINDOW TITLE WITH BARGE NAME AND DETAIL
-        // ============================================================
-        function updateWindowTitle() {
-            const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
-            const title = `⚓ Barge Ballast · ${BARGE_NAME} · ${totalLength.toFixed(2)}m × ${totalWidth.toFixed(2)}m (${numCols}×${numRows})`;
-            document.title = title;
-        }
     </script>
 </body>
 </html>
