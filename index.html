@@ -324,18 +324,10 @@
             font-size: 12px;
             font-weight: 700;
             letter-spacing: 1px;
-            color: var(--text-muted); /* Uses theme variable */
+            color: #ffffff;
             white-space: nowrap;
             z-index: 15;
             pointer-events: none;
-        }
-
-        .barge-end-label-active {
-            color: #fff7ed;
-            background: #f97316;
-            padding: 1px 4px;
-            border-radius: 3px;
-            font-weight: 800;
         }
 
         /* PS (port side) / SB (starboard side) tags along the long edges */
@@ -484,10 +476,10 @@
             line-height: 1.2;
         }
 
-        .weight-input:focus {
-            outline: none;
-            border-color: var(--accent-blue);
-        }
+            .weight-input:focus {
+                outline: none;
+                border-color: var(--accent-blue);
+            }
 
         .load-percentage-label {
             font-size: 9px;
@@ -598,60 +590,32 @@
     </style>
 </head>
 <body class="light-theme">
-            <header style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--panel-border); max-width: 900px; margin: 0 auto; width: 100%;">
-            <!-- Title -->
-            <h1 style="font-size: 13px; font-weight: 600; color: var(--text-main); margin: 0; white-space: nowrap;">
-                ⚓ Barge Ballast
-            </h1>
-
-            <!-- Barge Info - Compact -->
-            <div id="bargeInfoNote" style="font-size: 10px; color: var(--text-muted); margin: 0; white-space: nowrap;">
-                CREST_301 · 91.44m × 27.43m (9×3)
+    <header>
+        <div>
+            <h1>⚓ Barge Ballast</h1>
+            <div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        </div>
+        <div class="header-controls">
+            <div class="theme-toggle-container">
+                <span>Day</span>
+                <label class="switch"><input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()"><span class="slider"></span></label>
             </div>
-
-            <div style="flex: 1; min-width: 10px;"></div>
-
-            <!-- Controls -->
-            <div class="header-controls" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10px;">
-                <!-- Day/Night Toggle -->
-                <div class="theme-toggle-container" style="display: flex; align-items: center; gap: 4px; font-size: 9px;">
-                    <span>Day</span>
-                    <label class="switch" style="width: 28px; height: 16px; margin: 0;">
-                        <input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()" style="opacity: 0; width: 0; height: 0;">
-                        <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #242f41; transition: .3s; border-radius: 20px; border: 1px solid var(--panel-border);"></span>
-                    </label>
-                    <span>Night</span>
-                </div>
-
-                <!-- Trailer Toggle -->
-                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: bold; color: var(--text-muted);">
-                    <span>🚛</span>
-                    <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()" style="accent-color: var(--accent-blue); width: 13px; height: 13px; cursor: pointer; margin: 0;">
-                </label>
-
-                <!-- Dimensions Toggle -->
-                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: bold; color: var(--text-muted);">
-                    <span>📐</span>
-                    <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()" style="accent-color: var(--accent-blue); width: 13px; height: 13px; cursor: pointer; margin: 0;">
-                </label>
-
-                <!-- Pump Toggle -->
-                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 9px; font-weight: bold; color: var(--text-muted);">
-                    <span>⚡</span>
-                    <input type="checkbox" id="pumpToggleCheckbox" checked onchange="togglePumpMarkers()" style="accent-color: var(--accent-blue); width: 13px; height: 13px; cursor: pointer; margin: 0;">
-                </label>
-
-                <!-- Status -->
-                <div id="connectionStatus" style="display: flex; align-items: center; gap: 3px; font-size: 9px; color: var(--text-muted);">
-                    <span style="color: #ef4444;">●</span>
-                </div>
-
-                <!-- Sync Button -->
-                <button class="sync-btn" onclick="pullExcelTankData()" style="background: transparent; border: 1px solid var(--panel-border); color: var(--accent-blue); padding: 1px 8px; font-size: 10px; border-radius: 3px; cursor: pointer; transition: 0.2s; line-height: 1.4;">
-                    ↻
-                </button>
+            <div class="toggle-container">
+                <span>🚛 Trailer</span>
+                <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
             </div>
-        </header>
+            <div class="toggle-container">
+                <span>📐 Dimensions</span>
+                <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
+            </div>
+            <div class="toggle-container">
+                <span>⚡ Pump-only input</span>
+                <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
+            </div>
+            <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
+            <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
+        </div>
+    </header>
     <div class="main-layout">
         <div class="tank-grid-container">
             <div class="section-title" style="justify-content: center; border-left: none; padding-left: 0;">
@@ -802,22 +766,17 @@
 
         // Update the on-screen header subtitle:
         // "<Barge Name> · total length X.XXm (N tanks) × total tank width Y.YYm (M tanks)"
+        // Also pushes the same text (with the anchor) into the browser
+        // tab title, replacing the static "Barge Ballast" placeholder.
         function updateBargeInfoNote() {
             const note = document.getElementById('bargeInfoNote');
             if (!note) return;
-
             const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
-            // Compact format: "CREST_301 · 91.44m × 27.43m (9×3)"
-            note.textContent = `${BARGE_NAME} · ${totalLength.toFixed(2)}m × ${totalWidth.toFixed(2)}m (${numCols}×${numRows})`;
-
-            // Also update window title if desired
-            updateWindowTitle();
-        }
-
-        // Add this function if you want to update the browser tab title too
-        function updateWindowTitle() {
-            const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
-            document.title = `⚓ Barge Ballast · ${BARGE_NAME} · ${totalLength.toFixed(2)}m × ${totalWidth.toFixed(2)}m (${numCols}×${numRows})`;
+            const infoText =
+                `${BARGE_NAME} · total length ${totalLength.toFixed(2)}m (${numCols} tanks) × ` +
+                `total tank width ${totalWidth.toFixed(2)}m (${numRows} tanks)`;
+            note.textContent = infoText;
+            document.title = `⚓ Barge Ballast ${infoText}`;
         }
 
         // ---- state ----
@@ -1094,8 +1053,8 @@
             quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
-                        <div class="quay-title">QUAY</div>
-                    `;
+                    <div class="quay-title">QUAY</div>
+                `;
             container.appendChild(quayBox);
 
             // Render each tank at its TRUE real-world position and size
@@ -1149,21 +1108,21 @@
                 const waterClass = pct >= 85 ? 'tank-water-level tank-water-high' : 'tank-water-level';
                 const shortName = shortenTankName(cfg.name);
                 box.innerHTML += `
-                            <div class="${waterClass}" style="height: ${pct}%"></div>
-                            <div class="tank-header">
-                                <span class="tank-name">${shortName}</span>
-                                <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
+                        <div class="${waterClass}" style="height: ${pct}%"></div>
+                        <div class="tank-header">
+                            <span class="tank-name">${shortName}</span>
+                            <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
+                        </div>
+                        <div class="tank-inputs">
+                            <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
+                                   id="txt_Row${cfg.id}" value="${weight}"
+                                   onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
+                            <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                ${pctString} (Cap. ${cfg.capacity}t)
                             </div>
-                            <div class="tank-inputs">
-                                <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
-                                       id="txt_Row${cfg.id}" value="${weight}"
-                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
-                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                    ${pctString} (Cap. ${cfg.capacity}t)
-                                </div>
-                                <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
-                            </div>
-                        `;
+                            <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
+                        </div>
+                    `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
@@ -1188,12 +1147,12 @@
             // Anchor points (x, y) for each of the 6 Load_Editor labels,
             // using the barge's real extents as the reference frame.
             const anchors = [
-                { text: bargeCornerLabels[0], x: BARGE_X_MIN, y: BARGE_Y_MAX, h: 'left', v: 'top' },    // I1 top-left
-                { text: bargeCornerLabels[1], x: midX, y: BARGE_Y_MAX, h: 'center', v: 'top' },    // I2 top-center
-                { text: bargeCornerLabels[2], x: BARGE_X_MAX, y: BARGE_Y_MAX, h: 'right', v: 'top' },    // I3 top-right
-                { text: bargeCornerLabels[3], x: BARGE_X_MIN, y: BARGE_Y_MIN, h: 'left', v: 'bottom' }, // I4 bottom-left
-                { text: bargeCornerLabels[4], x: midX, y: BARGE_Y_MIN, h: 'center', v: 'bottom' }, // I5 bottom-center
-                { text: bargeCornerLabels[5], x: BARGE_X_MAX, y: BARGE_Y_MIN, h: 'right', v: 'bottom' }  // I6 bottom-right
+                { text: bargeCornerLabels[0], x: BARGE_X_MIN, y: BARGE_Y_MAX, h: 'left',   v: 'top' },    // I1 top-left
+                { text: bargeCornerLabels[1], x: midX,        y: BARGE_Y_MAX, h: 'center', v: 'top' },    // I2 top-center
+                { text: bargeCornerLabels[2], x: BARGE_X_MAX, y: BARGE_Y_MAX, h: 'right',  v: 'top' },    // I3 top-right
+                { text: bargeCornerLabels[3], x: BARGE_X_MIN, y: BARGE_Y_MIN, h: 'left',   v: 'bottom' }, // I4 bottom-left
+                { text: bargeCornerLabels[4], x: midX,        y: BARGE_Y_MIN, h: 'center', v: 'bottom' }, // I5 bottom-center
+                { text: bargeCornerLabels[5], x: BARGE_X_MAX, y: BARGE_Y_MIN, h: 'right',  v: 'bottom' }  // I6 bottom-right
             ];
 
             // Pushes labels fully OUTSIDE the barge's bounding box (above
@@ -1494,6 +1453,7 @@
             const heelAbs = Math.abs(currentHeelDegrees).toFixed(2) + '°';
 
             // Trim > 0 means AFT is down; trim < 0 means FWD is down
+            // (matches the existing AFT TRIM / FWD TRIM text logic above).
             if (aftEl && fwdEl) {
                 aftEl.textContent = currentTrimDegrees > 0 ? `AFT ${trimAbs}` : 'AFT';
                 fwdEl.textContent = currentTrimDegrees < 0 ? `FWD ${trimAbs}` : 'FWD';
@@ -1502,6 +1462,7 @@
             }
 
             // Heel > 0 means PORT (PS) is down; heel < 0 means STBD (SB) is down
+            // (matches the existing PORT HEEL / STBD HEEL text logic above).
             if (psEl && sbEl) {
                 psEl.textContent = currentHeelDegrees > 0 ? `PS ${heelAbs}` : 'PS';
                 sbEl.textContent = currentHeelDegrees < 0 ? `SB ${heelAbs}` : 'SB';
@@ -1509,7 +1470,10 @@
                 sbEl.classList.toggle('grid-side-label-active', currentHeelDegrees < 0);
             }
 
-            // Same logic for plan-view labels (barge-end-label)
+            // Same value-on-affected-side logic, applied to the plan-view
+            // AFT/FWD/PS/SB labels (rendered by renderBargeCornerLabels,
+            // which only exist once the tank grid has been drawn at least
+            // once — hence the null checks rather than an early return).
             const planAft = document.getElementById('lbl_PlanAFT');
             const planFwd = document.getElementById('lbl_PlanFWD');
             const planPs = document.getElementById('lbl_PlanPS');
@@ -1518,16 +1482,14 @@
             if (planAft && planFwd) {
                 planAft.textContent = currentTrimDegrees > 0 ? `AFT ${trimAbs}` : 'AFT';
                 planFwd.textContent = currentTrimDegrees < 0 ? `FWD ${trimAbs}` : 'FWD';
-                // Use the new class for barge-end labels
-                planAft.classList.toggle('barge-end-label-active', currentTrimDegrees > 0);
-                planFwd.classList.toggle('barge-end-label-active', currentTrimDegrees < 0);
+                planAft.classList.toggle('grid-side-label-active', currentTrimDegrees > 0);
+                planFwd.classList.toggle('grid-side-label-active', currentTrimDegrees < 0);
             }
             if (planPs && planSb) {
                 planPs.textContent = currentHeelDegrees > 0 ? `PS ${heelAbs}` : 'PS';
                 planSb.textContent = currentHeelDegrees < 0 ? `SB ${heelAbs}` : 'SB';
-                // Use the new class for barge-end labels
-                planPs.classList.toggle('barge-end-label-active', currentHeelDegrees > 0);
-                planSb.classList.toggle('barge-end-label-active', currentHeelDegrees < 0);
+                planPs.classList.toggle('grid-side-label-active', currentHeelDegrees > 0);
+                planSb.classList.toggle('grid-side-label-active', currentHeelDegrees < 0);
             }
         }
 
