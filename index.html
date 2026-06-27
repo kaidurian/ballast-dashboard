@@ -460,6 +460,14 @@
             box-shadow: 0 0 0 1px rgba(239,68,68,0.5);
         }
 
+        /* Greyed-out look for tanks without a pump marker when the
+           "pump-only input" toggle is on (see applyPumpInputRestriction). */
+        .weight-input-disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            background: var(--panel-border) !important;
+        }
+
         .tank-warning {
             font-size: 8px;
             font-weight: 700;
@@ -599,6 +607,10 @@
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
                 <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
+            </div>
+            <div class="toggle-container">
+                <span>⚡ Pump-only input</span>
+                <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
             </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
@@ -1244,9 +1256,19 @@
         //      E = pump name (e.g. "P1"). Drawn at the matching tank's
         //      real-world location using the same worldToScreen() mapping.
         // ============================================================
+        // Tank IDs that currently have a pump marker on them — populated
+        // by renderPumpMarkers each time it runs, consumed by
+        // applyPumpInputRestriction() to decide which weight inputs stay
+        // enabled when "pump-only input" mode is on.
+        let tanksWithPump = new Set();
+
         function renderPumpMarkers(container) {
             container.querySelectorAll('.pump-marker').forEach(el => el.remove());
-            if (!pumpLocations.length || !TANK_CONFIG.length) return;
+            tanksWithPump = new Set();
+            if (!pumpLocations.length || !TANK_CONFIG.length) {
+                applyPumpInputRestriction();
+                return;
+            }
 
             pumpLocations.forEach(pump => {
                 const targetNorm = normalizeTankName(pump.tankName);
@@ -1254,6 +1276,8 @@
                 if (!cfg) return; // tank name in BALLASTPLAN didn't match any known tank
                 const geo = getTankGeometry(cfg.id);
                 if (!geo) return;
+
+                tanksWithPump.add(cfg.id);
 
                 // Anchor at the tank's top-right corner: shift the
                 // world point by half the tank's width/height before
@@ -1270,6 +1294,8 @@
                 marker.innerHTML = `<span class="pump-marker-label">${pump.pumpName}</span><span class="pump-marker-dot"></span>`;
                 container.appendChild(marker);
             });
+
+            applyPumpInputRestriction();
         }
 
         // ============================================================
@@ -1291,6 +1317,32 @@
             const checked = document.getElementById('dimensionToggleCheckbox').checked;
             showDimensions = checked;
             applyDimensionVisibility();
+        }
+
+        // ============================================================
+        // 3c. PUMP-ONLY WEIGHT INPUT RESTRICTION TOGGLE
+        //     When ON, only tanks that currently have a pump marker
+        //     (see tanksWithPump, populated by renderPumpMarkers) keep
+        //     their weight input editable — all other tanks' inputs are
+        //     greyed out/disabled. When OFF (default), every tank's
+        //     input stays active as before.
+        // ============================================================
+        let pumpOnlyInput = false;
+
+        function applyPumpInputRestriction() {
+            TANK_CONFIG.forEach(cfg => {
+                const input = document.getElementById(`txt_Row${cfg.id}`);
+                if (!input) return;
+                const shouldDisable = pumpOnlyInput && !tanksWithPump.has(cfg.id);
+                input.disabled = shouldDisable;
+                input.classList.toggle('weight-input-disabled', shouldDisable);
+            });
+        }
+
+        function togglePumpOnlyInput() {
+            const checked = document.getElementById('pumpInputToggleCheckbox').checked;
+            pumpOnlyInput = checked;
+            applyPumpInputRestriction();
         }
 
         // ============================================================
