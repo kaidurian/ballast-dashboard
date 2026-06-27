@@ -599,11 +599,8 @@
 </head>
 <body class="light-theme">
     <header>
-        <div>
-            <h1>⚓ Barge Ballast</h1>
-            <div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
-        </div>
-        <div class="header-controls">
+            <div class="header-controls">
+            <h1>⚓ Barge Ballast</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
             <div class="theme-toggle-container">
                 <span>Day</span>
                 <label class="switch"><input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()"><span class="slider"></span></label>
@@ -779,8 +776,8 @@
             if (!note) return;
             const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
             note.textContent =
-                `${BARGE_NAME} · total length ${totalLength.toFixed(2)}m (${numCols} tanks) × ` +
-                `total tank width ${totalWidth.toFixed(2)}m (${numRows} tanks)`;
+                `${BARGE_NAME} ·length ${totalLength.toFixed(2)}m (${numCols} tanks) × ` +
+                `width ${totalWidth.toFixed(2)}m (${numRows} tanks)`;
         }
 
         // ---- state ----
