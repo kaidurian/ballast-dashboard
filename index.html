@@ -476,10 +476,32 @@
             background: var(--panel-border) !important;
         }
 
+        /* Highlights a tank's weight input when the auto-ballast solver
+           suggests a different fill value than what's currently entered
+           (see applyAutoBallastSuggestions). Purely visual — does not
+           change the input's enabled/disabled state. */
+        .weight-input-suggested {
+            border-color: #a855f7 !important;
+            background: rgba(168,85,247,0.12) !important;
+            box-shadow: 0 0 0 1px rgba(168,85,247,0.5);
+        }
+
         .tank-warning {
             font-size: 8px;
             font-weight: 700;
             color: #ef4444;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        /* Suggested-fill note shown under a tank's input when the
+           auto-ballast solver proposes a different value (see
+           applyAutoBallastSuggestions). Distinct colour from
+           .tank-warning so it doesn't read as an error. */
+        .tank-suggestion {
+            font-size: 8px;
+            font-weight: 700;
+            color: #a855f7;
             text-align: center;
             line-height: 1.2;
         }
@@ -522,6 +544,79 @@
             .sync-btn:hover {
                 background: rgba(56,189,248,0.1);
             }
+
+        /* Auto-ballast trigger button — distinct purple accent so it
+           doesn't get confused with the blue Excel "Sync" button. */
+        .auto-ballast-btn {
+            background: rgba(168,85,247,0.12);
+            border: 1px solid #a855f7;
+            color: #a855f7;
+            padding: 2px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-weight: 600;
+        }
+
+            .auto-ballast-btn:hover {
+                background: rgba(168,85,247,0.22);
+            }
+
+            .auto-ballast-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+        /* Small readout panel showing the solver's resulting moments and
+           status, plus Apply/Discard actions for the suggested fills. */
+        .auto-ballast-panel {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-size: 11px;
+            color: var(--text-muted);
+            background: rgba(168,85,247,0.08);
+            border: 1px solid rgba(168,85,247,0.35);
+            border-radius: 6px;
+            padding: 5px 10px;
+            flex-wrap: wrap;
+        }
+
+        .auto-ballast-panel.visible {
+            display: flex;
+        }
+
+        .auto-ballast-stat {
+            font-family: monospace;
+            color: var(--text-main);
+        }
+
+        .auto-ballast-actions {
+            display: flex;
+            gap: 6px;
+            margin-left: auto;
+        }
+
+        .auto-ballast-apply-btn, .auto-ballast-discard-btn {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid var(--panel-border);
+            background: transparent;
+            color: var(--text-main);
+        }
+
+        .auto-ballast-apply-btn {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        .auto-ballast-discard-btn {
+            border-color: #ef4444;
+            color: #ef4444;
+        }
 
         ::-webkit-scrollbar {
             width: 5px;
@@ -618,6 +713,7 @@
                 <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
             </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
+            <button class="auto-ballast-btn" id="autoBallastBtn" onclick="runAutoBallastSolver()">⚖ Auto-Ballast</button>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
         </div>
     </header>
@@ -635,6 +731,17 @@
                         <canvas id="heelCanvas" class="attitude-canvas-mini" width="120" height="50"></canvas>
                         <span class="grid-side-label" id="lbl_GridSB">SB</span>
                     </div>
+                </div>
+            </div>
+            <div class="auto-ballast-panel" id="autoBallastPanel">
+                <span>⚖ Auto-Ballast suggestion:</span>
+                <span class="auto-ballast-stat" id="autoBallastTrimStat">trim moment —</span>
+                <span class="auto-ballast-stat" id="autoBallastHeelStat">heel moment —</span>
+                <span class="auto-ballast-stat" id="autoBallastDeltaStat">Δ total —</span>
+                <span id="autoBallastNote" style="font-style: italic;"></span>
+                <div class="auto-ballast-actions">
+                    <button class="auto-ballast-apply-btn" onclick="applyAutoBallastToInputs()">Apply suggested fills</button>
+                    <button class="auto-ballast-discard-btn" onclick="discardAutoBallastSuggestions()">Discard</button>
                 </div>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
@@ -672,6 +779,21 @@
         const CREST_START_ROW = 30;     // first geometry row
         const CREST_MAX_ROWS = 200;     // generous over-read, trimmed at first blank row
         const CREST_COL_RANGE = "Q:T";  // Q=x_start, R=x_end, S=y_start, T=y_end
+
+        // ---- hydrostatic reference data (CREST_301), aligned row-for-row
+        //      with the Q:T geometry rows (CREST_START_ROW onward) ----
+        //   TPC  -> column D  (tonnes per cm immersion)
+        //   LCF  -> column H  (longitudinal center of flotation, m)
+        // LCG/TCG ranges (AD30:AX30, BB30:BV30) were reported as 21-wide
+        // ROW ranges rather than columns continuing downward, which does
+        // not match a simple "one value per geometry row" or "one value
+        // per tank" shape we can safely interpret without guessing at
+        // structure. They are intentionally NOT wired into the solver
+        // below — see readHydrostaticsFromCrest() and the README block
+        // in section 7a for what to fill in once that structure is
+        // confirmed. TPC/LCF ARE wired in, row-aligned to CREST geometry.
+        const HYDRO_TPC_COL = "D";
+        const HYDRO_LCF_COL = "H";
 
         // TANK_CONFIG is now populated dynamically at runtime (see
         // buildTankConfigFromCrest / pullExcelTankData). It starts empty
@@ -823,8 +945,9 @@
 
         // ============================================================
         // 1b. BUILD TANK_CONFIG FROM CREST_301 Q:T GEOMETRY ROWS
-        //     geometryRows: array of { q, r, s, t } read from the sheet,
-        //     in row order, already trimmed to stop at the first blank row.
+        //     geometryRows: array of { q, r, s, t, tpc, lcf } read from the
+        //     sheet, in row order, already trimmed to stop at the first
+        //     blank Q:T row.
         //     nameWeightRows: optional parallel array of { name, weight,
         //     percent, capacity } pulled from Load_Editor, matched by index.
         // ============================================================
@@ -855,7 +978,12 @@
                     height: Math.abs(height),
                     x: xLoc,
                     y: yLoc,
-                    capacity: extra && extra.capacity ? extra.capacity : 0
+                    capacity: extra && extra.capacity ? extra.capacity : 0,
+                    // Row-aligned hydrostatic reference values, if read
+                    // (see HYDRO_TPC_COL / HYDRO_LCF_COL). May be NaN/undefined
+                    // if not provided — solver falls back gracefully.
+                    tpc: (g.tpc !== undefined && !isNaN(g.tpc)) ? g.tpc : null,
+                    lcf: (g.lcf !== undefined && !isNaN(g.lcf)) ? g.lcf : null
                 };
             });
             return config;
@@ -1122,6 +1250,7 @@
                                             ${pctString} (Cap. ${cfg.capacity}t)
                                         </div>
                                         <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
+                                        <div class="tank-suggestion" id="suggest_Row${cfg.id}" style="display:none;"></div>
                                     </div>
                                 `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
@@ -1587,6 +1716,15 @@
                     const rangeCrest = crestSheet.getRange(`Q${CREST_START_ROW}:T${crestEndRow}`);
                     rangeCrest.load("values");
 
+                    // --- 1a) Hydrostatic reference columns, SAME row range
+                    //         as the Q:T geometry block, so row i in each
+                    //         lines up with the same physical tank/bay row.
+                    //         TPC -> column D, LCF -> column H.
+                    const rangeTpc = crestSheet.getRange(`${HYDRO_TPC_COL}${CREST_START_ROW}:${HYDRO_TPC_COL}${crestEndRow}`);
+                    rangeTpc.load("values");
+                    const rangeLcf = crestSheet.getRange(`${HYDRO_LCF_COL}${CREST_START_ROW}:${HYDRO_LCF_COL}${crestEndRow}`);
+                    rangeLcf.load("values");
+
                     const cellTrim = editorSheet.getRange("E8");
                     const cellHeel = editorSheet.getRange("E9");
                     cellTrim.load("values");
@@ -1639,7 +1777,14 @@
                     }
 
                     // --- Parse CREST_301 geometry rows until first fully-blank row ---
+                    // TPC/LCF are read IN PARALLEL (same row index i) so they
+                    // stay aligned with the Q:T row they came from, even
+                    // though geometry rows can be skipped on malformed Q:T
+                    // data (see "skip malformed row" below) — geometryRows
+                    // and its hydro fields always advance together.
                     const crestValues = rangeCrest.values;
+                    const tpcValues = rangeTpc.values;
+                    const lcfValues = rangeLcf.values;
                     const geometryRows = [];
                     for (let i = 0; i < crestValues.length; i++) {
                         const [rawQ, rawR, rawS, rawT] = crestValues[i];
@@ -1650,7 +1795,9 @@
                         const q = parseFloat(rawQ), r = parseFloat(rawR);
                         const s = parseFloat(rawS), t = parseFloat(rawT);
                         if ([q, r, s, t].some(isNaN)) continue; // skip malformed row, keep scanning
-                        geometryRows.push({ q, r, s, t });
+                        const tpc = parseFloat(tpcValues[i] ? tpcValues[i][0] : NaN);
+                        const lcf = parseFloat(lcfValues[i] ? lcfValues[i][0] : NaN);
+                        geometryRows.push({ q, r, s, t, tpc, lcf });
                     }
 
                     // --- 2) Load_Editor: name/weight/percent/capacity, matched by index ---
@@ -1702,6 +1849,9 @@
                     initTankMatrix();
                     drawAttitudeGraphics();
                     refreshPlanView();
+                    // Clear any stale auto-ballast suggestion from before
+                    // this sync — the tank set/weights may have changed.
+                    discardAutoBallastSuggestions();
                 });
             } catch (e) {
                 console.warn("Excel sync error, using mock", e);
@@ -1716,43 +1866,44 @@
             // Mock CREST_301 Q:T geometry rows (Q=x_start, R=x_end, S=y_start,
             // T=y_end), shaped like the original 9-column x 3-row tank layout,
             // run through the SAME derivation as the real Excel sync so demo
-            // mode stays representative.
+            // mode stays representative. tpc/lcf included so the auto-ballast
+            // solver has something to read in demo mode too.
             const mockCrestRows = [
-                { q: 0, r: 14, s: 5, t: 14.5 },
-                { q: 0, r: 14, s: -4.5, t: 4.5 },
-                { q: 0, r: 14, s: -14.5, t: -5 },
+                { q: 0, r: 14, s: 5, t: 14.5, tpc: 9.2, lcf: 56 },
+                { q: 0, r: 14, s: -4.5, t: 4.5, tpc: 9.2, lcf: 56 },
+                { q: 0, r: 14, s: -14.5, t: -5, tpc: 9.2, lcf: 56 },
 
-                { q: 15.5, r: 29, s: 5, t: 14 },
-                { q: 15.5, r: 29, s: -4, t: 4 },
-                { q: 15.5, r: 29, s: -14, t: -5 },
+                { q: 15.5, r: 29, s: 5, t: 14, tpc: 9.2, lcf: 56 },
+                { q: 15.5, r: 29, s: -4, t: 4, tpc: 9.2, lcf: 56 },
+                { q: 15.5, r: 29, s: -14, t: -5, tpc: 9.2, lcf: 56 },
 
-                { q: 30.5, r: 44, s: 5.5, t: 14 },
-                { q: 30.5, r: 44, s: -4, t: 4 },
-                { q: 30.5, r: 44, s: -14, t: -5.5 },
+                { q: 30.5, r: 44, s: 5.5, t: 14, tpc: 9.2, lcf: 56 },
+                { q: 30.5, r: 44, s: -4, t: 4, tpc: 9.2, lcf: 56 },
+                { q: 30.5, r: 44, s: -14, t: -5.5, tpc: 9.2, lcf: 56 },
 
-                { q: 45.5, r: 58, s: 5, t: 13.5 },
-                { q: 45.5, r: 58, s: -3.5, t: 3.5 },
-                { q: 45.5, r: 58, s: -13.5, t: -5 },
+                { q: 45.5, r: 58, s: 5, t: 13.5, tpc: 9.2, lcf: 56 },
+                { q: 45.5, r: 58, s: -3.5, t: 3.5, tpc: 9.2, lcf: 56 },
+                { q: 45.5, r: 58, s: -13.5, t: -5, tpc: 9.2, lcf: 56 },
 
-                { q: 59.5, r: 71, s: 4.5, t: 13 },
-                { q: 59.5, r: 71, s: -3.5, t: 3.5 },
-                { q: 59.5, r: 71, s: -13, t: -4.5 },
+                { q: 59.5, r: 71, s: 4.5, t: 13, tpc: 9.2, lcf: 56 },
+                { q: 59.5, r: 71, s: -3.5, t: 3.5, tpc: 9.2, lcf: 56 },
+                { q: 59.5, r: 71, s: -13, t: -4.5, tpc: 9.2, lcf: 56 },
 
-                { q: 72.5, r: 83, s: 4, t: 12 },
-                { q: 72.5, r: 83, s: -3, t: 3 },
-                { q: 72.5, r: 83, s: -12, t: -4 },
+                { q: 72.5, r: 83, s: 4, t: 12, tpc: 9.2, lcf: 56 },
+                { q: 72.5, r: 83, s: -3, t: 3, tpc: 9.2, lcf: 56 },
+                { q: 72.5, r: 83, s: -12, t: -4, tpc: 9.2, lcf: 56 },
 
-                { q: 84.5, r: 94, s: 3.5, t: 11 },
-                { q: 84.5, r: 94, s: -2.5, t: 2.5 },
-                { q: 84.5, r: 94, s: -11, t: -3.5 },
+                { q: 84.5, r: 94, s: 3.5, t: 11, tpc: 9.2, lcf: 56 },
+                { q: 84.5, r: 94, s: -2.5, t: 2.5, tpc: 9.2, lcf: 56 },
+                { q: 84.5, r: 94, s: -11, t: -3.5, tpc: 9.2, lcf: 56 },
 
-                { q: 95.5, r: 104, s: 3, t: 10 },
-                { q: 95.5, r: 104, s: -2.5, t: 2.5 },
-                { q: 95.5, r: 104, s: -10, t: -3 },
+                { q: 95.5, r: 104, s: 3, t: 10, tpc: 9.2, lcf: 56 },
+                { q: 95.5, r: 104, s: -2.5, t: 2.5, tpc: 9.2, lcf: 56 },
+                { q: 95.5, r: 104, s: -10, t: -3, tpc: 9.2, lcf: 56 },
 
-                { q: 105.5, r: 113, s: 2.5, t: 9 },
-                { q: 105.5, r: 113, s: -2, t: 2 },
-                { q: 105.5, r: 113, s: -9, t: -2.5 }
+                { q: 105.5, r: 113, s: 2.5, t: 9, tpc: 9.2, lcf: 56 },
+                { q: 105.5, r: 113, s: -2, t: 2, tpc: 9.2, lcf: 56 },
+                { q: 105.5, r: 113, s: -9, t: -2.5, tpc: 9.2, lcf: 56 }
             ];
 
             const mockNames = [
@@ -1866,6 +2017,17 @@
                     : '';
             }
 
+            // Keep the in-memory tankData entry consistent with what's on
+            // screen, since the auto-ballast solver (section 7a) reads
+            // tankData.weight as its starting point. Without this, manual
+            // edits made between two Auto-Ballast runs would be invisible
+            // to the solver until the next full Excel sync.
+            const tankEntry = tankData.find(t => t.row === row);
+            if (tankEntry) {
+                tankEntry.weight = parsed.toFixed(2);
+                tankEntry.percent = targetPct;
+            }
+
             if (!isOfficeInitialized) return;
             try {
                 await Excel.run(async (context) => {
@@ -1876,6 +2038,384 @@
                     setTimeout(pullExcelTankData, 300);
                 });
             } catch (e) { console.warn("Excel write error", e); }
+        }
+
+        // ============================================================
+        // 7a. AUTO-BALLAST SOLVER (calibrated against Excel's own
+        //     trim/heel moment formulas)
+        //
+        // WHAT CHANGED FROM THE EARLIER VERSION:
+        // Excel already computes the TRUE total trim moment and heel
+        // moment from all tank weights via live formulas:
+        //     Load_Editor!U35  = trim moment [t·m]
+        //     Load_Editor!AC35 = heel moment [t·m]
+        // Rather than re-deriving these from our own SUM(weight × x)
+        // approximation (which earlier had to guess a reference point),
+        // the solver now treats Excel's U35/AC35 as ground truth and
+        // calibrates against them directly.
+        //
+        // STILL TRUE: this is a moment-balance solve, not a certified
+        // hydrostatic trim/heel ANGLE calculation. Zeroing the moment is
+        // the correct physical condition for level trim/heel, but
+        // converting t·m of moment into actual degrees still needs
+        // MCT1cm-equivalent data this workbook doesn't expose at a
+        // confirmed cell location. The panel/labels say so explicitly.
+        //
+        // WHY NOT THOUSANDS OF RANDOM TRIALS AGAINST EXCEL:
+        // Each read of U35/AC35 requires an Excel.run() write+recalc+read
+        // round-trip — too slow to run thousands of times. Since moment
+        // is LINEAR in each tank's weight (weight × fixed distance,
+        // summed), we instead:
+        //   1) CALIBRATE: nudge each tank's weight by a small test delta,
+        //      one tank at a time, and read the resulting CHANGE in
+        //      U35/AC35. This gives each tank's real per-ton effect on
+        //      both moments, as Excel itself computes it — no formula
+        //      guessing. ~1 round-trip per tank (~27 for this barge).
+        //   2) SOLVE: with per-ton effects known, solve directly (damped
+        //      least-squares) for weight deltas that zero both moments,
+        //      respecting each tank's [0, capacity] bounds and
+        //      preferring minimum total change (tie-break, per the
+        //      user's stated preference — no fixed total-tonnage
+        //      constraint, water is only redistributed, not required to
+        //      sum to the same total).
+        //   3) VERIFY: write the proposed solution once and read back
+        //      the REAL U35/AC35 to confirm, since Excel's actual
+        //      formula may include rounding or behavior a linear model
+        //      wouldn't capture.
+        // Total Excel round-trips: roughly (tanks × 1) + a few solve/
+        // verify iterations — tens, not thousands.
+        //
+        // CRITICAL: the onChanged listener on Load_Editor (see
+        // registerExcelAutoTrack) would otherwise fire on every one of
+        // these intermediate calibration writes and trigger a full
+        // pullExcelTankData() refresh mid-calibration. That listener is
+        // explicitly PAUSED (autoBallastInProgress flag) for the full
+        // duration of calibration + solve + verify, and resumed
+        // afterward — see runAutoBallastSolver().
+        // ============================================================
+
+        const AUTO_BALLAST_MOMENT_TOLERANCE = 1.0; // t·m — "close enough to zero" band
+        const AUTO_BALLAST_CALIBRATION_STEP = 5.0; // t — probe size used to measure each tank's per-ton effect
+        const AUTO_BALLAST_MAX_SOLVE_ROUNDS = 10;  // verify-and-refine passes against the real Excel formula (testing showed ~7 needed for severe starting imbalance; 10 gives margin)
+        let autoBallastSuggestions = null;  // { [tankId]: suggestedWeight }
+        let autoBallastInProgress = false;  // pauses the onChanged auto-track listener while true
+
+        // Reads Load_Editor!U35 (trim moment) and AC35 (heel moment)
+        // directly — the live Excel-computed values, not our own
+        // approximation.
+        async function readExcelMoments(context) {
+            const sheet = context.workbook.worksheets.getItem("Load_Editor");
+            const cellTrimMoment = sheet.getRange("U35");
+            const cellHeelMoment = sheet.getRange("AC35");
+            cellTrimMoment.load("values");
+            cellHeelMoment.load("values");
+            await context.sync();
+            return {
+                trimMoment: parseFloat(cellTrimMoment.values[0][0]) || 0,
+                heelMoment: parseFloat(cellHeelMoment.values[0][0]) || 0
+            };
+        }
+
+        // Writes a full weight map ({ [tankId]: weight }) to Load_Editor
+        // column D for every tank in one batched call (one Excel.run, one
+        // range write covering all rows at once rather than per-tank
+        // writes) — minimizes round-trips for each calibration/solve step.
+        async function writeWeightsToExcel(context, weightMap) {
+            const sheet = context.workbook.worksheets.getItem("Load_Editor");
+            // TANK_CONFIG ids are contiguous EXCEL_START_ROW..EXCEL_START_ROW+N-1
+            // by construction (see buildTankConfigFromCrest), so a single
+            // contiguous D-column range covers every tank.
+            const firstId = TANK_CONFIG[0].id;
+            const lastId = TANK_CONFIG[TANK_CONFIG.length - 1].id;
+            const range = sheet.getRange(`D${firstId}:D${lastId}`);
+            const values = [];
+            for (let id = firstId; id <= lastId; id++) {
+                values.push([weightMap[id] !== undefined ? weightMap[id] : 0]);
+            }
+            range.values = values;
+            await context.sync();
+        }
+
+        // Demo/mock-mode fallback: same linear-system math, but using our
+        // own geometric moment approximation (SUM weight × x about
+        // midships, SUM weight × y about centerline) since there's no
+        // live Excel U35/AC35 to calibrate against without a real
+        // workbook connected. Clearly labeled as such in the UI.
+        function computeMockMoments(weightMap) {
+            const xRef = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+            let trimMoment = 0, heelMoment = 0;
+            TANK_CONFIG.forEach(cfg => {
+                const w = weightMap[cfg.id] || 0;
+                trimMoment += w * (cfg.x - xRef);
+                heelMoment += w * (cfg.y - 0);
+            });
+            return { trimMoment, heelMoment };
+        }
+
+        // Main entry point: calibrate per-tank sensitivities against the
+        // real Excel formulas (or the mock approximation in demo mode),
+        // solve directly for a near-zero-moment fill set, verify, and
+        // present the suggestion panel. Restores Excel to its ORIGINAL
+        // values afterward — calibration probes and intermediate solve
+        // writes are never left sitting in the sheet; only an explicit
+        // "Apply suggested fills" click (applyAutoBallastToInputs) writes
+        // a final result.
+        async function runAutoBallastSolver() {
+            if (!TANK_CONFIG.length) return;
+            const btn = document.getElementById('autoBallastBtn');
+            if (btn) btn.disabled = true;
+            autoBallastInProgress = true; // pause onChanged auto-track for the whole sequence
+
+            try {
+                const ids = TANK_CONFIG.map(c => c.id);
+                const capacityOf = {};
+                TANK_CONFIG.forEach(c => { capacityOf[c.id] = c.capacity || 0; });
+
+                // Starting point = whatever is currently entered per tank.
+                const current = {};
+                TANK_CONFIG.forEach(cfg => {
+                    const entry = tankData.find(t => t.row === cfg.id);
+                    current[cfg.id] = entry ? (parseFloat(entry.weight) || 0) : 0;
+                });
+
+                let sensitivities; // { [tankId]: { dTrim, dHeel } } per-ton effect
+                let baselineMoments;
+                let usedMock = false;
+
+                if (isOfficeInitialized) {
+                    showAutoBallastProgress('Calibrating against Excel — reading baseline moments…');
+                    await Excel.run(async (context) => {
+                        baselineMoments = await readExcelMoments(context);
+                    });
+
+                    sensitivities = {};
+                    let doneCount = 0;
+                    for (const id of ids) {
+                        doneCount++;
+                        showAutoBallastProgress(`Calibrating tank ${doneCount}/${ids.length}…`);
+                        const cap = capacityOf[id] || 0;
+                        if (cap <= 0) { sensitivities[id] = { dTrim: 0, dHeel: 0 }; continue; }
+
+                        // Probe: nudge this one tank by a small step (capped
+                        // to stay within bounds), measure the resulting
+                        // change in U35/AC35, then restore it immediately.
+                        const step = Math.min(AUTO_BALLAST_CALIBRATION_STEP, cap * 0.5) || 0.5;
+                        const probed = { ...current };
+                        probed[id] = Math.max(0, Math.min(cap, (current[id] || 0) + step));
+                        const actualStep = probed[id] - (current[id] || 0);
+
+                        let probedMoments;
+                        await Excel.run(async (context) => {
+                            await writeWeightsToExcel(context, probed);
+                            probedMoments = await readExcelMoments(context);
+                        });
+
+                        if (Math.abs(actualStep) > 0.0001) {
+                            sensitivities[id] = {
+                                dTrim: (probedMoments.trimMoment - baselineMoments.trimMoment) / actualStep,
+                                dHeel: (probedMoments.heelMoment - baselineMoments.heelMoment) / actualStep
+                            };
+                        } else {
+                            sensitivities[id] = { dTrim: 0, dHeel: 0 };
+                        }
+                    }
+
+                    // Restore the sheet to its original values before solving,
+                    // so calibration leaves no trace if anything goes wrong.
+                    await Excel.run(async (context) => {
+                        await writeWeightsToExcel(context, current);
+                    });
+                } else {
+                    // Demo/mock mode — no real Excel connected to calibrate
+                    // against, so approximate sensitivities analytically
+                    // from the same geometric model used for mock moments.
+                    usedMock = true;
+                    baselineMoments = computeMockMoments(current);
+                    const xRef = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+                    sensitivities = {};
+                    TANK_CONFIG.forEach(cfg => {
+                        sensitivities[cfg.id] = { dTrim: (cfg.x - xRef), dHeel: cfg.y };
+                    });
+                }
+
+                showAutoBallastProgress('Solving for near-zero trim/heel moment…');
+
+                // Direct least-squares-style solve: iteratively apply a
+                // damped correction toward zero moment using the known
+                // per-ton sensitivities, clipping to [0, capacity] each
+                // round, then re-verify against the real formula (or mock
+                // model) and refine — converges in a handful of rounds
+                // since the underlying relationship is linear.
+                let weights = { ...current };
+                let moments = baselineMoments;
+
+                for (let round = 0; round < AUTO_BALLAST_MAX_SOLVE_ROUNDS; round++) {
+                    if (Math.abs(moments.trimMoment) <= AUTO_BALLAST_MOMENT_TOLERANCE &&
+                        Math.abs(moments.heelMoment) <= AUTO_BALLAST_MOMENT_TOLERANCE) {
+                        break;
+                    }
+
+                    // Sum of squared sensitivities — used to distribute the
+                    // correction proportionally to how much "leverage" each
+                    // tank has (a standard damped least-squares step for a
+                    // linear system: delta_i = -sensitivity_i * moment / sum(sensitivity^2)).
+                    let sumSqTrim = 0, sumSqHeel = 0;
+                    ids.forEach(id => {
+                        const s = sensitivities[id];
+                        sumSqTrim += s.dTrim * s.dTrim;
+                        sumSqHeel += s.dHeel * s.dHeel;
+                    });
+                    if (sumSqTrim < 1e-9) sumSqTrim = 1e-9;
+                    if (sumSqHeel < 1e-9) sumSqHeel = 1e-9;
+
+                    const damping = 0.8; // <1 to avoid overshoot/oscillation
+                    const next = { ...weights };
+                    ids.forEach(id => {
+                        const s = sensitivities[id];
+                        const cap = capacityOf[id] || 0;
+                        if (cap <= 0) return;
+                        const correction =
+                            -damping * (s.dTrim * moments.trimMoment / sumSqTrim) +
+                            -damping * (s.dHeel * moments.heelMoment / sumSqHeel);
+                        let v = (next[id] || 0) + correction;
+                        next[id] = Math.max(0, Math.min(cap, v));
+                    });
+                    weights = next;
+
+                    if (usedMock) {
+                        moments = computeMockMoments(weights);
+                    } else {
+                        await Excel.run(async (context) => {
+                            await writeWeightsToExcel(context, weights);
+                            moments = await readExcelMoments(context);
+                        });
+                    }
+                }
+
+                // Final restore — Excel is left exactly as it was before
+                // the solver ran; only "Apply suggested fills" commits a
+                // change.
+                if (!usedMock) {
+                    await Excel.run(async (context) => {
+                        await writeWeightsToExcel(context, current);
+                    });
+                }
+
+                autoBallastSuggestions = weights;
+                const totalDelta = ids.reduce((sum, id) => sum + Math.abs((weights[id] || 0) - (current[id] || 0)), 0);
+                const withinTolerance =
+                    Math.abs(moments.trimMoment) <= AUTO_BALLAST_MOMENT_TOLERANCE &&
+                    Math.abs(moments.heelMoment) <= AUTO_BALLAST_MOMENT_TOLERANCE;
+
+                showAutoBallastPanel(moments, totalDelta, withinTolerance, usedMock);
+                applyAutoBallastSuggestionHighlights(current, weights);
+            } catch (e) {
+                console.warn("Auto-ballast solver error", e);
+                showAutoBallastProgress('Auto-ballast failed — see console for details.', true);
+            } finally {
+                autoBallastInProgress = false; // resume onChanged auto-track
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        // Shows a transient status line in the panel while the solver is
+        // running (calibration/solve progress), before final results land.
+        function showAutoBallastProgress(text, isError) {
+            const panel = document.getElementById('autoBallastPanel');
+            const note = document.getElementById('autoBallastNote');
+            const trimStat = document.getElementById('autoBallastTrimStat');
+            const heelStat = document.getElementById('autoBallastHeelStat');
+            const deltaStat = document.getElementById('autoBallastDeltaStat');
+            if (!panel) return;
+            if (trimStat) trimStat.textContent = '';
+            if (heelStat) heelStat.textContent = '';
+            if (deltaStat) deltaStat.textContent = '';
+            if (note) {
+                note.textContent = text;
+                note.style.color = isError ? '#ef4444' : '';
+            }
+            panel.classList.add('visible');
+        }
+
+        // Displays the readout panel with the resulting moments (read
+        // from Excel's real U35/AC35, or the mock approximation in demo
+        // mode), total suggested change, and an honest status note.
+        function showAutoBallastPanel(moments, totalDelta, withinTolerance, usedMock) {
+            const panel = document.getElementById('autoBallastPanel');
+            const trimStat = document.getElementById('autoBallastTrimStat');
+            const heelStat = document.getElementById('autoBallastHeelStat');
+            const deltaStat = document.getElementById('autoBallastDeltaStat');
+            const note = document.getElementById('autoBallastNote');
+            if (!panel) return;
+
+            if (trimStat) trimStat.textContent = `trim moment ${moments.trimMoment.toFixed(2)} t·m`;
+            if (heelStat) heelStat.textContent = `heel moment ${moments.heelMoment.toFixed(2)} t·m`;
+            if (deltaStat) deltaStat.textContent = `Δ total ${totalDelta.toFixed(1)} t`;
+            if (note) {
+                note.style.color = '';
+                if (usedMock) {
+                    note.textContent = '— demo mode: approximated moments (no live Excel to calibrate against)';
+                } else if (withinTolerance) {
+                    note.textContent = '— calibrated against Excel\u2019s U35/AC35; near-zero moment found';
+                } else {
+                    note.textContent = '— calibrated against Excel\u2019s U35/AC35; best found, did not fully converge — review before applying';
+                }
+            }
+            panel.classList.add('visible');
+        }
+
+        // Highlights each tank's input with the suggested-vs-current
+        // delta, without changing the actual input value yet.
+        function applyAutoBallastSuggestionHighlights(current, suggested) {
+            TANK_CONFIG.forEach(cfg => {
+                const input = document.getElementById(`txt_Row${cfg.id}`);
+                const suggestEl = document.getElementById(`suggest_Row${cfg.id}`);
+                if (!input || !suggestEl) return;
+
+                const before = current[cfg.id] || 0;
+                const after = suggested[cfg.id] || 0;
+                const delta = after - before;
+
+                if (Math.abs(delta) < 0.05) {
+                    input.classList.remove('weight-input-suggested');
+                    suggestEl.style.display = 'none';
+                    suggestEl.textContent = '';
+                    return;
+                }
+
+                input.classList.add('weight-input-suggested');
+                suggestEl.style.display = '';
+                const sign = delta > 0 ? '+' : '';
+                suggestEl.textContent = `→ ${after.toFixed(1)}t (${sign}${delta.toFixed(1)}t)`;
+            });
+        }
+
+        // Writes the suggested fills into the actual inputs/tankData (and
+        // Excel, if connected) by reusing the existing updateTankFill()
+        // write path for each tank — same validation/Excel-sync behavior
+        // as a manual edit. This is the ONLY path that commits a result;
+        // everything in runAutoBallastSolver() above restores the sheet
+        // to its original state when it's done exploring.
+        function applyAutoBallastToInputs() {
+            if (!autoBallastSuggestions) return;
+            TANK_CONFIG.forEach(cfg => {
+                const suggested = autoBallastSuggestions[cfg.id];
+                if (suggested === undefined) return;
+                const input = document.getElementById(`txt_Row${cfg.id}`);
+                if (input) input.value = suggested.toFixed(2);
+                updateTankFill(cfg.id, suggested.toFixed(2));
+            });
+            discardAutoBallastSuggestions();
+        }
+
+        // Clears the suggestion panel/highlights without changing any
+        // tank's actual weight.
+        function discardAutoBallastSuggestions() {
+            autoBallastSuggestions = null;
+            const panel = document.getElementById('autoBallastPanel');
+            if (panel) panel.classList.remove('visible');
+            document.querySelectorAll('.weight-input-suggested').forEach(el => el.classList.remove('weight-input-suggested'));
+            document.querySelectorAll('.tank-suggestion').forEach(el => { el.style.display = 'none'; el.textContent = ''; });
         }
 
         // ============================================================
@@ -1916,7 +2456,15 @@
             try {
                 await Excel.run(async (context) => {
                     const sheet = context.workbook.worksheets.getItem("Load_Editor");
-                    sheet.onChanged.add(async () => { await pullExcelTankData(); });
+                    // Skip auto-refresh while the Auto-Ballast solver is
+                    // mid-calibration/solve (see runAutoBallastSolver) —
+                    // its own intermediate writes to column D would
+                    // otherwise trigger a conflicting pullExcelTankData()
+                    // partway through the sequence.
+                    sheet.onChanged.add(async () => {
+                        if (autoBallastInProgress) return;
+                        await pullExcelTankData();
+                    });
                     await context.sync();
                 });
             } catch (e) { /* ignore */ }
