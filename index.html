@@ -214,21 +214,22 @@
             white-space: nowrap;
         }
 
-        .grid-side-label {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    white-space: nowrap;
-}
+        .grid-side-label-active {
+            color: #fff7ed;
+            background: #f97316;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 800;
+        }
 
-.grid-side-label-active {
-    color: #fff7ed;
-    background: #f97316;
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-weight: 800;
-}
+        .attitude-canvas-mini {
+            background: #0b0f19;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+            width: 110px;
+            height: 46px;
+            display: block;
+        }
 
         /* ---- Tank grid + trailer axle overlay (same coordinate space, meters) ---- */
         .tank-grid-wrap {
@@ -336,36 +337,35 @@
         }
 
         /* AFT / FWD tags at each end of the barge */
- .barge-end-label {
-     position: absolute;
-     font-size: 12px;
-     font-weight: 700;
-     letter-spacing: 1px;
-     color: var(--text-muted); /* Uses theme variable */
-     white-space: nowrap;
-     z-index: 15;
-     pointer-events: none;
- }
+        .barge-end-label {
+            position: absolute;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--text-muted); /* Uses theme variable */
+            white-space: nowrap;
+            z-index: 15;
+            pointer-events: none;
+        }
 
- .barge-end-label-active {
-     color: #fff7ed;
-     background: #f97316;
-     padding: 1px 4px;
-     border-radius: 3px;
-     font-weight: 800;
- }
-
+        .barge-end-label-active {
+            color: #fff7ed;
+            background: #f97316;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 800;
+        }
 
         /* PS (port side) / SB (starboard side) tags along the long edges */
         /* Pump location marker — small dot + pump name, plotted at the
            matching tank's real-world location (see renderPumpMarkers). */
         .pump-marker {
             position: absolute;
+            transform: translate(-0%, -50%);
             display: flex;
-            flex-direction: row;
+            flex-direction: column;
             align-items: center;
-            justify-content: flex-end;
-            gap: 2px;
+            gap: 1px;
             z-index: 16;
             pointer-events: none;
         }
@@ -484,14 +484,6 @@
             border-color: #ef4444 !important;
             background: rgba(239,68,68,0.12) !important;
             box-shadow: 0 0 0 1px rgba(239,68,68,0.5);
-        }
-
-        /* Greyed-out look for tanks without a pump marker when the
-           "pump-only input" toggle is on (see applyPumpInputRestriction). */
-        .weight-input-disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-            background: var(--panel-border) !important;
         }
 
         .tank-warning {
@@ -680,10 +672,6 @@
                 <span>📐 Dimensions</span>
                 <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
             </div>
-            <div class="toggle-container">
-                <span>⚡ Pump-only input</span>
-                <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
-            </div>
             <div id="connectionStatus" style="font-size: 9px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
         </div>
@@ -838,17 +826,13 @@
 
         // Update the on-screen header subtitle:
         // "<Barge Name> · total length X.XXm (N tanks) × total tank width Y.YYm (M tanks)"
-        // Also pushes the same text (with the anchor) into the browser
-        // tab title, replacing the static "Barge Ballast" placeholder.
         function updateBargeInfoNote() {
             const note = document.getElementById('bargeInfoNote');
             if (!note) return;
             const { totalLength, totalWidth, numCols, numRows } = computeTotalTankSpan();
-            const infoText =
+            note.textContent =
                 `${BARGE_NAME} · total length ${totalLength.toFixed(2)}m (${numCols} tanks) × ` +
                 `total tank width ${totalWidth.toFixed(2)}m (${numRows} tanks)`;
-            note.textContent = infoText;
-            document.title = `⚓ Barge Ballast ${infoText}`;
         }
 
         // ---- state ----
@@ -962,19 +946,26 @@
         }
 
         // Shortens long Excel tank names like "WB-01-PS.P" / "WB-01-C.C" /
-        // "WB-01-SB.S" down to "1P" / "1C" / "1S" — takes the bay number
-        // from the second segment (leading zero stripped) and fuses it
-        // with the single letter after the dot, dropping the "WB-"
-        // prefix and the middle "PS"/"C"/"SB" segment entirely. Falls
-        // back to the original name unchanged if it doesn't match this
-        // pattern, so other naming schemes still display correctly.
+        // "WB-01-SB.S" down to "01-PS" / "01-C" / "01-SB" — keeps the bay
+        // number (with leading zero) and the Port/Centre/Starboard tag,
+        // drops the "WB-" prefix and any trailing ".P"/".C"/".S" suffix.
+        // Falls back to the original name unchanged if it doesn't match
+        // this pattern, so other naming schemes still display correctly.
+        // Shortens long Excel tank names like "WB-01-PS.P" / "WB-01-C.C" /
+        // "WB-01-SB.S" down to "01-P" / "01-C" / "01-S" — keeps the bay
+        // number (with leading zero) and a single-letter Port/Centre/
+        // Starboard code, drops the "WB-" prefix and any trailing
+        // ".P"/".C"/".S" suffix. Falls back to the original name unchanged
+        // if it doesn't match this pattern, so other naming schemes still
+        // display correctly.
         function shortenTankName(name) {
             if (!name) return name;
-            const m = String(name).match(/^WB-?(\d+)-(?:PS|SB|C)\.([A-Z])$/i);
+            const m = String(name).match(/^WB-?(\d+)-(PS|SB|C)(?:\.[A-Z])?$/i);
             if (!m) return name;
-            const num = String(parseInt(m[1], 10));
-            const side = m[2].toUpperCase();
-            return `${num}${side}`;
+            const num = m[1].padStart(2, '0');
+            const sideMap = { PS: 'P', SB: 'S', C: 'C' };
+            const side = sideMap[m[2].toUpperCase()];
+            return `${num}-${side}`;
         }
 
         // ============================================================
@@ -1332,19 +1323,9 @@
         //      E = pump name (e.g. "P1"). Drawn at the matching tank's
         //      real-world location using the same worldToScreen() mapping.
         // ============================================================
-        // Tank IDs that currently have a pump marker on them — populated
-        // by renderPumpMarkers each time it runs, consumed by
-        // applyPumpInputRestriction() to decide which weight inputs stay
-        // enabled when "pump-only input" mode is on.
-        let tanksWithPump = new Set();
-
         function renderPumpMarkers(container) {
             container.querySelectorAll('.pump-marker').forEach(el => el.remove());
-            tanksWithPump = new Set();
-            if (!pumpLocations.length || !TANK_CONFIG.length) {
-                applyPumpInputRestriction();
-                return;
-            }
+            if (!pumpLocations.length || !TANK_CONFIG.length) return;
 
             pumpLocations.forEach(pump => {
                 const targetNorm = normalizeTankName(pump.tankName);
@@ -1353,25 +1334,15 @@
                 const geo = getTankGeometry(cfg.id);
                 if (!geo) return;
 
-                tanksWithPump.add(cfg.id);
-
-                // Anchor at the tank's top-right corner: shift the
-                // world point by half the tank's width/height before
-                // projecting, then position the marker's right edge
-                // (not left) at that screen point.
-                const topRightX = geo.x + geo.width / 2;
-                const topRightY = geo.y + geo.height / 2; // world Y grows upward on screen-down axis, so "top" is +height/2
-                const p = worldToScreen(topRightX, topRightY);
+                const p = worldToScreen(geo.x, geo.y);
                 const marker = document.createElement('div');
                 marker.className = 'pump-marker';
-                marker.style.right = (container.clientWidth - p.sx + 3) + 'px';
-                marker.style.top = (p.sy + 3) + 'px';
+                marker.style.left = p.sx + 'px';
+                marker.style.top = p.sy + 'px';
                 marker.title = `Pump ${pump.pumpName} — ${pump.tankName}`;
-                marker.innerHTML = `<span class="pump-marker-label">${pump.pumpName}</span><span class="pump-marker-dot"></span>`;
+                marker.innerHTML = `<span class="pump-marker-dot"></span><span class="pump-marker-label">${pump.pumpName}</span>`;
                 container.appendChild(marker);
             });
-
-            applyPumpInputRestriction();
         }
 
         // ============================================================
@@ -1393,32 +1364,6 @@
             const checked = document.getElementById('dimensionToggleCheckbox').checked;
             showDimensions = checked;
             applyDimensionVisibility();
-        }
-
-        // ============================================================
-        // 3c. PUMP-ONLY WEIGHT INPUT RESTRICTION TOGGLE
-        //     When ON, only tanks that currently have a pump marker
-        //     (see tanksWithPump, populated by renderPumpMarkers) keep
-        //     their weight input editable — all other tanks' inputs are
-        //     greyed out/disabled. When OFF (default), every tank's
-        //     input stays active as before.
-        // ============================================================
-        let pumpOnlyInput = false;
-
-        function applyPumpInputRestriction() {
-            TANK_CONFIG.forEach(cfg => {
-                const input = document.getElementById(`txt_Row${cfg.id}`);
-                if (!input) return;
-                const shouldDisable = pumpOnlyInput && !tanksWithPump.has(cfg.id);
-                input.disabled = shouldDisable;
-                input.classList.toggle('weight-input-disabled', shouldDisable);
-            });
-        }
-
-        function togglePumpOnlyInput() {
-            const checked = document.getElementById('pumpInputToggleCheckbox').checked;
-            pumpOnlyInput = checked;
-            applyPumpInputRestriction();
         }
 
         // ============================================================
