@@ -337,23 +337,25 @@
         }
 
         /* AFT / FWD tags at each end of the barge */
-        .barge-end-label {
-            position: absolute;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            color: var(--text-muted);  /* Uses theme variable */
-            white-space: nowrap;
-            z-index: 15;
-            pointer-events: none;
-        }
-        .barge-end-label-active {
-            color: #fff7ed;
-            background: #f97316;
-            padding: 1px 4px;
-            border-radius: 3px;
-            font-weight: 800;
-        }
+          .barge-end-label {
+      position: absolute;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--text-muted); /* Uses theme variable */
+      white-space: nowrap;
+      z-index: 15;
+      pointer-events: none;
+  }
+
+  .barge-end-label-active {
+      color: #fff7ed;
+      background: #f97316;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-weight: 800;
+  }
+
 
         /* PS (port side) / SB (starboard side) tags along the long edges */
         /* Pump location marker — small dot + pump name, plotted at the
