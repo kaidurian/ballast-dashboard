@@ -335,11 +335,11 @@
            matching tank's real-world location (see renderPumpMarkers). */
         .pump-marker {
             position: absolute;
-            transform: translate(-0%, -50%);
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
-            gap: 1px;
+            justify-content: flex-end;
+            gap: 2px;
             z-index: 16;
             pointer-events: none;
         }
@@ -1255,13 +1255,19 @@
                 const geo = getTankGeometry(cfg.id);
                 if (!geo) return;
 
-                const p = worldToScreen(geo.x, geo.y);
+                // Anchor at the tank's top-right corner: shift the
+                // world point by half the tank's width/height before
+                // projecting, then position the marker's right edge
+                // (not left) at that screen point.
+                const topRightX = geo.x + geo.width / 2;
+                const topRightY = geo.y + geo.height / 2; // world Y grows upward on screen-down axis, so "top" is +height/2
+                const p = worldToScreen(topRightX, topRightY);
                 const marker = document.createElement('div');
                 marker.className = 'pump-marker';
-                marker.style.left = p.sx + 'px';
-                marker.style.top = p.sy + 'px';
+                marker.style.right = (container.clientWidth - p.sx + 3) + 'px';
+                marker.style.top = (p.sy + 3) + 'px';
                 marker.title = `Pump ${pump.pumpName} — ${pump.tankName}`;
-                marker.innerHTML = `<span class="pump-marker-dot"></span><span class="pump-marker-label">${pump.pumpName}</span>`;
+                marker.innerHTML = `<span class="pump-marker-label">${pump.pumpName}</span><span class="pump-marker-dot"></span>`;
                 container.appendChild(marker);
             });
         }
