@@ -1107,7 +1107,7 @@
                         <div class="tank-inputs">
                             <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
                                    id="txt_Row${cfg.id}" value="${weight}"
-                                   onchange="updateTankFill(${cfg.id}, this.value)">
+                                   onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
                             <div class="load-percentage-label" id="lbl_Load${cfg.id}">
                                 ${pctString} (Cap. ${cfg.capacity}t)
                             </div>
