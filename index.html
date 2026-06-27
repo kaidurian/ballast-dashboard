@@ -189,15 +189,15 @@
         }
 
         .grid-side-label {
-            font-size: 9px;
+            font-size: 12px;
             font-weight: 700;
             letter-spacing: 0.5px;
-            color: #ffffff;
+            color: var(--text-muted);
             white-space: nowrap;
         }
 
         .grid-side-label-active {
-            color: #ffffff;
+            color: #fff7ed;
             background: #f97316;
             padding: 1px 4px;
             border-radius: 3px;
@@ -285,6 +285,7 @@
             text-transform: uppercase;
             letter-spacing: 1px;
             color: var(--quay-text);
+            transform: rotate(270deg);
         }
 
         .quay-dims {
@@ -320,10 +321,10 @@
         /* AFT / FWD tags at each end of the barge */
         .barge-end-label {
             position: absolute;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             letter-spacing: 1px;
-            color: var(--text-muted);
+            color: #ffffff;
             white-space: nowrap;
             z-index: 15;
             pointer-events: none;
@@ -334,7 +335,7 @@
            matching tank's real-world location (see renderPumpMarkers). */
         .pump-marker {
             position: absolute;
-            transform: translate(-50%, -50%);
+            transform: translate(-0%, -50%);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -1043,7 +1044,7 @@
             quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
-                    <div class="quay-title">QUAY WALL</div>
+                    <div class="quay-title">QUAY</div>
                 `;
             container.appendChild(quayBox);
 
