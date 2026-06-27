@@ -874,26 +874,19 @@
         }
 
         // Shortens long Excel tank names like "WB-01-PS.P" / "WB-01-C.C" /
-        // "WB-01-SB.S" down to "01-PS" / "01-C" / "01-SB" — keeps the bay
-        // number (with leading zero) and the Port/Centre/Starboard tag,
-        // drops the "WB-" prefix and any trailing ".P"/".C"/".S" suffix.
-        // Falls back to the original name unchanged if it doesn't match
-        // this pattern, so other naming schemes still display correctly.
-        // Shortens long Excel tank names like "WB-01-PS.P" / "WB-01-C.C" /
-        // "WB-01-SB.S" down to "01-P" / "01-C" / "01-S" — keeps the bay
-        // number (with leading zero) and a single-letter Port/Centre/
-        // Starboard code, drops the "WB-" prefix and any trailing
-        // ".P"/".C"/".S" suffix. Falls back to the original name unchanged
-        // if it doesn't match this pattern, so other naming schemes still
-        // display correctly.
+        // "WB-01-SB.S" down to "1P" / "1C" / "1S" — takes the bay number
+        // from the second segment (leading zero stripped) and fuses it
+        // with the single letter after the dot, dropping the "WB-"
+        // prefix and the middle "PS"/"C"/"SB" segment entirely. Falls
+        // back to the original name unchanged if it doesn't match this
+        // pattern, so other naming schemes still display correctly.
         function shortenTankName(name) {
             if (!name) return name;
-            const m = String(name).match(/^WB-?(\d+)-(PS|SB|C)(?:\.[A-Z])?$/i);
+            const m = String(name).match(/^WB-?(\d+)-(?:PS|SB|C)\.([A-Z])$/i);
             if (!m) return name;
-            const num = m[1].padStart(2, '0');
-            const sideMap = { PS: 'P', SB: 'S', C: 'C' };
-            const side = sideMap[m[2].toUpperCase()];
-            return `${num}-${side}`;
+            const num = String(parseInt(m[1], 10));
+            const side = m[2].toUpperCase();
+            return `${num}${side}`;
         }
 
         // ============================================================
