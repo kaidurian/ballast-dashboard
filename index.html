@@ -596,8 +596,6 @@
                 cursor: pointer;
             }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body class="light-theme">
     <header>
@@ -781,6 +779,24 @@
                 `${BARGE_NAME} ·length ${totalLength.toFixed(2)}m (${numCols} tanks) × ` +
                 `width ${totalWidth.toFixed(2)}m (${numRows} tanks)`;
         }
+
+        // ============================================================
+        // 1c. FIREBASE LINK — lets this same dashboard be viewed live on
+        //     phones/tablets/other PCs (no Excel needed there), by reading
+        //     a snapshot that the Excel side (this add-in, or the
+        //     PublishBallastData.bas macro, or publish.html) writes to a
+        //     free Firebase Realtime Database.
+        //
+        //     Replace FIREBASE_URL with YOUR OWN Firebase project URL
+        //     (see setup instructions). Everything else just works once
+        //     that's set.
+        // ============================================================
+        const FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
+        const FIREBASE_POLL_MS = 4000; // how often viewer devices re-check for new data
+        let dataMode = "mock"; // "excel" | "firebase" | "mock"
+        let firebaseStarted = false;
+        let lastFirebaseTimestamp = null;
+        let firebasePublishInFlight = false;
 
         // ---- state ----
         let isOfficeInitialized = false;
@@ -1056,8 +1072,8 @@
             quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
-                                        <div class="quay-title">QUAY</div>
-                                    `;
+                                <div class="quay-title">QUAY</div>
+                            `;
             container.appendChild(quayBox);
 
             // Render each tank at its TRUE real-world position and size
@@ -1111,21 +1127,21 @@
                 const waterClass = pct >= 85 ? 'tank-water-level tank-water-high' : 'tank-water-level';
                 const shortName = shortenTankName(cfg.name);
                 box.innerHTML += `
-                                            <div class="${waterClass}" style="height: ${pct}%"></div>
-                                            <div class="tank-header">
-                                                <span class="tank-name">${shortName}</span>
-                                                <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
-                                            </div>
-                                            <div class="tank-inputs">
-                                                <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
-                                                       id="txt_Row${cfg.id}" value="${weight}"
-                                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
-                                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                                    ${pctString} (Cap. ${cfg.capacity}t)
-                                                </div>
-                                                <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
-                                            </div>
-                                        `;
+                                    <div class="${waterClass}" style="height: ${pct}%"></div>
+                                    <div class="tank-header">
+                                        <span class="tank-name">${shortName}</span>
+                                        <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
+                                    </div>
+                                    <div class="tank-inputs">
+                                        <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
+                                               id="txt_Row${cfg.id}" value="${weight}"
+                                               onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
+                                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                            ${pctString} (Cap. ${cfg.capacity}t)
+                                        </div>
+                                        <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
+                                    </div>
+                                `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
@@ -1574,7 +1590,11 @@
         // ============================================================
         async function pullExcelTankData() {
             if (!isOfficeInitialized) {
-                generateMockSystemValues();
+                // Not running inside Excel: if a viewer Firebase session is
+                // active, re-check Firebase instead of falling straight to
+                // mock data.
+                if (dataMode === "firebase") pullFirebaseData(true);
+                else generateMockSystemValues();
                 return;
             }
             try {
@@ -1704,11 +1724,135 @@
                     initTankMatrix();
                     drawAttitudeGraphics();
                     refreshPlanView();
+                    dataMode = "excel";
+                    publishToFirebase();
                 });
             } catch (e) {
                 console.warn("Excel sync error, using mock", e);
                 generateMockSystemValues();
             }
+        }
+
+        // ============================================================
+        // 5b. FIREBASE — PUBLISH (Excel side) / PULL (viewer side)
+        //
+        //     Publish: called automatically every time this add-in pulls
+        //     fresh data from Excel, so the snapshot in Firebase always
+        //     mirrors what's on screen here. Other devices opening this
+        //     same index.html in a plain browser tab (not inside Excel)
+        //     will pick it up via pullFirebaseData() below.
+        // ============================================================
+        async function publishToFirebase() {
+            if (firebasePublishInFlight) return;
+            firebasePublishInFlight = true;
+            try {
+                const tanks = {};
+                tankData.forEach(t => { tanks["row" + t.row] = parseFloat(t.weight) || 0; });
+                const payload = {
+                    trim: currentTrimDegrees,
+                    heel: currentHeelDegrees,
+                    tanks: tanks,
+                    tankConfig: TANK_CONFIG,
+                    trailerAxles: trailerAxles,
+                    pumpLocations: pumpLocations,
+                    bargeCornerLabels: bargeCornerLabels,
+                    bargeName: BARGE_NAME,
+                    showTrailer: showTrailer,
+                    updatedAt: new Date().toISOString(),
+                    source: "excel-addin"
+                };
+                const res = await fetch(`${FIREBASE_URL}/ballast.json`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error("Request failed: " + res.status);
+            } catch (e) {
+                console.warn("Firebase publish error (check FIREBASE_URL / internet)", e);
+            } finally {
+                firebasePublishInFlight = false;
+            }
+        }
+
+        // Pull the latest published snapshot from Firebase. Used on any
+        // device that opens this page outside of Excel (phone, tablet,
+        // another PC) so it shows the same live data without needing the
+        // Excel file open. showAsManual=true forces a status update / mock
+        // fallback even if nothing changed since the last check.
+        async function pullFirebaseData(showAsManual) {
+            try {
+                const res = await fetch(`${FIREBASE_URL}/ballast.json`, { cache: "no-store" });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+
+                if (!data) {
+                    if (showAsManual) {
+                        document.getElementById('connectionStatus').innerHTML =
+                            'Status: <span style="color: #eab308;">● No published data yet — showing demo</span>';
+                        generateMockSystemValues();
+                    }
+                    return;
+                }
+
+                if (data.updatedAt === lastFirebaseTimestamp && !showAsManual) return;
+                lastFirebaseTimestamp = data.updatedAt;
+
+                if (Array.isArray(data.tankConfig) && data.tankConfig.length) {
+                    TANK_CONFIG = data.tankConfig;
+                }
+                recomputeBargeExtents();
+                rebuildTankDataFromConfig();
+                BARGE_NAME = data.bargeName || BARGE_NAME;
+                updateBargeInfoNote();
+
+                currentTrimDegrees = parseFloat(data.trim || 0);
+                currentHeelDegrees = parseFloat(data.heel || 0);
+
+                if (data.tanks) {
+                    tankData.forEach(tank => {
+                        const val = data.tanks["row" + tank.row];
+                        if (val !== undefined) {
+                            tank.weight = parseFloat(val).toFixed(2);
+                            const cfg = TANK_CONFIG.find(t => t.id === tank.row);
+                            tank.percent = (cfg && cfg.capacity) ? Math.min(parseFloat(val) / cfg.capacity, 1) : 0;
+                        }
+                    });
+                }
+                if (Array.isArray(data.trailerAxles)) trailerAxles = data.trailerAxles;
+                if (Array.isArray(data.pumpLocations)) pumpLocations = data.pumpLocations;
+                if (Array.isArray(data.bargeCornerLabels)) bargeCornerLabels = data.bargeCornerLabels;
+                if (typeof data.showTrailer === 'boolean') {
+                    showTrailer = data.showTrailer;
+                    const trailerBox = document.getElementById('trailerToggleCheckbox');
+                    if (trailerBox) trailerBox.checked = showTrailer;
+                }
+
+                initTankMatrix();
+                drawAttitudeGraphics();
+                refreshPlanView();
+
+                const when = data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "unknown time";
+                document.getElementById('connectionStatus').innerHTML =
+                    `Status: <span style="color: var(--accent-blue);">● Live — published ${when}</span>`;
+            } catch (e) {
+                console.warn("Firebase read error", e);
+                if (showAsManual) {
+                    document.getElementById('connectionStatus').innerHTML =
+                        'Status: <span style="color: #ef4444;">● Could not reach data source</span>';
+                }
+            }
+        }
+
+        // Starts viewer (non-Excel) polling mode. Safe to call more than
+        // once; only the first call actually starts the interval.
+        function startFirebaseMode() {
+            if (firebaseStarted) return;
+            firebaseStarted = true;
+            dataMode = "firebase";
+            document.getElementById('connectionStatus').innerHTML =
+                'Status: <span style="color: #eab308;">● Connecting...</span>';
+            pullFirebaseData(true);
+            setInterval(() => pullFirebaseData(false), FIREBASE_POLL_MS);
         }
 
         // ============================================================
@@ -1901,18 +2045,32 @@
 
         // ============================================================
         // 10. OFFICE INIT
+        //     Inside Excel (as the add-in) → live Excel sync, and every
+        //     pull also publishes a snapshot to Firebase (see
+        //     publishToFirebase). Anywhere else (a plain browser tab on a
+        //     phone/tablet/other PC, opened via this same index.html) →
+        //     Firebase viewer mode, polling for whatever was last
+        //     published. If Firebase has nothing yet, demo/mock data is
+        //     shown so the screen is never blank.
         // ============================================================
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
                 isOfficeInitialized = true;
+                dataMode = "excel";
                 document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
                 pullExcelTankData();
                 registerExcelAutoTrack();
             } else {
-                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
-                generateMockSystemValues();
+                startFirebaseMode();
             }
         });
+
+        // Fallback: if Office.js never calls onReady (e.g. this page is
+        // just opened as a normal web link, not loaded as an Excel
+        // add-in), start Firebase viewer mode anyway after a short wait.
+        setTimeout(() => {
+            if (!isOfficeInitialized) startFirebaseMode();
+        }, 1200);
 
         async function registerExcelAutoTrack() {
             try {
@@ -1924,202 +2082,11 @@
             } catch (e) { /* ignore */ }
         }
 
-        // initial render fallback
+        // initial render fallback (safety net — startFirebaseMode() above
+        // already falls back to mock data on its own if Firebase is empty)
         window.addEventListener('load', () => {
-            if (!isOfficeInitialized) generateMockSystemValues();
+            if (!isOfficeInitialized) startFirebaseMode();
         });
     </script>
-    <div id="viewer3d"
-         style="
-        width:100%;
-        height:500px;
-        margin-top:20px;
-        border:1px solid #555;
-        border-radius:8px;">
-    </div>
-    <script>
-
-        const container =
-            document.getElementById("viewer3d");
-
-        const scene =
-            new THREE.Scene();
-
-        scene.background =
-            new THREE.Color(0x111111);
-
-        const camera =
-            new THREE.PerspectiveCamera(
-                75,
-                container.clientWidth /
-                container.clientHeight,
-                0.1,
-                1000
-            );
-
-        const renderer =
-            new THREE.WebGLRenderer({
-                antialias: true
-            });
-
-        renderer.setSize(
-            container.clientWidth,
-            container.clientHeight
-        );
-
-        container.appendChild(
-            renderer.domElement
-        );
-
-        const light =
-            new THREE.DirectionalLight(
-                0xffffff,
-                1
-            );
-
-        light.position.set(
-            5,
-            10,
-            10
-        );
-
-        scene.add(light);
-
-        scene.add(
-            new THREE.AmbientLight(
-                0xffffff,
-                0.5
-            )
-        );
-
-        const barge = new THREE.Group();
-        scene.add(barge);
-
-        const deck =
-            new THREE.Mesh(
-                new THREE.BoxGeometry(
-                    120,
-                    2,
-                    30
-                ),
-                new THREE.MeshPhongMaterial({
-                    color: 0x555555
-                })
-            );
-
-        barge.add(deck);
-
-        const tanks = [
-
-            {
-                name: '1PS',
-                x: -40,
-                z: -8,
-                width: 15,
-                length: 8,
-                fill: 0.8
-            },
-
-            {
-                name: '1SB',
-                x: -40,
-                z: 8,
-                width: 15,
-                length: 8,
-                fill: 0.5
-            },
-
-            {
-                name: '2PS',
-                x: 0,
-                z: -8,
-                width: 15,
-                length: 8,
-                fill: 0.3
-            },
-
-            {
-                name: '2SB',
-                x: 0,
-                z: 8,
-                width: 15,
-                length: 8,
-                fill: 0.9
-            }
-
-        ];
-
-        tanks.forEach(t => {
-
-            const shell =
-                new THREE.Mesh(
-                    new THREE.BoxGeometry(
-                        t.width,
-                        8,
-                        t.length
-                    ),
-                    new THREE.MeshPhongMaterial({
-                        color: 0x888888,
-                        transparent: true,
-                        opacity: 0.3
-                    })
-                );
-
-            shell.position.set(
-                t.x,
-                4,
-                t.z
-            );
-
-            barge.add(shell);
-
-            const water =
-                new THREE.Mesh(
-                    new THREE.BoxGeometry(
-                        t.width * 0.95,
-                        t.fill * 8,
-                        t.length * 0.95
-                    ),
-                    new THREE.MeshPhongMaterial({
-                        color: 0x0088ff
-                    })
-                );
-
-            water.position.set(
-                t.x,
-                (t.fill * 8) / 2,
-                t.z
-            );
-
-            barge.add(water);
-
-        });
-
-        camera.position.set(
-            60,
-            40,
-            60
-        );
-
-        camera.lookAt(
-            0,
-            0,
-            0
-        );
-
-        function animate() {
-            requestAnimationFrame(
-                animate
-            );
-
-            renderer.render(
-                scene,
-                camera
-            );
-        }
-
-        animate();
-
-    </script>  
 </body>
 </html>
