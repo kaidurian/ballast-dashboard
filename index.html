@@ -596,6 +596,8 @@
                 cursor: pointer;
             }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.179/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.179/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body class="light-theme">
     <header>
@@ -618,9 +620,7 @@
                 <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
             </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
-            <span id="lastUpdated" style="font-size: 10px; color: var(--text-muted);"></span>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
-            <button class="sync-btn" onclick="manualRefresh()">↻ Refresh (Mobile)</button>
         </div>
     </header>
     <div class="main-layout">
@@ -674,20 +674,6 @@
         const CREST_START_ROW = 30;     // first geometry row
         const CREST_MAX_ROWS = 200;     // generous over-read, trimmed at first blank row
         const CREST_COL_RANGE = "Q:T";  // Q=x_start, R=x_end, S=y_start, T=y_end
-
-        // ============================================================
-        // FIREBASE CONFIG — shared data store used by publish.html (the
-        // mobile publisher page) and the Excel VBA macros (PublishBallastData
-        // / RunAutoSyncCheck) to exchange trim/heel/tank-weight data with
-        // this standalone webpage when it's not running inside Excel.
-        // Data shape at `${FIREBASE_URL}/ballast.json`:
-        //   { trim, heel, tanks: { "row14": <weight>, ... }, updatedAt, source }
-        // Tank weight keys ("row14".."row40") line up with tankData[i].row,
-        // which is always EXCEL_START_ROW + index, so they apply correctly
-        // however many tanks CREST_301 currently defines.
-        // ============================================================
-        const FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
-        const FIREBASE_POLL_MS = 4000; // check for new published data every 4 seconds
 
         // TANK_CONFIG is now populated dynamically at runtime (see
         // buildTankConfigFromCrest / pullExcelTankData). It starts empty
@@ -800,9 +786,6 @@
         let isOfficeInitialized = false;
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
-        let dataMode = "none"; // "firebase" or "excel" — which source last updated the dashboard
-        let lastFirebaseTimestamp = null; // last data.updatedAt seen from Firebase, to skip redundant re-renders
-        let firebaseStarted = false; // guards against starting the Firebase poll loop more than once
         let trailerAxles = []; // [{ name, x, y }]
         let showTrailer = true;  // new state for trailer toggle
 
@@ -1073,8 +1056,8 @@
             quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
-                                <div class="quay-title">QUAY</div>
-                            `;
+                                        <div class="quay-title">QUAY</div>
+                                    `;
             container.appendChild(quayBox);
 
             // Render each tank at its TRUE real-world position and size
@@ -1128,21 +1111,21 @@
                 const waterClass = pct >= 85 ? 'tank-water-level tank-water-high' : 'tank-water-level';
                 const shortName = shortenTankName(cfg.name);
                 box.innerHTML += `
-                                    <div class="${waterClass}" style="height: ${pct}%"></div>
-                                    <div class="tank-header">
-                                        <span class="tank-name">${shortName}</span>
-                                        <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
-                                    </div>
-                                    <div class="tank-inputs">
-                                        <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
-                                               id="txt_Row${cfg.id}" value="${weight}"
-                                               onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
-                                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                            ${pctString} (Cap. ${cfg.capacity}t)
-                                        </div>
-                                        <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
-                                    </div>
-                                `;
+                                            <div class="${waterClass}" style="height: ${pct}%"></div>
+                                            <div class="tank-header">
+                                                <span class="tank-name">${shortName}</span>
+                                                <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
+                                            </div>
+                                            <div class="tank-inputs">
+                                                <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
+                                                       id="txt_Row${cfg.id}" value="${weight}"
+                                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
+                                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                                    ${pctString} (Cap. ${cfg.capacity}t)
+                                                </div>
+                                                <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
+                                            </div>
+                                        `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
@@ -1587,98 +1570,11 @@
         window.addEventListener('resize', () => drawAxleOverlay());
 
         // ============================================================
-        // 4b. FIREBASE — read the latest snapshot published from either
-        //     publish.html (mobile) or the Excel VBA macros, when this
-        //     page is running standalone (i.e. NOT inside Excel as an
-        //     Office add-in). Geometry (CREST_301) still comes from the
-        //     mock/local TANK_CONFIG; Firebase only supplies the live
-        //     trim/heel and per-tank weights, exactly like pullExcelTankData
-        //     does for the Excel-connected case.
-        // ============================================================
-        async function pullFirebaseData(showAsManual) {
-            try {
-                const res = await fetch(`${FIREBASE_URL}/ballast.json`, { cache: "no-store" });
-                if (!res.ok) throw new Error("HTTP " + res.status);
-                const data = await res.json();
-                if (!data) {
-                    if (showAsManual) setStatus("none", "No published data yet");
-                    return;
-                }
-
-                // Avoid re-rendering if nothing changed (prevents flicker)
-                if (data.updatedAt === lastFirebaseTimestamp && !showAsManual) return;
-                lastFirebaseTimestamp = data.updatedAt;
-
-                currentTrimDegrees = parseFloat(data.trim || 0);
-                currentHeelDegrees = parseFloat(data.heel || 0);
-
-                if (data.tanks) {
-                    tankData.forEach(tank => {
-                        const val = data.tanks["row" + tank.row];
-                        if (val !== undefined) {
-                            const cfg = TANK_CONFIG.find(t => t.id === tank.row);
-                            const cap = cfg ? cfg.capacity : 0;
-                            tank.weight = parseFloat(val).toFixed(2);
-                            tank.percent = cap ? Math.min(parseFloat(val) / cap, 1) : 0;
-                        }
-                    });
-                }
-
-                initTankMatrix();
-                drawAttitudeGraphics();
-                refreshPlanView();
-                dataMode = "firebase";
-                setStatus("firebase", data.source === "excel-vba" ? "Excel (published)" : "Mobile (published)");
-
-                if (data.updatedAt) {
-                    const d = new Date(data.updatedAt);
-                    const lu = document.getElementById('lastUpdated');
-                    if (lu) lu.textContent = "Last update: " + d.toLocaleString();
-                }
-            } catch (e) {
-                console.warn("Firebase read error", e);
-                if (showAsManual) setStatus("error", "Could not reach data source");
-            }
-        }
-
-        function setStatus(mode, label) {
-            const el = document.getElementById('connectionStatus');
-            if (!el) return;
-            if (mode === "firebase") {
-                el.innerHTML = `Status: <span style="color: var(--accent-blue);">● ${label}</span>`;
-            } else if (mode === "excel") {
-                el.innerHTML = `Status: <span style="color: var(--accent-green);">● ${label}</span>`;
-            } else if (mode === "error") {
-                el.innerHTML = `Status: <span style="color:#ef4444;">● ${label}</span>`;
-            } else {
-                el.innerHTML = `Status: <span style="color:#eab308;">● ${label}</span>`;
-            }
-        }
-
-        function manualRefresh() {
-            pullFirebaseData(true);
-        }
-
-        // Starts (once) the standalone-mode Firebase polling loop. Called
-        // from Office.onReady's non-Excel branch — see section 10 below.
-        function startFirebaseMode() {
-            if (firebaseStarted) return;
-            firebaseStarted = true;
-            setStatus("none", "Loading...");
-            pullFirebaseData(true);
-            setInterval(() => pullFirebaseData(false), FIREBASE_POLL_MS);
-        }
-
-        // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
         // ============================================================
         async function pullExcelTankData() {
             if (!isOfficeInitialized) {
-                if (firebaseStarted) {
-                    manualRefresh();
-                } else {
-                    startFirebaseMode();
-                }
+                generateMockSystemValues();
                 return;
             }
             try {
@@ -2009,12 +1905,12 @@
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
                 isOfficeInitialized = true;
-                dataMode = "excel";
                 document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
                 pullExcelTankData();
                 registerExcelAutoTrack();
             } else {
-                startFirebaseMode();
+                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
+                generateMockSystemValues();
             }
         });
 
@@ -2028,11 +1924,120 @@
             } catch (e) { /* ignore */ }
         }
 
-        // initial render fallback (Office.js never called onReady — plain
-        // browser tab outside any Office host)
+        // initial render fallback
         window.addEventListener('load', () => {
-            if (!isOfficeInitialized) startFirebaseMode();
+            if (!isOfficeInitialized) generateMockSystemValues();
         });
+    </script>
+    <div id="viewer3d"
+         style="
+        width:100%;
+        height:500px;
+        margin-top:20px;
+        border:1px solid #555;
+        border-radius:8px;">
+    </div>
+    <script>
+
+        const scene = new THREE.Scene();
+
+        const camera =
+            new THREE.PerspectiveCamera(
+                45,
+                viewer3d.clientWidth /
+                viewer3d.clientHeight,
+                0.1,
+                1000
+            );
+
+        camera.position.set(60, 40, 60);
+
+        const renderer =
+            new THREE.WebGLRenderer({
+                antialias: true
+            });
+
+        renderer.setSize(
+            viewer3d.clientWidth,
+            viewer3d.clientHeight
+        );
+
+        viewer3d.appendChild(
+            renderer.domElement
+        );
+
+        const controls =
+            new THREE.OrbitControls(
+                camera,
+                renderer.domElement
+            );
+
+        const light =
+            new THREE.DirectionalLight(
+                0xffffff,
+                1
+            );
+
+        light.position.set(20, 30, 20);
+
+        scene.add(light);
+
+        scene.add(
+            new THREE.AmbientLight(
+                0xffffff,
+                0.5
+            )
+        );
+
+        const deck =
+            new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    120,
+                    2,
+                    30
+                ),
+                new THREE.MeshPhongMaterial({
+                    color: 0x555555
+                })
+            );
+
+        scene.add(deck);
+
+        const tank =
+            new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    10,
+                    8,
+                    8
+                ),
+                new THREE.MeshPhongMaterial({
+                    color: 0x00aaff
+                })
+            );
+
+        tank.position.set(
+            0,
+            5,
+            0
+        );
+
+        scene.add(tank);
+
+        function animate() {
+            requestAnimationFrame(
+                animate
+            );
+
+            controls.update();
+
+            renderer.render(
+                scene,
+                camera
+            );
+        }
+
+        animate();
+
     </script>
 </body>
 </html>
