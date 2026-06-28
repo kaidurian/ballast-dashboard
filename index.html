@@ -654,7 +654,10 @@
                     </label>
                 </div>
             </div>
-            <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
+            <div style="position:relative; width:100%; height:420px;">
+                <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
+                <div id="labels3d" style="position:absolute; inset:0; pointer-events:none;"></div>
+            </div>
             <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
                 <button class="sync-btn" onclick="set3DCamera('iso-fwd-ps')" id="cam3d-iso-fwd-ps">FWD-PS iso</button>
                 <button class="sync-btn" onclick="set3DCamera('iso-fwd-sb')" id="cam3d-iso-fwd-sb">FWD-SB iso</button>
@@ -1989,9 +1992,16 @@
             'iso-aft-ps': { az: -45,  el: 32 },
             'iso-aft-sb': { az: -135, el: 32 },
             'top':        { az: 0,    el: 89 },
-            'side':       { az: 90,   el: 6  },
-            'front':      { az: 0,    el: 6  },
-            'end':        { az: 180,  el: 6  }
+            // Camera position model: x-offset = radius*sin(theta),
+            // z-offset = radius*cos(theta). FWD/bow is +X, AFT/stern is -X,
+            // PS is +Z, SB is -Z. So a true bow/stern (fore-aft) view needs
+            // theta = +-90, NOT 0/180 (which is the broadside PS/SB axis).
+            // 'side' looks down the length from the quay end (same azimuth
+            // as 'end'/stern, since the quay sits at low X), pulled back
+            // further so the quay structure is clearly visible in frame.
+            'side':       { az: -90,  el: 8  },
+            'front':      { az: 90,   el: 6  },
+            'end':        { az: -90,  el: 6  }
         };
 
         function init3DScene() {
@@ -2043,6 +2053,7 @@
             function animate3d() {
                 requestAnimationFrame(animate3d);
                 if (renderer3d && scene3d && camera3d) renderer3d.render(scene3d, camera3d);
+                if (typeof renderLabels3D === 'function') renderLabels3D();
             }
             animate3d();
         }
@@ -2065,7 +2076,13 @@
             current3DCamera = name;
             const tp = azElToThetaPhi3D(p.az, p.el);
             theta3d = tp.theta; phi3d = tp.phi;
-            radius3d = (name === 'front' || name === 'end' || name === 'side') ? 180 : 230;
+            if (name === 'side') {
+                radius3d = 260; // pulled back further so the quay structure is fully in frame
+            } else if (name === 'front' || name === 'end') {
+                radius3d = 180;
+            } else {
+                radius3d = 230;
+            }
             updateCamera3DPosition();
             Object.keys(CAM_PRESETS_3D).forEach((k) => {
                 const b = document.getElementById('cam3d-' + k);
@@ -2244,7 +2261,86 @@
                 tm.ballast.material.color.set(hot ? 0xf08a3c : 0x3aa6e8);
             });
             hull3dGroup.rotation.z = (currentTrimDegrees * Math.PI) / 180;
-            hull3dGroup.rotation.x = (-currentHeelDegrees * Math.PI) / 180;
+            // Heel > 0 means PORT (PS, +Z in this model) goes DOWN — verified
+            // numerically against the 2D convention. Previous code used a
+            // negated sign here, which visually swapped the PS/SB rows
+            // under any heel tilt.
+            hull3dGroup.rotation.x = (currentHeelDegrees * Math.PI) / 180;
+        }
+
+        // ---- label overlay: AFT/FWD/PS/SB, the 6 corner labels, and a
+        // trim/heel readout. World anchor points live INSIDE hull3dGroup
+        // so they tilt together with the hull, matching what the labels
+        // are pointing at. Re-projected to 2D screen space every frame
+        // using the live camera, since the camera/hull both move.
+        let labelAnchors3d = [];
+
+        function buildLabelAnchors3D() {
+            labelAnchors3d.forEach((a) => { if (a.obj && a.obj.parent) a.obj.parent.remove(a.obj); });
+            labelAnchors3d = [];
+            if (!hull3dGroup || !TANK_CONFIG.length) return;
+
+            const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+            const labelY = 1.0; // small lift above deck so labels don't sit inside the hull
+
+            function addAnchor(id, x, y, z, text, cls) {
+                const obj = new THREE.Object3D();
+                obj.position.set(x, y, z);
+                hull3dGroup.add(obj);
+                labelAnchors3d.push({ id, obj, text, cls });
+            }
+
+            // AFT / FWD (along X, centered in Z)
+            addAnchor('aft', BARGE_X_MIN, labelY, 0, 'AFT', 'edge');
+            addAnchor('fwd', BARGE_X_MAX, labelY, 0, 'FWD', 'edge');
+            // PS / SB (along Z, centered in X) — PS = +Z, SB = -Z per the
+            // confirmed real-data convention (positive Y in CREST_301 = PS).
+            addAnchor('ps', midX, labelY, BARGE_Y_MAX, 'PS', 'edge');
+            addAnchor('sb', midX, labelY, BARGE_Y_MIN, 'SB', 'edge');
+
+            // 6 corner labels, sourced from Load_Editor!I1:I6 via
+            // bargeCornerLabels — same indexing as the 2D plan view.
+            addAnchor('corner0', BARGE_X_MIN, labelY, BARGE_Y_MAX, '', 'corner'); // I1 AFT-PS
+            addAnchor('corner1', midX,        labelY, BARGE_Y_MAX, '', 'corner'); // I2 mid-PS
+            addAnchor('corner2', BARGE_X_MAX, labelY, BARGE_Y_MAX, '', 'corner'); // I3 FWD-PS
+            addAnchor('corner3', BARGE_X_MIN, labelY, BARGE_Y_MIN, '', 'corner'); // I4 AFT-SB
+            addAnchor('corner4', midX,        labelY, BARGE_Y_MIN, '', 'corner'); // I5 mid-SB
+            addAnchor('corner5', BARGE_X_MAX, labelY, BARGE_Y_MIN, '', 'corner'); // I6 FWD-SB
+        }
+
+        function renderLabels3D() {
+            const layer = document.getElementById('labels3d');
+            const container = document.getElementById('viewer3d');
+            if (!layer || !container || !camera3d || !labelAnchors3d.length) return;
+
+            const w = container.clientWidth, h = container.clientHeight;
+            const v = new THREE.Vector3();
+            let html = '';
+
+            labelAnchors3d.forEach((a) => {
+                a.obj.getWorldPosition(v);
+                v.project(camera3d);
+                if (v.z > 1) return; // behind camera
+                const sx = (v.x * 0.5 + 0.5) * w;
+                const sy = (-v.y * 0.5 + 0.5) * h;
+
+                if (a.cls === 'edge') {
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:12px; font-weight:700; letter-spacing:0.5px; color:#fef3c7; background:rgba(15,17,21,0.55); padding:1px 6px; border-radius:4px; white-space:nowrap;">${a.text}</div>`;
+                } else if (a.cls === 'corner') {
+                    const idx = parseInt(a.id.replace('corner', ''), 10);
+                    const text = (bargeCornerLabels[idx] || '').trim();
+                    if (!text) return;
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:11px; color:#cbd5e1; background:rgba(15,17,21,0.5); padding:1px 5px; border-radius:4px; white-space:nowrap;">${text}</div>`;
+                }
+            });
+
+            const trimAbs3d = Math.abs(currentTrimDegrees).toFixed(1);
+            const heelAbs3d = Math.abs(currentHeelDegrees).toFixed(1);
+            const trimTxt = currentTrimDegrees === 0 ? 'Trim 0.0°' : (currentTrimDegrees > 0 ? `Trim ${trimAbs3d}° (AFT down)` : `Trim ${trimAbs3d}° (FWD down)`);
+            const heelTxt = currentHeelDegrees === 0 ? 'Heel 0.0°' : (currentHeelDegrees > 0 ? `Heel ${heelAbs3d}° (PS down)` : `Heel ${heelAbs3d}° (SB down)`);
+            html += `<div style="position:absolute; left:8px; top:8px; font-size:11px; line-height:1.5; color:#e2e8f0; background:rgba(15,17,21,0.6); padding:5px 9px; border-radius:6px;">${trimTxt}<br>${heelTxt}</div>`;
+
+            layer.innerHTML = html;
         }
 
         // Public entry point — called after every refreshPlanView() so the
@@ -2263,9 +2359,11 @@
             const signature = TANK_CONFIG.length + '|' + trailerAxles.length + '|' + pumpLocations.length;
             if (signature !== last3DSignature) {
                 rebuild3DGeometry();
+                buildLabelAnchors3D();
                 last3DSignature = signature;
             }
             update3DFillAndAttitude();
+            renderLabels3D();
         }
     </script>  
 </body>
