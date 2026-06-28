@@ -596,8 +596,6 @@
                 cursor: pointer;
             }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body class="light-theme">
     <header>
@@ -1056,8 +1054,8 @@
             quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
-                                        <div class="quay-title">QUAY</div>
-                                    `;
+                                <div class="quay-title">QUAY</div>
+                            `;
             container.appendChild(quayBox);
 
             // Render each tank at its TRUE real-world position and size
@@ -1111,21 +1109,21 @@
                 const waterClass = pct >= 85 ? 'tank-water-level tank-water-high' : 'tank-water-level';
                 const shortName = shortenTankName(cfg.name);
                 box.innerHTML += `
-                                            <div class="${waterClass}" style="height: ${pct}%"></div>
-                                            <div class="tank-header">
-                                                <span class="tank-name">${shortName}</span>
-                                                <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
-                                            </div>
-                                            <div class="tank-inputs">
-                                                <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
-                                                       id="txt_Row${cfg.id}" value="${weight}"
-                                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
-                                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                                    ${pctString} (Cap. ${cfg.capacity}t)
-                                                </div>
-                                                <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
-                                            </div>
-                                        `;
+                                    <div class="${waterClass}" style="height: ${pct}%"></div>
+                                    <div class="tank-header">
+                                        <span class="tank-name">${shortName}</span>
+                                        <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
+                                    </div>
+                                    <div class="tank-inputs">
+                                        <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
+                                               id="txt_Row${cfg.id}" value="${weight}"
+                                               onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
+                                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                            ${pctString} (Cap. ${cfg.capacity}t)
+                                        </div>
+                                        <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
+                                    </div>
+                                `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
@@ -1559,62 +1557,15 @@
             });
         }
 
-        // Full layout refresh — re-measures the plan view container and
-        // redraws EVERYTHING anchored to it via worldToScreen() (quay box,
-        // tanks, corner/AFT/FWD/PS/SB labels, pump markers, axle overlay).
-        // drawAxleOverlay() alone only repaints the trailer-axle canvas; it
-        // does NOT recompute the quay box or any of the absolutely
-        // positioned labels/markers, which is what left them mis-placed
-        // after the Office side panel was closed and reopened (the pane
-        // gets a new rendered width, but nothing told those elements to
-        // re-project onto it). initTankMatrix() rebuilds all of them from
-        // scratch against the freshly re-measured container, so this is
-        // the function to call any time the panel's size may have changed
-        // out from under us.
         function refreshPlanView() {
-            if (!TANK_CONFIG.length) return; // nothing loaded yet to redraw
-            initTankMatrix();
-            applyDimensionVisibility();
-            drawAttitudeGraphics();
             drawAxleOverlay();
-            // Re-measure a couple more times shortly after, since the
-            // Office host (esp. when the task pane is reopened) can settle
-            // its final width/height a frame or two after this first pass.
+            // Re-measure one frame later too, in case fonts/scrollbars shift
+            // the grid's rendered box right after the initial paint.
             requestAnimationFrame(() => drawAxleOverlay());
-            setTimeout(refreshPlanViewMeasureOnly, 150);
-            setTimeout(refreshPlanViewMeasureOnly, 500);
         }
 
-        // Lighter-weight re-measure used for the delayed follow-up passes
-        // above: re-runs the same full rebuild as refreshPlanView() but
-        // without re-arming its own timers, to avoid runaway recursion.
-        function refreshPlanViewMeasureOnly() {
-            if (!TANK_CONFIG.length) return;
-            initTankMatrix();
-            applyDimensionVisibility();
-            drawAttitudeGraphics();
-            drawAxleOverlay();
-        }
-
-        // Recompute the full layout whenever the window/pane reflows.
-        window.addEventListener('resize', refreshPlanView);
-
-        // The Office task pane (side panel) does not reliably fire a
-        // browser 'resize' event when it is closed and reopened — the
-        // pane's iframe can be torn down/rebuilt without one. Re-running
-        // the layout refresh on visibilitychange catches that case: the
-        // document goes hidden when the pane closes and visible again
-        // when it reopens, regardless of whether 'resize' also fired.
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                refreshPlanView();
-            }
-        });
-
-        // Belt-and-suspenders: also catch plain window focus, which fires
-        // when the user clicks back into the task pane after it was
-        // reopened, in case visibilitychange doesn't fire in some hosts.
-        window.addEventListener('focus', refreshPlanView);
+        // Recompute overlay alignment whenever the layout reflows
+        window.addEventListener('resize', () => drawAxleOverlay());
 
         // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
@@ -1959,16 +1910,6 @@
                 document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
                 generateMockSystemValues();
             }
-            // Office.onReady can fire before the task pane has finished
-            // settling into its final on-screen size (this is the same
-            // "open the side panel" moment the user sees the barge plan
-            // mis-positioned in). Force a couple of delayed full layout
-            // refreshes after data load so the quay box, tank tiles,
-            // corner labels, and pump markers re-project onto the pane's
-            // real, settled width/height rather than whatever width
-            // happened to be available at first paint.
-            setTimeout(refreshPlanView, 200);
-            setTimeout(refreshPlanView, 800);
         });
 
         async function registerExcelAutoTrack() {
@@ -1986,197 +1927,5 @@
             if (!isOfficeInitialized) generateMockSystemValues();
         });
     </script>
-    <div id="viewer3d"
-         style="
-        width:100%;
-        height:500px;
-        margin-top:20px;
-        border:1px solid #555;
-        border-radius:8px;">
-    </div>
-    <script>
-
-        const container =
-            document.getElementById("viewer3d");
-
-        const scene =
-            new THREE.Scene();
-
-        scene.background =
-            new THREE.Color(0x111111);
-
-        const camera =
-            new THREE.PerspectiveCamera(
-                75,
-                container.clientWidth /
-                container.clientHeight,
-                0.1,
-                1000
-            );
-
-        const renderer =
-            new THREE.WebGLRenderer({
-                antialias: true
-            });
-
-        renderer.setSize(
-            container.clientWidth,
-            container.clientHeight
-        );
-
-        container.appendChild(
-            renderer.domElement
-        );
-
-        const light =
-            new THREE.DirectionalLight(
-                0xffffff,
-                1
-            );
-
-        light.position.set(
-            5,
-            10,
-            10
-        );
-
-        scene.add(light);
-
-        scene.add(
-            new THREE.AmbientLight(
-                0xffffff,
-                0.5
-            )
-        );
-
-        const barge = new THREE.Group();
-        scene.add(barge);
-
-        const deck =
-            new THREE.Mesh(
-                new THREE.BoxGeometry(
-                    120,
-                    2,
-                    30
-                ),
-                new THREE.MeshPhongMaterial({
-                    color: 0x555555
-                })
-            );
-
-        barge.add(deck);
-
-        const tanks = [
-
-            {
-                name: '1PS',
-                x: -40,
-                z: -8,
-                width: 15,
-                length: 8,
-                fill: 0.8
-            },
-
-            {
-                name: '1SB',
-                x: -40,
-                z: 8,
-                width: 15,
-                length: 8,
-                fill: 0.5
-            },
-
-            {
-                name: '2PS',
-                x: 0,
-                z: -8,
-                width: 15,
-                length: 8,
-                fill: 0.3
-            },
-
-            {
-                name: '2SB',
-                x: 0,
-                z: 8,
-                width: 15,
-                length: 8,
-                fill: 0.9
-            }
-
-        ];
-
-        tanks.forEach(t => {
-
-            const shell =
-                new THREE.Mesh(
-                    new THREE.BoxGeometry(
-                        t.width,
-                        8,
-                        t.length
-                    ),
-                    new THREE.MeshPhongMaterial({
-                        color: 0x888888,
-                        transparent: true,
-                        opacity: 0.3
-                    })
-                );
-
-            shell.position.set(
-                t.x,
-                4,
-                t.z
-            );
-
-            barge.add(shell);
-
-            const water =
-                new THREE.Mesh(
-                    new THREE.BoxGeometry(
-                        t.width * 0.95,
-                        t.fill * 8,
-                        t.length * 0.95
-                    ),
-                    new THREE.MeshPhongMaterial({
-                        color: 0x0088ff
-                    })
-                );
-
-            water.position.set(
-                t.x,
-                (t.fill * 8) / 2,
-                t.z
-            );
-
-            barge.add(water);
-
-        });
-
-        camera.position.set(
-            60,
-            40,
-            60
-        );
-
-        camera.lookAt(
-            0,
-            0,
-            0
-        );
-
-        function animate() {
-            requestAnimationFrame(
-                animate
-            );
-
-            renderer.render(
-                scene,
-                camera
-            );
-        }
-
-        animate();
-
-    </script>  
 </body>
 </html>
