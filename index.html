@@ -1929,17 +1929,34 @@
         // ============================================================
         // 10. OFFICE INIT
         // ============================================================
-        Office.onReady((info) => {
-            if (info.host === Office.HostType.Excel) {
-                isOfficeInitialized = true;
-                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
-                pullExcelTankData();
-                registerExcelAutoTrack();
-            } else {
-                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
-                generateMockSystemValues();
-            }
-        });
+        // office.js (loaded in <head>) expects to run inside an Office
+        // host (Excel task pane). When this file is opened as a plain
+        // standalone webpage — no Office host, blocked CDN, file://
+        // access, corporate firewall, ad-blocker, etc — that <script> tag
+        // can fail to load entirely, leaving the global `Office` object
+        // undefined. Calling Office.onReady() directly in that case throws
+        // a ReferenceError and halts this ENTIRE script, which is why the
+        // whole dashboard (2D and 3D alike) can fail to render at all as
+        // a standalone page. Guard for that explicitly: if `Office` never
+        // showed up, skip straight to demo/mock mode ourselves.
+        if (typeof Office !== 'undefined' && Office && typeof Office.onReady === 'function') {
+            Office.onReady((info) => {
+                if (info.host === Office.HostType.Excel) {
+                    isOfficeInitialized = true;
+                    document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
+                    pullExcelTankData();
+                    registerExcelAutoTrack();
+                } else {
+                    document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
+                    generateMockSystemValues();
+                }
+            });
+        } else {
+            console.warn('Office.js unavailable (standalone webpage context) — running in demo mode.');
+            const statusEl = document.getElementById('connectionStatus');
+            if (statusEl) statusEl.innerHTML = 'Status: <span style="color: #eab308;">● Demo mode (standalone)</span>';
+            generateMockSystemValues();
+        }
 
         async function registerExcelAutoTrack() {
             try {
@@ -2188,21 +2205,30 @@
             });
 
             // pump markers — purple post + cap, sitting ON the deck top
-            // surface, extruding up by the fixed PUMP_HEIGHT_Z_M
+            // surface, extruding up by the fixed PUMP_HEIGHT_Z_M. Anchored
+            // at each tank's TOP-RIGHT corner (max X, max Y — i.e. the
+            // FWD+PS corner of that tank's own footprint), matching the
+            // exact convention used by the 2D plan's renderPumpMarkers().
+            // Matched via normalizeTankName(), same fuzzy matching the 2D
+            // view uses, so real Excel names like "WB-09-PS.P" match
+            // reliably regardless of separator/case differences.
             pumpLocations.forEach((pump) => {
-                const cfg = TANK_CONFIG.find((t) => t.name === pump.tankName);
+                const targetNorm = normalizeTankName(pump.tankName);
+                const cfg = TANK_CONFIG.find((t) => normalizeTankName(t.name) === targetNorm);
                 if (!cfg) return;
+                const cornerX = cfg.x + cfg.width / 2;
+                const cornerY = cfg.y + cfg.height / 2;
                 const post = new THREE.Mesh(
                     new THREE.CylinderGeometry(0.35, 0.35, PUMP_HEIGHT_Z_M, 12),
                     new THREE.MeshPhongMaterial({ color: 0xa855f7 })
                 );
-                post.position.set(cfg.x, DECK_TOP_Y + PUMP_HEIGHT_Z_M / 2, cfg.y);
+                post.position.set(cornerX, DECK_TOP_Y + PUMP_HEIGHT_Z_M / 2, cornerY);
                 hull3dGroup.add(post);
                 const cap = new THREE.Mesh(
                     new THREE.SphereGeometry(0.55, 12, 12),
                     new THREE.MeshPhongMaterial({ color: 0xf5f3ff })
                 );
-                cap.position.set(cfg.x, DECK_TOP_Y + PUMP_HEIGHT_Z_M, cfg.y);
+                cap.position.set(cornerX, DECK_TOP_Y + PUMP_HEIGHT_Z_M, cornerY);
                 hull3dGroup.add(cap);
                 pumpMeshes3d.push(post, cap);
             });
