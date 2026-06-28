@@ -596,6 +596,8 @@
                 cursor: pointer;
             }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body class="light-theme">
     <header>
@@ -640,6 +642,28 @@
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
                 <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
+            </div>
+        </div>
+        <div class="tank-grid-container" id="view3dPanel">
+            <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0;">
+                <span style="font-size: 12px; color: var(--text-muted);">3D ballast view</span>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <label class="toggle-container" style="margin:0;">
+                        <span style="font-size:11px;">Deck</span>
+                        <input type="checkbox" id="deck3dToggle" checked onchange="set3DDeckVisible(this.checked)">
+                    </label>
+                </div>
+            </div>
+            <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
+                <button class="sync-btn" onclick="set3DCamera('iso-fwd-ps')" id="cam3d-iso-fwd-ps">FWD-PS iso</button>
+                <button class="sync-btn" onclick="set3DCamera('iso-fwd-sb')" id="cam3d-iso-fwd-sb">FWD-SB iso</button>
+                <button class="sync-btn" onclick="set3DCamera('iso-aft-ps')" id="cam3d-iso-aft-ps">AFT-PS iso</button>
+                <button class="sync-btn" onclick="set3DCamera('iso-aft-sb')" id="cam3d-iso-aft-sb">AFT-SB iso</button>
+                <button class="sync-btn" onclick="set3DCamera('top')" id="cam3d-top">Top-down</button>
+                <button class="sync-btn" onclick="set3DCamera('side')" id="cam3d-side">Side</button>
+                <button class="sync-btn" onclick="set3DCamera('front')" id="cam3d-front">Front (bow)</button>
+                <button class="sync-btn" onclick="set3DCamera('end')" id="cam3d-end">End (stern)</button>
             </div>
         </div>
     </div>
@@ -779,24 +803,6 @@
                 `${BARGE_NAME} ·length ${totalLength.toFixed(2)}m (${numCols} tanks) × ` +
                 `width ${totalWidth.toFixed(2)}m (${numRows} tanks)`;
         }
-
-        // ============================================================
-        // 1c. FIREBASE LINK — lets this same dashboard be viewed live on
-        //     phones/tablets/other PCs (no Excel needed there), by reading
-        //     a snapshot that the Excel side (this add-in, or the
-        //     PublishBallastData.bas macro, or publish.html) writes to a
-        //     free Firebase Realtime Database.
-        //
-        //     Replace FIREBASE_URL with YOUR OWN Firebase project URL
-        //     (see setup instructions). Everything else just works once
-        //     that's set.
-        // ============================================================
-        const FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
-        const FIREBASE_POLL_MS = 4000; // how often viewer devices re-check for new data
-        let dataMode = "mock"; // "excel" | "firebase" | "mock"
-        let firebaseStarted = false;
-        let lastFirebaseTimestamp = null;
-        let firebasePublishInFlight = false;
 
         // ---- state ----
         let isOfficeInitialized = false;
@@ -1072,8 +1078,8 @@
             quayBox.style.width = Math.max(qBotRight.sx - qTopLeft.sx, 40) + 'px';
             quayBox.style.height = Math.max(qBotRight.sy - qTopLeft.sy, 60) + 'px';
             quayBox.innerHTML = `
-                                <div class="quay-title">QUAY</div>
-                            `;
+                                        <div class="quay-title">QUAY</div>
+                                    `;
             container.appendChild(quayBox);
 
             // Render each tank at its TRUE real-world position and size
@@ -1127,21 +1133,21 @@
                 const waterClass = pct >= 85 ? 'tank-water-level tank-water-high' : 'tank-water-level';
                 const shortName = shortenTankName(cfg.name);
                 box.innerHTML += `
-                                    <div class="${waterClass}" style="height: ${pct}%"></div>
-                                    <div class="tank-header">
-                                        <span class="tank-name">${shortName}</span>
-                                        <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
-                                    </div>
-                                    <div class="tank-inputs">
-                                        <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
-                                               id="txt_Row${cfg.id}" value="${weight}"
-                                               onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
-                                        <div class="load-percentage-label" id="lbl_Load${cfg.id}">
-                                            ${pctString} (Cap. ${cfg.capacity}t)
-                                        </div>
-                                        <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
-                                    </div>
-                                `;
+                                            <div class="${waterClass}" style="height: ${pct}%"></div>
+                                            <div class="tank-header">
+                                                <span class="tank-name">${shortName}</span>
+                                                <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
+                                            </div>
+                                            <div class="tank-inputs">
+                                                <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
+                                                       id="txt_Row${cfg.id}" value="${weight}"
+                                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
+                                                <div class="load-percentage-label" id="lbl_Load${cfg.id}">
+                                                    ${pctString} (Cap. ${cfg.capacity}t)
+                                                </div>
+                                                <div class="tank-warning" id="warn_Row${cfg.id}" style="display:${isOverCapacity ? '' : 'none'};">${isOverCapacity ? `⚠ Exceeds capacity (${cfg.capacity}t)` : ''}</div>
+                                            </div>
+                                        `;
                 box.title = `${cfg.name} — Row ${excelRow} — ${geo.width.toFixed(2)}m × ${geo.height.toFixed(2)}m @ (x=${geo.x.toFixed(2)}, y=${geo.y.toFixed(2)})`;
                 container.appendChild(box);
             });
@@ -1590,11 +1596,7 @@
         // ============================================================
         async function pullExcelTankData() {
             if (!isOfficeInitialized) {
-                // Not running inside Excel: if a viewer Firebase session is
-                // active, re-check Firebase instead of falling straight to
-                // mock data.
-                if (dataMode === "firebase") pullFirebaseData(true);
-                else generateMockSystemValues();
+                generateMockSystemValues();
                 return;
             }
             try {
@@ -1724,135 +1726,12 @@
                     initTankMatrix();
                     drawAttitudeGraphics();
                     refreshPlanView();
-                    dataMode = "excel";
-                    publishToFirebase();
+                    refresh3DView();
                 });
             } catch (e) {
                 console.warn("Excel sync error, using mock", e);
                 generateMockSystemValues();
             }
-        }
-
-        // ============================================================
-        // 5b. FIREBASE — PUBLISH (Excel side) / PULL (viewer side)
-        //
-        //     Publish: called automatically every time this add-in pulls
-        //     fresh data from Excel, so the snapshot in Firebase always
-        //     mirrors what's on screen here. Other devices opening this
-        //     same index.html in a plain browser tab (not inside Excel)
-        //     will pick it up via pullFirebaseData() below.
-        // ============================================================
-        async function publishToFirebase() {
-            if (firebasePublishInFlight) return;
-            firebasePublishInFlight = true;
-            try {
-                const tanks = {};
-                tankData.forEach(t => { tanks["row" + t.row] = parseFloat(t.weight) || 0; });
-                const payload = {
-                    trim: currentTrimDegrees,
-                    heel: currentHeelDegrees,
-                    tanks: tanks,
-                    tankConfig: TANK_CONFIG,
-                    trailerAxles: trailerAxles,
-                    pumpLocations: pumpLocations,
-                    bargeCornerLabels: bargeCornerLabels,
-                    bargeName: BARGE_NAME,
-                    showTrailer: showTrailer,
-                    updatedAt: new Date().toISOString(),
-                    source: "excel-addin"
-                };
-                const res = await fetch(`${FIREBASE_URL}/ballast.json`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
-                if (!res.ok) throw new Error("Request failed: " + res.status);
-            } catch (e) {
-                console.warn("Firebase publish error (check FIREBASE_URL / internet)", e);
-            } finally {
-                firebasePublishInFlight = false;
-            }
-        }
-
-        // Pull the latest published snapshot from Firebase. Used on any
-        // device that opens this page outside of Excel (phone, tablet,
-        // another PC) so it shows the same live data without needing the
-        // Excel file open. showAsManual=true forces a status update / mock
-        // fallback even if nothing changed since the last check.
-        async function pullFirebaseData(showAsManual) {
-            try {
-                const res = await fetch(`${FIREBASE_URL}/ballast.json`, { cache: "no-store" });
-                if (!res.ok) throw new Error("HTTP " + res.status);
-                const data = await res.json();
-
-                if (!data) {
-                    if (showAsManual) {
-                        document.getElementById('connectionStatus').innerHTML =
-                            'Status: <span style="color: #eab308;">● No published data yet — showing demo</span>';
-                        generateMockSystemValues();
-                    }
-                    return;
-                }
-
-                if (data.updatedAt === lastFirebaseTimestamp && !showAsManual) return;
-                lastFirebaseTimestamp = data.updatedAt;
-
-                if (Array.isArray(data.tankConfig) && data.tankConfig.length) {
-                    TANK_CONFIG = data.tankConfig;
-                }
-                recomputeBargeExtents();
-                rebuildTankDataFromConfig();
-                BARGE_NAME = data.bargeName || BARGE_NAME;
-                updateBargeInfoNote();
-
-                currentTrimDegrees = parseFloat(data.trim || 0);
-                currentHeelDegrees = parseFloat(data.heel || 0);
-
-                if (data.tanks) {
-                    tankData.forEach(tank => {
-                        const val = data.tanks["row" + tank.row];
-                        if (val !== undefined) {
-                            tank.weight = parseFloat(val).toFixed(2);
-                            const cfg = TANK_CONFIG.find(t => t.id === tank.row);
-                            tank.percent = (cfg && cfg.capacity) ? Math.min(parseFloat(val) / cfg.capacity, 1) : 0;
-                        }
-                    });
-                }
-                if (Array.isArray(data.trailerAxles)) trailerAxles = data.trailerAxles;
-                if (Array.isArray(data.pumpLocations)) pumpLocations = data.pumpLocations;
-                if (Array.isArray(data.bargeCornerLabels)) bargeCornerLabels = data.bargeCornerLabels;
-                if (typeof data.showTrailer === 'boolean') {
-                    showTrailer = data.showTrailer;
-                    const trailerBox = document.getElementById('trailerToggleCheckbox');
-                    if (trailerBox) trailerBox.checked = showTrailer;
-                }
-
-                initTankMatrix();
-                drawAttitudeGraphics();
-                refreshPlanView();
-
-                const when = data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "unknown time";
-                document.getElementById('connectionStatus').innerHTML =
-                    `Status: <span style="color: var(--accent-blue);">● Live — published ${when}</span>`;
-            } catch (e) {
-                console.warn("Firebase read error", e);
-                if (showAsManual) {
-                    document.getElementById('connectionStatus').innerHTML =
-                        'Status: <span style="color: #ef4444;">● Could not reach data source</span>';
-                }
-            }
-        }
-
-        // Starts viewer (non-Excel) polling mode. Safe to call more than
-        // once; only the first call actually starts the interval.
-        function startFirebaseMode() {
-            if (firebaseStarted) return;
-            firebaseStarted = true;
-            dataMode = "firebase";
-            document.getElementById('connectionStatus').innerHTML =
-                'Status: <span style="color: #eab308;">● Connecting...</span>';
-            pullFirebaseData(true);
-            setInterval(() => pullFirebaseData(false), FIREBASE_POLL_MS);
         }
 
         // ============================================================
@@ -1969,6 +1848,7 @@
             initTankMatrix();
             drawAttitudeGraphics();
             refreshPlanView();
+            refresh3DView();
             document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span>';
         }
 
@@ -2045,32 +1925,18 @@
 
         // ============================================================
         // 10. OFFICE INIT
-        //     Inside Excel (as the add-in) → live Excel sync, and every
-        //     pull also publishes a snapshot to Firebase (see
-        //     publishToFirebase). Anywhere else (a plain browser tab on a
-        //     phone/tablet/other PC, opened via this same index.html) →
-        //     Firebase viewer mode, polling for whatever was last
-        //     published. If Firebase has nothing yet, demo/mock data is
-        //     shown so the screen is never blank.
         // ============================================================
         Office.onReady((info) => {
             if (info.host === Office.HostType.Excel) {
                 isOfficeInitialized = true;
-                dataMode = "excel";
                 document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
                 pullExcelTankData();
                 registerExcelAutoTrack();
             } else {
-                startFirebaseMode();
+                document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Demo mode</span>';
+                generateMockSystemValues();
             }
         });
-
-        // Fallback: if Office.js never calls onReady (e.g. this page is
-        // just opened as a normal web link, not loaded as an Excel
-        // add-in), start Firebase viewer mode anyway after a short wait.
-        setTimeout(() => {
-            if (!isOfficeInitialized) startFirebaseMode();
-        }, 1200);
 
         async function registerExcelAutoTrack() {
             try {
@@ -2082,11 +1948,320 @@
             } catch (e) { /* ignore */ }
         }
 
-        // initial render fallback (safety net — startFirebaseMode() above
-        // already falls back to mock data on its own if Firebase is empty)
+        // initial render fallback
         window.addEventListener('load', () => {
-            if (!isOfficeInitialized) startFirebaseMode();
+            if (!isOfficeInitialized) generateMockSystemValues();
         });
     </script>
+    <script>
+        // ============================================================
+        // 11. 3D BALLAST VIEW — a true twin of the 2D plan view, built
+        //     from the SAME live data: TANK_CONFIG (geometry), tankData
+        //     (percent fill), currentTrimDegrees/currentHeelDegrees
+        //     (hull tilt), pumpLocations, trailerAxles. Re-synced every
+        //     time refresh3DView() runs, which pullExcelTankData() and
+        //     generateMockSystemValues() both call after refreshPlanView().
+        // ============================================================
+
+        // ---- fixed 3D-only constants (no equivalent in the 2D model) ----
+        const TANK_DEPTH_M = 6.0;        // every tank is a flat 6m-deep box
+        const DECK_THICKNESS_M = 0.022;  // 22mm top barge deck plate
+        const TANK_DECK_GAP_M = 0.05;    // small clearance: tank top sits under, not flush with, deck underside
+        const PUMP_HEIGHT_Z_M = 1.25;    // pump marker height above deck
+        const AXLE_BOX = { x: 0.86, y: AXLE_HEIGHT_Y, z: 1.4 }; // axle marker box (m): width=AXLE_WIDTH_X, depth=AXLE_HEIGHT_Y, height=1.4
+        const BARGE_QUAY_GAP_M = 1.2;    // real gap between barge leading edge and quay
+        const QUAY_SLAB_THICKNESS_M = 0.4;
+        const TANK_FOOTPRINT_GAP_M = 0.12; // real gap between adjacent tank footprints (visual daylight)
+
+        let scene3d, camera3d, renderer3d, hull3dGroup, world3dGroup, deckPlate3d;
+        let tankMeshes3d = []; // [{ cfgId, shell, ballast, depth }]
+        let pumpMeshes3d = [];
+        let axleMeshes3d = [];
+        let quayMeshes3d = [];
+        let isDragging3d = false, lastX3d = 0, lastY3d = 0;
+        let theta3d = Math.PI / 4, phi3d = 0.95, radius3d = 230;
+        let lookAtX3d = 0;
+        let current3DCamera = 'iso-fwd-ps';
+
+        const CAM_PRESETS_3D = {
+            'iso-fwd-ps': { az: 45,   el: 32 },
+            'iso-fwd-sb': { az: 135,  el: 32 },
+            'iso-aft-ps': { az: -45,  el: 32 },
+            'iso-aft-sb': { az: -135, el: 32 },
+            'top':        { az: 0,    el: 89 },
+            'side':       { az: 90,   el: 6  },
+            'front':      { az: 0,    el: 6  },
+            'end':        { az: 180,  el: 6  }
+        };
+
+        function init3DScene() {
+            const container = document.getElementById('viewer3d');
+            if (!container || scene3d) return; // already initialized
+
+            scene3d = new THREE.Scene();
+            camera3d = new THREE.PerspectiveCamera(45, container.clientWidth / Math.max(container.clientHeight, 1), 0.1, 2000);
+            renderer3d = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer3d.setSize(container.clientWidth, container.clientHeight);
+            renderer3d.setPixelRatio(window.devicePixelRatio || 1);
+            container.appendChild(renderer3d.domElement);
+
+            scene3d.add(new THREE.AmbientLight(0xffffff, 0.65));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight.position.set(40, 60, 30);
+            scene3d.add(dirLight);
+
+            world3dGroup = new THREE.Group();
+            scene3d.add(world3dGroup);
+
+            hull3dGroup = new THREE.Group();
+            world3dGroup.add(hull3dGroup);
+
+            // mouse drag to orbit
+            container.addEventListener('mousedown', (e) => { isDragging3d = true; lastX3d = e.clientX; lastY3d = e.clientY; });
+            window.addEventListener('mouseup', () => { isDragging3d = false; });
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging3d) return;
+                const dx = e.clientX - lastX3d, dy = e.clientY - lastY3d;
+                theta3d -= dx * 0.006;
+                phi3d = Math.max(0.05, Math.min(1.5, phi3d - dy * 0.006));
+                lastX3d = e.clientX; lastY3d = e.clientY;
+                updateCamera3DPosition();
+            });
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                radius3d = Math.max(60, Math.min(600, radius3d + e.deltaY * 0.12));
+                updateCamera3DPosition();
+            }, { passive: false });
+
+            window.addEventListener('resize', () => {
+                if (!container.clientWidth) return;
+                camera3d.aspect = container.clientWidth / Math.max(container.clientHeight, 1);
+                camera3d.updateProjectionMatrix();
+                renderer3d.setSize(container.clientWidth, container.clientHeight);
+            });
+
+            function animate3d() {
+                requestAnimationFrame(animate3d);
+                if (renderer3d && scene3d && camera3d) renderer3d.render(scene3d, camera3d);
+            }
+            animate3d();
+        }
+
+        function azElToThetaPhi3D(az, el) {
+            return { theta: (az * Math.PI) / 180, phi: ((90 - el) * Math.PI) / 180 };
+        }
+
+        function updateCamera3DPosition() {
+            if (!camera3d) return;
+            camera3d.position.x = lookAtX3d + radius3d * Math.sin(phi3d) * Math.sin(theta3d);
+            camera3d.position.z = radius3d * Math.sin(phi3d) * Math.cos(theta3d);
+            camera3d.position.y = radius3d * Math.cos(phi3d);
+            camera3d.lookAt(lookAtX3d, -1, 0);
+        }
+
+        function set3DCamera(name) {
+            const p = CAM_PRESETS_3D[name];
+            if (!p) return;
+            current3DCamera = name;
+            const tp = azElToThetaPhi3D(p.az, p.el);
+            theta3d = tp.theta; phi3d = tp.phi;
+            radius3d = (name === 'front' || name === 'end' || name === 'side') ? 180 : 230;
+            updateCamera3DPosition();
+            Object.keys(CAM_PRESETS_3D).forEach((k) => {
+                const b = document.getElementById('cam3d-' + k);
+                if (b) b.style.fontWeight = (k === name) ? '700' : '400';
+            });
+        }
+
+        function set3DDeckVisible(visible) {
+            if (deckPlate3d) deckPlate3d.visible = visible;
+        }
+
+        // Disposes every mesh currently in hull3dGroup/world3dGroup so the
+        // scene can be rebuilt cleanly whenever TANK_CONFIG changes shape
+        // (different number of tanks, different barge length, etc).
+        function clear3DGeometry() {
+            if (!hull3dGroup) return;
+            [...hull3dGroup.children].forEach((m) => {
+                hull3dGroup.remove(m);
+                if (m.geometry) m.geometry.dispose();
+                if (m.material) m.material.dispose();
+            });
+            tankMeshes3d = [];
+            pumpMeshes3d = [];
+            axleMeshes3d = [];
+            quayMeshes3d.forEach((m) => {
+                if (m.parent) m.parent.remove(m);
+                if (m.geometry) m.geometry.dispose();
+                if (m.material) m.material.dispose();
+            });
+            quayMeshes3d = [];
+            deckPlate3d = null;
+        }
+
+        // Rebuilds the entire 3D scene from the CURRENT TANK_CONFIG,
+        // pumpLocations and trailerAxles. Call this any time those
+        // change shape (after a sync/refresh), not on every fill update.
+        function rebuild3DGeometry() {
+            if (!hull3dGroup || !TANK_CONFIG.length) return;
+            clear3DGeometry();
+
+            const TANK_TOP_Y = 0;
+            const DECK_UNDERSIDE_Y = TANK_TOP_Y + TANK_DECK_GAP_M;
+            const DECK_TOP_Y = DECK_UNDERSIDE_Y + DECK_THICKNESS_M;
+            const QUAY_TOP_Y = DECK_TOP_Y; // quay top level with barge deck top
+
+            const bargeLength3d = BARGE_X_MAX - BARGE_X_MIN;
+            const bargeCenterX3d = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+            const bargeWidth3d = BARGE_Y_MAX - BARGE_Y_MIN;
+
+            lookAtX3d = bargeCenterX3d;
+
+            // bottom shell (purely illustrative hull bottom)
+            const bottomShell = new THREE.Mesh(
+                new THREE.BoxGeometry(bargeLength3d, 0.6, bargeWidth3d),
+                new THREE.MeshPhongMaterial({ color: 0x4b5563 })
+            );
+            bottomShell.position.set(bargeCenterX3d, TANK_TOP_Y - TANK_DEPTH_M - 0.3, 0);
+            hull3dGroup.add(bottomShell);
+
+            // 22mm top deck plate, transparent so water level is visible from the side
+            deckPlate3d = new THREE.Mesh(
+                new THREE.BoxGeometry(bargeLength3d, DECK_THICKNESS_M, bargeWidth3d),
+                new THREE.MeshPhongMaterial({ color: 0x9aa3ad, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })
+            );
+            deckPlate3d.position.set(bargeCenterX3d, DECK_TOP_Y - DECK_THICKNESS_M / 2, 0);
+            hull3dGroup.add(deckPlate3d);
+            const deckToggle = document.getElementById('deck3dToggle');
+            if (deckToggle) deckPlate3d.visible = deckToggle.checked;
+
+            // sea level plane
+            const water = new THREE.Mesh(
+                new THREE.PlaneGeometry(2000, 2000),
+                new THREE.MeshPhongMaterial({ color: 0x1d6fa5, transparent: true, opacity: 0.32, side: THREE.DoubleSide })
+            );
+            water.rotation.x = -Math.PI / 2;
+            water.position.y = TANK_TOP_Y - TANK_DEPTH_M - 3.2;
+            hull3dGroup.add(water);
+
+            // tanks — flat 6m boxes, shrunk by the real footprint gap so
+            // neighbouring tanks show true daylight between their shells
+            TANK_CONFIG.forEach((cfg) => {
+                const w = Math.max(0.05, cfg.width - TANK_FOOTPRINT_GAP_M);
+                const h = Math.max(0.05, cfg.height - TANK_FOOTPRINT_GAP_M);
+
+                const shell = new THREE.Mesh(
+                    new THREE.BoxGeometry(w, TANK_DEPTH_M, h),
+                    new THREE.MeshPhongMaterial({ color: 0xb8c2cc, transparent: true, opacity: 0.18 })
+                );
+                shell.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M / 2, cfg.y);
+                hull3dGroup.add(shell);
+
+                const ballast = new THREE.Mesh(
+                    new THREE.BoxGeometry(w * 0.92, 0.01, h * 0.92),
+                    new THREE.MeshPhongMaterial({ color: 0x3aa6e8 })
+                );
+                ballast.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M + 0.005, cfg.y);
+                hull3dGroup.add(ballast);
+
+                tankMeshes3d.push({ cfgId: cfg.id, shell, ballast });
+            });
+
+            // pump markers — purple post + cap, sitting ON the deck top
+            // surface, extruding up by the fixed PUMP_HEIGHT_Z_M
+            pumpLocations.forEach((pump) => {
+                const cfg = TANK_CONFIG.find((t) => t.name === pump.tankName);
+                if (!cfg) return;
+                const post = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.35, 0.35, PUMP_HEIGHT_Z_M, 12),
+                    new THREE.MeshPhongMaterial({ color: 0xa855f7 })
+                );
+                post.position.set(cfg.x, DECK_TOP_Y + PUMP_HEIGHT_Z_M / 2, cfg.y);
+                hull3dGroup.add(post);
+                const cap = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.55, 12, 12),
+                    new THREE.MeshPhongMaterial({ color: 0xf5f3ff })
+                );
+                cap.position.set(cfg.x, DECK_TOP_Y + PUMP_HEIGHT_Z_M, cfg.y);
+                hull3dGroup.add(cap);
+                pumpMeshes3d.push(post, cap);
+            });
+
+            // axle markers — amber box (0.86 x 0.945 x 1.4m), base resting
+            // on the deck top surface
+            trailerAxles.forEach((axle) => {
+                const box = new THREE.Mesh(
+                    new THREE.BoxGeometry(AXLE_BOX.x, AXLE_BOX.z, AXLE_BOX.y),
+                    new THREE.MeshPhongMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.88 })
+                );
+                box.position.set(axle.x, DECK_TOP_Y + AXLE_BOX.z / 2, axle.y);
+                hull3dGroup.add(box);
+                axleMeshes3d.push(box);
+            });
+
+            // quay — leading edge sits exactly BARGE_QUAY_GAP_M short of the
+            // barge's real leading edge (BARGE_X_MIN), top slab level with
+            // the barge's own deck top (QUAY_TOP_Y === DECK_TOP_Y)
+            const quayLen = 10;
+            const quayXEnd = BARGE_X_MIN - BARGE_QUAY_GAP_M;
+            const quayXStart = quayXEnd - quayLen;
+            const quayWidth = bargeWidth3d + 14;
+
+            const quayBodyTopY = QUAY_TOP_Y - QUAY_SLAB_THICKNESS_M;
+            const quayBodyBottomY = TANK_TOP_Y - TANK_DEPTH_M - 0.9;
+            const quayBodyHeight = quayBodyTopY - quayBodyBottomY;
+            const quayBody = new THREE.Mesh(
+                new THREE.BoxGeometry(quayLen, quayBodyHeight, quayWidth),
+                new THREE.MeshPhongMaterial({ color: 0x8a8f98 })
+            );
+            quayBody.position.set(quayXStart + quayLen / 2, quayBodyBottomY + quayBodyHeight / 2, 0);
+            world3dGroup.add(quayBody);
+            quayMeshes3d.push(quayBody);
+
+            const quaySlab = new THREE.Mesh(
+                new THREE.BoxGeometry(quayLen, QUAY_SLAB_THICKNESS_M, quayWidth),
+                new THREE.MeshPhongMaterial({ color: 0x5a5e66 })
+            );
+            quaySlab.position.set(quayXStart + quayLen / 2, QUAY_TOP_Y - QUAY_SLAB_THICKNESS_M / 2, 0);
+            world3dGroup.add(quaySlab);
+            quayMeshes3d.push(quaySlab);
+        }
+
+        // Updates ONLY fill heights + hull rotation — cheap, safe to call
+        // every sync/refresh without rebuilding any geometry.
+        function update3DFillAndAttitude() {
+            if (!hull3dGroup || !tankMeshes3d.length) return;
+            tankMeshes3d.forEach((tm) => {
+                const td = tankData.find((t) => t.row === tm.cfgId);
+                const pct = td ? Math.max(0, Math.min(1, td.percent)) : 0;
+                const waterHeight = Math.max(0.002, pct * TANK_DEPTH_M);
+                tm.ballast.scale.y = waterHeight / 0.01;
+                tm.ballast.position.y = 0 - TANK_DEPTH_M + waterHeight / 2;
+                const hot = pct >= 0.85;
+                tm.ballast.material.color.set(hot ? 0xf08a3c : 0x3aa6e8);
+            });
+            hull3dGroup.rotation.z = (currentTrimDegrees * Math.PI) / 180;
+            hull3dGroup.rotation.x = (-currentHeelDegrees * Math.PI) / 180;
+        }
+
+        // Public entry point — called after every refreshPlanView() so the
+        // 3D view always mirrors whatever the 2D plan just showed. Rebuilds
+        // geometry only when the tank COUNT changed (cheap check), otherwise
+        // just updates fill levels + tilt.
+        let last3DTankCount = -1;
+        function refresh3DView() {
+            const container = document.getElementById('viewer3d');
+            if (!container) return;
+            if (!scene3d) {
+                init3DScene();
+                set3DCamera('iso-fwd-ps');
+            }
+            if (TANK_CONFIG.length !== last3DTankCount) {
+                rebuild3DGeometry();
+                last3DTankCount = TANK_CONFIG.length;
+            }
+            update3DFillAndAttitude();
+        }
+    </script>  
 </body>
 </html>
