@@ -2135,14 +2135,17 @@
             const deckToggle = document.getElementById('deck3dToggle');
             if (deckToggle) deckPlate3d.visible = deckToggle.checked;
 
-            // sea level plane
+            // sea level plane — parented to world3dGroup (NOT hull3dGroup),
+            // so it stays flat/level and never inherits the hull's
+            // trim/heel rotation, matching real physical sea behavior.
             const water = new THREE.Mesh(
                 new THREE.PlaneGeometry(2000, 2000),
                 new THREE.MeshPhongMaterial({ color: 0x1d6fa5, transparent: true, opacity: 0.32, side: THREE.DoubleSide })
             );
             water.rotation.x = -Math.PI / 2;
             water.position.y = TANK_TOP_Y - TANK_DEPTH_M - 3.2;
-            hull3dGroup.add(water);
+            world3dGroup.add(water);
+            quayMeshes3d.push(water);
 
             // tanks — flat 6m boxes, shrunk by the real footprint gap so
             // neighbouring tanks show true daylight between their shells
@@ -2246,9 +2249,10 @@
 
         // Public entry point — called after every refreshPlanView() so the
         // 3D view always mirrors whatever the 2D plan just showed. Rebuilds
-        // geometry only when the tank COUNT changed (cheap check), otherwise
+        // geometry whenever tank, axle, or pump COUNT changed (cheap check
+        // covering both an Excel re-sync and demo/mock data), otherwise
         // just updates fill levels + tilt.
-        let last3DTankCount = -1;
+        let last3DSignature = '';
         function refresh3DView() {
             const container = document.getElementById('viewer3d');
             if (!container) return;
@@ -2256,9 +2260,10 @@
                 init3DScene();
                 set3DCamera('iso-fwd-ps');
             }
-            if (TANK_CONFIG.length !== last3DTankCount) {
+            const signature = TANK_CONFIG.length + '|' + trailerAxles.length + '|' + pumpLocations.length;
+            if (signature !== last3DSignature) {
                 rebuild3DGeometry();
-                last3DTankCount = TANK_CONFIG.length;
+                last3DSignature = signature;
             }
             update3DFillAndAttitude();
         }
