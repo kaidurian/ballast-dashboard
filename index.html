@@ -2669,8 +2669,8 @@
         // their original lower height (close to the deck, floating just
         // over each tank) — unaffected by either constant.
         let labelAnchors3d = [];
-        const EDGE_LABEL_LIFT_Y = 9.0;   // height (m) AFT/FWD/PS/SB float above the barge
-        const CORNER_LABEL_LIFT_Y = 5.5; // height (m) the 6 corner labels float above the barge (lower than edge tags)
+        const EDGE_LABEL_LIFT_Y = 4;   // height (m) AFT/FWD/PS/SB float above the barge
+        const CORNER_LABEL_LIFT_Y = 2.2; // height (m) the 6 corner labels float above the barge (lower than edge tags)
 
         function buildLabelAnchors3D() {
             labelAnchors3d.forEach((a) => { if (a.obj && a.obj.parent) a.obj.parent.remove(a.obj); });
