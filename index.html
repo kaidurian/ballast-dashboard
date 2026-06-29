@@ -339,25 +339,15 @@
         }
 
         /* PS (port side) / SB (starboard side) tags along the long edges */
-        /* Pump location marker — small dot + pump name, plotted at the
-           matching tank's real-world location (see renderPumpMarkers). */
+        /* Pump location marker — label only (no dot), positioned inside
+           the tank at the top-right corner (see renderPumpMarkers). */
         .pump-marker {
             position: absolute;
             display: flex;
             flex-direction: row;
-            align-items: center;
-            gap: 2px;
+            align-items: flex-start;
             z-index: 16;
             pointer-events: none;
-        }
-
-        .pump-marker-dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            background: #a855f7;
-            border: 1.5px solid #f5f3ff;
-            box-shadow: 0 0 4px rgba(168,85,247,0.8);
         }
 
         .pump-marker-label {
@@ -665,6 +655,10 @@
                         <span style="font-size:11px;">Deck</span>
                         <input type="checkbox" id="deck3dToggle" checked onchange="set3DDeckVisible(this.checked)">
                     </label>
+                    <label class="toggle-container" style="margin:0;">
+                        <span style="font-size:11px;">% Labels</span>
+                        <input type="checkbox" id="pctLabel3dToggle" checked onchange="togglePctLabels3D(this.checked)">
+                    </label>
                 </div>
             </div>
         </div>
@@ -811,8 +805,9 @@
         let isOfficeInitialized = false;
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
-        let trailerAxles = []; // [{ name, x, y }]
-        let showTrailer = true;  // new state for trailer toggle
+        let trailerAxles = []; // [{ name, x, y, groupId }] — pairs of axles share a groupId
+        let showTrailer = true;  // state for trailer toggle (2D + 3D)
+        let showPctLabels3D = true; // state for % label toggle in 3D
 
         // Pump locations, sourced from BALLASTPLAN(mT)!A33:E... (until column
         // A is blank). Column A = tank name (matches Load_Editor/CREST_301
@@ -1222,7 +1217,7 @@
             aftLbl.className = 'barge-end-label';
             aftLbl.id = 'lbl_PlanAFT';
             aftLbl.textContent = 'AFT';
-            aftLbl.style.left = (aftP.sx - 6) + 'px';
+            aftLbl.style.left = (aftP.sx - 22) + 'px';
             aftLbl.style.top = aftP.sy + 'px';
             aftLbl.style.transform = 'translate(-100%, -50%) rotate(-90deg)';
             container.appendChild(aftLbl);
@@ -1231,7 +1226,7 @@
             fwdLbl.className = 'barge-end-label';
             fwdLbl.id = 'lbl_PlanFWD';
             fwdLbl.textContent = 'FWD';
-            fwdLbl.style.left = (fwdP.sx + 6) + 'px';
+            fwdLbl.style.left = (fwdP.sx + 22) + 'px';
             fwdLbl.style.top = fwdP.sy + 'px';
             fwdLbl.style.transform = 'translate(0, -50%) rotate(90deg)';
             container.appendChild(fwdLbl);
@@ -1251,7 +1246,7 @@
             psLbl.id = 'lbl_PlanPS';
             psLbl.textContent = 'PS';
             psLbl.style.left = (psP.sx + 36) + 'px';
-            psLbl.style.top = (psP.sy - outsidePx) + 'px';
+            psLbl.style.top = (psP.sy - outsidePx - 16) + 'px';
             psLbl.style.textAlign = 'left';
             psLbl.style.transform = 'translateY(-100%)';
             container.appendChild(psLbl);
@@ -1261,7 +1256,7 @@
             sbLbl.id = 'lbl_PlanSB';
             sbLbl.textContent = 'SB';
             sbLbl.style.left = (sbP.sx + 36) + 'px';
-            sbLbl.style.top = (sbP.sy + outsidePx) + 'px';
+            sbLbl.style.top = (sbP.sy + outsidePx + 16) + 'px';
             sbLbl.style.textAlign = 'left';
             container.appendChild(sbLbl);
         }
@@ -1314,27 +1309,19 @@
 
                 tanksWithPump.add(cfg.id);
 
-                // Anchor at the tank's RIGHT edge. If the tank sits on the
-                // +Y (PS) side, anchor at the TOP-right corner; if on the
-                // -Y (SB) side, anchor at the BOTTOM-right corner.
-                const isPortSide = geo.y >= 0;
+                // Place label INSIDE the tank at the top-right corner (highest X, highest Y screen = PORT side top)
                 const anchorX = geo.x + geo.width / 2;
-                const anchorY = isPortSide ? (geo.y + geo.height / 2) : (geo.y - geo.height / 2);
+                const anchorY = geo.y + geo.height / 2; // top edge in world coords (PORT side = +Y)
                 const p = worldToScreen(anchorX, anchorY);
+
                 const marker = document.createElement('div');
                 marker.className = 'pump-marker';
-                marker.style.left = (p.sx + 3) + 'px';
-                if (isPortSide) {
-                    // Top-right: marker sits above-right of the anchor point
-                    marker.style.top = (p.sy - 14) + 'px';
-                    marker.style.flexDirection = 'row';
-                } else {
-                    // Bottom-right: marker sits below-right of the anchor point
-                    marker.style.top = (p.sy + 3) + 'px';
-                    marker.style.flexDirection = 'row';
-                }
+                // Offset inward from the top-right corner so the label sits inside the tank card
+                marker.style.left = (p.sx - 2) + 'px';
+                marker.style.top = (p.sy + 2) + 'px';
+                marker.style.transform = 'translateX(-100%)';
                 marker.title = `Pump ${pump.pumpName} — ${pump.tankName}`;
-                marker.innerHTML = `<span class="pump-marker-dot"></span><span class="pump-marker-label">${pump.pumpName}</span>`;
+                marker.innerHTML = `<span class="pump-marker-label">${pump.pumpName}</span>`;
                 container.appendChild(marker);
             });
 
@@ -1632,6 +1619,32 @@
 
                 ctx.restore();
             });
+
+            // Draw connecting bracket between paired axles in the same group
+            // Group axles by groupId, then draw a vertical line linking each pair's centers
+            const groupMap = new Map();
+            trailerAxles.forEach((axle) => {
+                if (axle.groupId === undefined) return;
+                if (!groupMap.has(axle.groupId)) groupMap.set(axle.groupId, []);
+                groupMap.get(axle.groupId).push(axle);
+            });
+            groupMap.forEach((axlesInGroup) => {
+                if (axlesInGroup.length < 2) return;
+                // Sort by Y (world) — upper (higher Y) to lower
+                const sorted = [...axlesInGroup].sort((a, b) => b.y - a.y);
+                const pA = worldToScreen(sorted[0].x, sorted[0].y);
+                const pB = worldToScreen(sorted[sorted.length - 1].x, sorted[sorted.length - 1].y);
+                ctx.save();
+                ctx.strokeStyle = isLight ? AXLE_STYLE.borderColorLight : AXLE_STYLE.borderColorDark;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([3, 2]);
+                ctx.beginPath();
+                ctx.moveTo(pA.sx, pA.sy);
+                ctx.lineTo(pB.sx, pB.sy);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
+            });
         }
 
         function refreshPlanView() {
@@ -1763,6 +1776,7 @@
                     // Parse trailer axle rows until first blank pair (E and F both empty)
                     const axleValues = rangeAxles.values;
                     const parsedAxles = [];
+                    let groupId = 0;
                     for (let i = 0; i < axleValues.length; i++) {
                         const rawX = axleValues[i][0];
                         const rawY = axleValues[i][1];
@@ -1772,7 +1786,11 @@
                         const x = parseFloat(rawX);
                         const y = parseFloat(rawY);
                         if (isNaN(x) || isNaN(y)) continue; // skip malformed row, keep scanning
-                        parsedAxles.push({ row: AXLE_START_ROW + i, x, y });
+                        // Each Excel row defines the CENTER of an axle pair.
+                        // Generate TWO axles in Y direction: center-to-center = 1.45m.
+                        parsedAxles.push({ row: AXLE_START_ROW + i, x, y: y + 0.725, groupId });
+                        parsedAxles.push({ row: AXLE_START_ROW + i, x, y: y - 0.725, groupId });
+                        groupId++;
                     }
                     trailerAxles = parsedAxles;
 
@@ -1887,15 +1905,24 @@
             currentTrimDegrees = 2.8;
             currentHeelDegrees = -1.9;
 
-            // Mock trailer axle layout: a typical multi-axle trailer footprint
-            // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
+            // Mock trailer axle layout: each axle position has a PAIR of
+            // axles in the Y direction, 1.45m center-to-center. Both axles
+            // in a pair share the same groupId so they are drawn/moved as one group.
+            // The existing X positions are kept; Y is offset by ±0.725m (half of 1.45m)
+            // from the original center Y so the group center matches the Excel value.
             trailerAxles = [
-                { row: AXLE_START_ROW, x: 30, y: 3.2 },
-                { row: AXLE_START_ROW + 1, x: 30, y: -3.2 },
-                { row: AXLE_START_ROW + 2, x: 45, y: 3.2 },
-                { row: AXLE_START_ROW + 3, x: 45, y: -3.2 },
-                { row: AXLE_START_ROW + 4, x: 60, y: 3.2 },
-                { row: AXLE_START_ROW + 5, x: 60, y: -3.2 }
+                { row: AXLE_START_ROW,     x: 30, y:  3.2 + 0.725,  groupId: 0 },
+                { row: AXLE_START_ROW + 1, x: 30, y:  3.2 - 0.725,  groupId: 0 },
+                { row: AXLE_START_ROW + 2, x: 30, y: -3.2 + 0.725,  groupId: 1 },
+                { row: AXLE_START_ROW + 3, x: 30, y: -3.2 - 0.725,  groupId: 1 },
+                { row: AXLE_START_ROW + 4, x: 45, y:  3.2 + 0.725,  groupId: 2 },
+                { row: AXLE_START_ROW + 5, x: 45, y:  3.2 - 0.725,  groupId: 2 },
+                { row: AXLE_START_ROW + 6, x: 45, y: -3.2 + 0.725,  groupId: 3 },
+                { row: AXLE_START_ROW + 7, x: 45, y: -3.2 - 0.725,  groupId: 3 },
+                { row: AXLE_START_ROW + 8, x: 60, y:  3.2 + 0.725,  groupId: 4 },
+                { row: AXLE_START_ROW + 9, x: 60, y:  3.2 - 0.725,  groupId: 4 },
+                { row: AXLE_START_ROW + 10, x: 60, y: -3.2 + 0.725, groupId: 5 },
+                { row: AXLE_START_ROW + 11, x: 60, y: -3.2 - 0.725, groupId: 5 }
             ];
 
             initTankMatrix();
@@ -1984,12 +2011,14 @@
         }
 
         // ============================================================
-        // 9. TRAILER OVERLAY TOGGLE (NEW)
+        // 9. TRAILER OVERLAY TOGGLE — affects both 2D plan and 3D view
         // ============================================================
         function toggleTrailerOverlay() {
             const checked = document.getElementById('trailerToggleCheckbox').checked;
             showTrailer = checked;
-            drawAxleOverlay();  // immediately show/hide
+            drawAxleOverlay();  // immediately show/hide 2D
+            // Also show/hide axle meshes in the 3D scene
+            axleMeshes3d.forEach(m => { if (m) m.visible = checked; });
         }
 
         // ============================================================
@@ -2320,6 +2349,11 @@
             if (deckPlate3d) deckPlate3d.visible = visible;
         }
 
+        function togglePctLabels3D(visible) {
+            showPctLabels3D = visible;
+            renderLabels3D();
+        }
+
         // Sky-only day/night control, driven by the SAME header toggle
         // that switches the 2D dashboard's light/dark theme (see
         // toggleDashboardTheme()). isDay = true -> light blue sky;
@@ -2431,36 +2465,26 @@
                 tankMeshes3d.push({ cfgId: cfg.id, shell, ballast });
             });
 
-            // pump markers — purple post + cap, sitting ON the deck top
-            // surface, extruding up by the fixed PUMP_HEIGHT_Z_M. Anchored
-            // at each tank's RIGHT-side corner: if the tank's Y center is
-            // positive (PS side) the anchor is the FWD+PS (top-right)
-            // corner; if negative (SB side) the anchor is the FWD+SB
-            // (bottom-right) corner — same rule as the 2D plan's
-            // renderPumpMarkers(). Matched via normalizeTankName(), same
-            // fuzzy matching the 2D view uses, so real Excel names like
-            // "WB-09-PS.P" match reliably regardless of separator/case.
+            // pump markers — label only (no physical post/cap mesh), displayed
+            // as a text overlay via the label anchor system. Each pump gets a
+            // 3D anchor point at the tank's top-right corner (FWD edge, inside
+            // the tank), which renderLabels3D() projects to a screen label.
+            // This mirrors the 2D plan's "label inside tank at top-right" rule.
             pumpLocations.forEach((pump) => {
                 const targetNorm = normalizeTankName(pump.tankName);
                 const cfg = TANK_CONFIG.find((t) => normalizeTankName(t.name) === targetNorm);
                 if (!cfg) return;
-                const isPortSide = cfg.y >= 0;
-                const cornerX = cfg.x + cfg.width / 2;
-                const cornerYWorld = isPortSide ? (cfg.y + cfg.height / 2) : (cfg.y - cfg.height / 2);
-                const cornerZ = worldYToZ3D(cornerYWorld);
-                const post = new THREE.Mesh(
-                    new THREE.CylinderGeometry(0.35, 0.35, PUMP_HEIGHT_Z_M, 12),
-                    new THREE.MeshPhongMaterial({ color: 0xa855f7 })
-                );
-                post.position.set(cornerX, DECK_TOP_Y + PUMP_HEIGHT_Z_M / 2, cornerZ);
-                hull3dGroup.add(post);
-                const cap = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.55, 12, 12),
-                    new THREE.MeshPhongMaterial({ color: 0xf5f3ff })
-                );
-                cap.position.set(cornerX, DECK_TOP_Y + PUMP_HEIGHT_Z_M, cornerZ);
-                hull3dGroup.add(cap);
-                pumpMeshes3d.push(post, cap);
+                // Top-right in world = FWD edge (max X) + PS/top edge (max Y center).
+                // We place the anchor at the FWD-right corner of the tank footprint,
+                // just above deck level so the label floats over the tank surface.
+                const anchorX = cfg.x + cfg.width / 2;
+                const anchorYWorld = cfg.y + cfg.height / 2;
+                const anchorZ3d = worldYToZ3D(anchorYWorld);
+                const DECK_TOP_Y = TANK_DECK_GAP_M + DECK_THICKNESS_M;
+                const pumpObj = new THREE.Object3D();
+                pumpObj.position.set(anchorX, DECK_TOP_Y + 0.4, anchorZ3d);
+                hull3dGroup.add(pumpObj);
+                pumpMeshes3d.push({ obj: pumpObj, pumpName: pump.pumpName });
             });
 
             // axle markers — REDESIGNED to match the reference sketch: two
@@ -2504,6 +2528,7 @@
                 axleMeshes3d.push(hub);
 
                 axleGroup.position.set(axle.x, 0, worldYToZ3D(axle.y));
+                axleGroup.visible = showTrailer; // respect trailer toggle
                 hull3dGroup.add(axleGroup);
                 axleMeshes3d.push(axleGroup);
             });
@@ -2610,6 +2635,18 @@
                 addAnchor(`pct_${cfg.id}`, cfg.x, labelY * 0.4, worldYToZ3D(cfg.y), '', 'pct');
             });
 
+            // Pump label anchors — placed at the tank's top-right corner
+            // (FWD edge + PS/top edge), just above deck level, matching the
+            // 2D plan's "pump label inside tank at top-right" rule.
+            pumpLocations.forEach((pump, i) => {
+                const targetNorm = normalizeTankName(pump.tankName);
+                const cfg = TANK_CONFIG.find(t => normalizeTankName(t.name) === targetNorm);
+                if (!cfg) return;
+                const anchorX = cfg.x + cfg.width / 2;
+                const anchorYWorld = cfg.y + cfg.height / 2;
+                addAnchor(`pump_${i}`, anchorX, labelY * 0.6, worldYToZ3D(anchorYWorld), pump.pumpName, 'pump');
+            });
+
             updateLabelAnchorText3D();
         }
 
@@ -2655,6 +2692,7 @@
                     if (!text) return;
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:11px; color:#cbd5e1; background:rgba(15,17,21,0.5); padding:1px 5px; border-radius:4px; white-space:nowrap;">${text}</div>`;
                 } else if (a.cls === 'pct') {
+                    if (!showPctLabels3D) return; // hidden by % label toggle
                     const cfgId = parseInt(a.id.replace('pct_', ''), 10);
                     const td = tankData.find(t => t.row === cfgId);
                     if (!td) return;
@@ -2662,6 +2700,9 @@
                     const isHigh = pct >= 85;
                     const bg = isHigh ? 'background:rgba(249,115,22,0.85); color:#fff7ed;' : 'background:rgba(15,17,21,0.55); color:#bae6fd;';
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:9px; font-weight:600; ${bg} padding:0px 4px; border-radius:3px; white-space:nowrap;">${pct}%</div>`;
+                } else if (a.cls === 'pump') {
+                    // Pump label inside tank at top-right (FWD+top corner), purple badge
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-100%,-100%); font-size:8px; font-weight:700; background:#7e22ce; color:#f5f3ff; padding:0px 3px; border-radius:2px; white-space:nowrap;">${a.text}</div>`;
                 }
             });
 
