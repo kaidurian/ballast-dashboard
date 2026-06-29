@@ -1993,6 +1993,25 @@
         const QUAY_SLAB_THICKNESS_M = 0.4;
         const TANK_FOOTPRINT_GAP_M = 0.12; // real gap between adjacent tank footprints (visual daylight)
 
+        // Real-world Y (PS = positive, SB = negative, matching the 2D
+        // plan's worldToScreen convention) does NOT map directly onto
+        // Three.js Z for this scene's chosen camera/viewing convention.
+        // Verified numerically: when the camera sits on the quay side
+        // looking down +X toward the barge (matching how a person standing
+        // on the quay, facing the vessel, would actually see it) — the
+        // user's own stated reference frame — placing PS at +Z put PS on
+        // the RIGHT of screen and SB on the LEFT, the opposite of the 2D
+        // plan and the opposite of true PS/SB handedness. Three.js's
+        // right-handed coordinate system, combined with a +X-forward view
+        // direction, puts +Z on the viewer's right; the real maritime
+        // convention (and the 2D plan) wants +Y/PS on the viewer's LEFT
+        // when facing the bow from astern/the quay. Negating Y→Z here
+        // (and ONLY here) fixes this from every camera angle, without
+        // touching anything on the vertical (Y-up) axis — deck height,
+        // water fill, pump height, and axle height are all completely
+        // unaffected, since none of them depend on Z's sign.
+        function worldYToZ3D(y) { return -y; }
+
         let scene3d, camera3d, renderer3d, hull3dGroup, world3dGroup, deckPlate3d;
         let tankMeshes3d = []; // [{ cfgId, shell, ballast, depth }]
         let pumpMeshes3d = [];
@@ -2191,14 +2210,14 @@
                     new THREE.BoxGeometry(w, TANK_DEPTH_M, h),
                     new THREE.MeshPhongMaterial({ color: 0xb8c2cc, transparent: true, opacity: 0.18 })
                 );
-                shell.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M / 2, cfg.y);
+                shell.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M / 2, worldYToZ3D(cfg.y));
                 hull3dGroup.add(shell);
 
                 const ballast = new THREE.Mesh(
                     new THREE.BoxGeometry(w * 0.92, 0.01, h * 0.92),
                     new THREE.MeshPhongMaterial({ color: 0x3aa6e8 })
                 );
-                ballast.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M + 0.005, cfg.y);
+                ballast.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M + 0.005, worldYToZ3D(cfg.y));
                 hull3dGroup.add(ballast);
 
                 tankMeshes3d.push({ cfgId: cfg.id, shell, ballast });
@@ -2217,7 +2236,7 @@
                 const cfg = TANK_CONFIG.find((t) => normalizeTankName(t.name) === targetNorm);
                 if (!cfg) return;
                 const cornerX = cfg.x + cfg.width / 2;
-                const cornerY = cfg.y + cfg.height / 2;
+                const cornerY = worldYToZ3D(cfg.y + cfg.height / 2);
                 const post = new THREE.Mesh(
                     new THREE.CylinderGeometry(0.35, 0.35, PUMP_HEIGHT_Z_M, 12),
                     new THREE.MeshPhongMaterial({ color: 0xa855f7 })
@@ -2240,7 +2259,7 @@
                     new THREE.BoxGeometry(AXLE_BOX.x, AXLE_BOX.z, AXLE_BOX.y),
                     new THREE.MeshPhongMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.88 })
                 );
-                box.position.set(axle.x, DECK_TOP_Y + AXLE_BOX.z / 2, axle.y);
+                box.position.set(axle.x, DECK_TOP_Y + AXLE_BOX.z / 2, worldYToZ3D(axle.y));
                 hull3dGroup.add(box);
                 axleMeshes3d.push(box);
             });
@@ -2287,11 +2306,11 @@
                 tm.ballast.material.color.set(hot ? 0xf08a3c : 0x3aa6e8);
             });
             hull3dGroup.rotation.z = (currentTrimDegrees * Math.PI) / 180;
-            // Heel > 0 means PORT (PS, +Z in this model) goes DOWN — verified
-            // numerically against the 2D convention. Previous code used a
-            // negated sign here, which visually swapped the PS/SB rows
-            // under any heel tilt.
-            hull3dGroup.rotation.x = (currentHeelDegrees * Math.PI) / 180;
+            // Heel > 0 means PORT (PS) goes DOWN. PS is now placed at
+            // NEGATIVE Z (via worldYToZ3D, see its comment for why), so
+            // the rotation sign here is the negative of what it would be
+            // under a direct Y->Z mapping — verified numerically.
+            hull3dGroup.rotation.x = (-currentHeelDegrees * Math.PI) / 180;
         }
 
         // ---- label overlay: AFT/FWD/PS/SB, the 6 corner labels, and a
@@ -2319,19 +2338,20 @@
             // AFT / FWD (along X, centered in Z)
             addAnchor('aft', BARGE_X_MIN, labelY, 0, 'AFT', 'edge');
             addAnchor('fwd', BARGE_X_MAX, labelY, 0, 'FWD', 'edge');
-            // PS / SB (along Z, centered in X) — PS = +Z, SB = -Z per the
-            // confirmed real-data convention (positive Y in CREST_301 = PS).
-            addAnchor('ps', midX, labelY, BARGE_Y_MAX, 'PS', 'edge');
-            addAnchor('sb', midX, labelY, BARGE_Y_MIN, 'SB', 'edge');
+            // PS / SB (along Z, centered in X) — PS = +Y in real-world
+            // coordinates, converted through worldYToZ3D() for correct
+            // on-screen handedness (see comment on that function).
+            addAnchor('ps', midX, labelY, worldYToZ3D(BARGE_Y_MAX), 'PS', 'edge');
+            addAnchor('sb', midX, labelY, worldYToZ3D(BARGE_Y_MIN), 'SB', 'edge');
 
             // 6 corner labels, sourced from Load_Editor!I1:I6 via
             // bargeCornerLabels — same indexing as the 2D plan view.
-            addAnchor('corner0', BARGE_X_MIN, labelY, BARGE_Y_MAX, '', 'corner'); // I1 AFT-PS
-            addAnchor('corner1', midX,        labelY, BARGE_Y_MAX, '', 'corner'); // I2 mid-PS
-            addAnchor('corner2', BARGE_X_MAX, labelY, BARGE_Y_MAX, '', 'corner'); // I3 FWD-PS
-            addAnchor('corner3', BARGE_X_MIN, labelY, BARGE_Y_MIN, '', 'corner'); // I4 AFT-SB
-            addAnchor('corner4', midX,        labelY, BARGE_Y_MIN, '', 'corner'); // I5 mid-SB
-            addAnchor('corner5', BARGE_X_MAX, labelY, BARGE_Y_MIN, '', 'corner'); // I6 FWD-SB
+            addAnchor('corner0', BARGE_X_MIN, labelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I1 AFT-PS
+            addAnchor('corner1', midX,        labelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I2 mid-PS
+            addAnchor('corner2', BARGE_X_MAX, labelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I3 FWD-PS
+            addAnchor('corner3', BARGE_X_MIN, labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I4 AFT-SB
+            addAnchor('corner4', midX,        labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I5 mid-SB
+            addAnchor('corner5', BARGE_X_MAX, labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I6 FWD-SB
         }
 
         function renderLabels3D() {
