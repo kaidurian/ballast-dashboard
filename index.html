@@ -2659,13 +2659,18 @@
         // also pan).
         //
         // AFT/FWD/PS/SB and the 6 corner labels are lifted well ABOVE the
-        // barge in the Y (vertical/up) direction — see EDGE_LABEL_LIFT_Y —
-        // so they sit clearly above the hull/tanks/axles and don't get
-        // visually blocked by other 3D geometry, while %-fill and pump
-        // labels stay at their original lower height (close to the deck,
-        // floating just over each tank).
+        // barge in the Y (vertical/up) direction, but at TWO DIFFERENT
+        // heights so they don't collide with each other either:
+        //   - EDGE_LABEL_LIFT_Y    -> AFT / FWD / PS / SB (the 4 edge tags)
+        //   - CORNER_LABEL_LIFT_Y  -> the 6 Load_Editor!I1:I6 corner labels
+        // EDGE_LABEL_LIFT_Y is set HIGHER than CORNER_LABEL_LIFT_Y so the
+        // 4 edge tags always float above the 6 corner labels, both well
+        // clear of the hull/tanks/axles. %-fill and pump labels stay at
+        // their original lower height (close to the deck, floating just
+        // over each tank) — unaffected by either constant.
         let labelAnchors3d = [];
-        const EDGE_LABEL_LIFT_Y = 9.0; // height (m) AFT/FWD/PS/SB + corner labels float above the barge
+        const EDGE_LABEL_LIFT_Y = 9.0;   // height (m) AFT/FWD/PS/SB float above the barge
+        const CORNER_LABEL_LIFT_Y = 5.5; // height (m) the 6 corner labels float above the barge (lower than edge tags)
 
         function buildLabelAnchors3D() {
             labelAnchors3d.forEach((a) => { if (a.obj && a.obj.parent) a.obj.parent.remove(a.obj); });
@@ -2673,7 +2678,8 @@
             if (!hull3dGroup || !TANK_CONFIG.length) return;
 
             const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
-            const labelY = EDGE_LABEL_LIFT_Y; // AFT/FWD/PS/SB + corner labels float well above the hull
+            const edgeLabelY = EDGE_LABEL_LIFT_Y;     // AFT/FWD/PS/SB float well above the hull
+            const cornerLabelY = CORNER_LABEL_LIFT_Y; // corner labels float above the hull, below the edge tags
 
             function addAnchor(id, x, y, z, text, cls) {
                 const obj = new THREE.Object3D();
@@ -2682,25 +2688,25 @@
                 labelAnchors3d.push({ id, obj, text, cls });
             }
 
-            // AFT / FWD (along X, centered in Z), lifted high above the hull.
-            addAnchor('aft', BARGE_X_MIN, labelY, 0, 'AFT', 'edge');
-            addAnchor('fwd', BARGE_X_MAX, labelY, 0, 'FWD', 'edge');
+            // AFT / FWD (along X, centered in Z), lifted to the (higher) edge height.
+            addAnchor('aft', BARGE_X_MIN, edgeLabelY, 0, 'AFT', 'edge');
+            addAnchor('fwd', BARGE_X_MAX, edgeLabelY, 0, 'FWD', 'edge');
             // PS / SB (along Z, centered in X) — PS = +Y in real-world
             // coordinates, converted through worldYToZ3D() for correct
             // on-screen handedness (see comment on that function).
-            addAnchor('ps', midX, labelY, worldYToZ3D(BARGE_Y_MAX), 'PS', 'edge');
-            addAnchor('sb', midX, labelY, worldYToZ3D(BARGE_Y_MIN), 'SB', 'edge');
+            addAnchor('ps', midX, edgeLabelY, worldYToZ3D(BARGE_Y_MAX), 'PS', 'edge');
+            addAnchor('sb', midX, edgeLabelY, worldYToZ3D(BARGE_Y_MIN), 'SB', 'edge');
 
             // 6 corner labels, sourced from Load_Editor!I1:I6 via
-            // bargeCornerLabels — same indexing as the 2D plan view, also
-            // lifted to the same height as AFT/FWD/PS/SB so the whole set
-            // of edge/corner labels floats clear of the 3D model together.
-            addAnchor('corner0', BARGE_X_MIN, labelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I1 AFT-PS
-            addAnchor('corner1', midX,        labelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I2 mid-PS
-            addAnchor('corner2', BARGE_X_MAX, labelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I3 FWD-PS
-            addAnchor('corner3', BARGE_X_MIN, labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I4 AFT-SB
-            addAnchor('corner4', midX,        labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I5 mid-SB
-            addAnchor('corner5', BARGE_X_MAX, labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I6 FWD-SB
+            // bargeCornerLabels — same indexing as the 2D plan view, now
+            // lifted to their OWN (lower) height so they float clear of
+            // the 3D model without sitting at the same level as AFT/FWD/PS/SB.
+            addAnchor('corner0', BARGE_X_MIN, cornerLabelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I1 AFT-PS
+            addAnchor('corner1', midX,        cornerLabelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I2 mid-PS
+            addAnchor('corner2', BARGE_X_MAX, cornerLabelY, worldYToZ3D(BARGE_Y_MAX), '', 'corner'); // I3 FWD-PS
+            addAnchor('corner3', BARGE_X_MIN, cornerLabelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I4 AFT-SB
+            addAnchor('corner4', midX,        cornerLabelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I5 mid-SB
+            addAnchor('corner5', BARGE_X_MAX, cornerLabelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I6 FWD-SB
 
             // Per-tank %-fill label anchor, lifted just above the tank's
             // deck-level position so it floats over each tank, matching
