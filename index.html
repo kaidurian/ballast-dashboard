@@ -666,10 +666,7 @@
                         <span style="font-size:11px;">Deck</span>
                         <input type="checkbox" id="deck3dToggle" checked onchange="set3DDeckVisible(this.checked)">
                     </label>
-                    <label class="toggle-container" style="margin:0;">
-                        <span style="font-size:11px;" id="dayNight3dLabel">Day</span>
-                        <input type="checkbox" id="dayNight3dToggle" onchange="set3DEnvironment(this.checked)">
-                    </label>
+                    <span style="font-size:10px; color:var(--text-muted);">(Day/Night follows the header toggle)</span>
                 </div>
             </div>
         </div>
@@ -719,6 +716,11 @@
         // ---- trailer axle constants ----
         const AXLE_WIDTH_X = 0.86;
         const AXLE_HEIGHT_Y = 0.945;
+        // Center-to-center spacing (m) between the two boxes of an axle
+        // pair, across the barge width (PS/SB direction). Shared by both
+        // the 2D plan overlay (drawAxleOverlay) and the 3D scene
+        // (rebuild3DGeometry) so they always render the same pair layout.
+        const AXLE_PAIR_SPACING_M = 1.45;
         const AXLE_START_ROW = 124;
         const AXLE_MAX_ROWS = 60;
 
@@ -1565,27 +1567,34 @@
             const { scaleX, scaleY } = getPlanScale();
             const halfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 3);
             const halfH = Math.max((AXLE_HEIGHT_Y / 2) * scaleY, 3);
+            // Two boxes per axle position, 1.45m center-to-center across the
+            // barge width (PS/SB direction) — same strategy as the 3D
+            // axle pair (see AXLE_PAIR_SPACING_M in the 3D section).
+            const halfPairPx = (AXLE_PAIR_SPACING_M / 2) * scaleY;
 
             trailerAxles.forEach((axle) => {
                 const p = worldToScreen(axle.x, axle.y);
-                const x0 = p.sx - halfW;
-                const y0 = p.sy - halfH;
                 const w = halfW * 2;
                 const h = halfH * 2;
 
-                // Fill/border driven by AXLE_STYLE above — edit those
-                // constants to change colour, transparency, or border.
-                ctx.save();
-                ctx.fillStyle = isLight
-                    ? `rgba(${AXLE_STYLE.fillColorLight},${AXLE_STYLE.fillOpacityLight})`
-                    : `rgba(${AXLE_STYLE.fillColorDark},${AXLE_STYLE.fillOpacityDark})`;
-                ctx.strokeStyle = isLight ? AXLE_STYLE.borderColorLight : AXLE_STYLE.borderColorDark;
-                ctx.lineWidth = AXLE_STYLE.borderWidth;
-                ctx.beginPath();
-                ctx.rect(x0, y0, w, h);
-                ctx.fill();
-                ctx.stroke();
-                ctx.restore();
+                [-halfPairPx, halfPairPx].forEach((offsetPx) => {
+                    const x0 = p.sx - halfW;
+                    const y0 = p.sy + offsetPx - halfH;
+
+                    // Fill/border driven by AXLE_STYLE above — edit those
+                    // constants to change colour, transparency, or border.
+                    ctx.save();
+                    ctx.fillStyle = isLight
+                        ? `rgba(${AXLE_STYLE.fillColorLight},${AXLE_STYLE.fillOpacityLight})`
+                        : `rgba(${AXLE_STYLE.fillColorDark},${AXLE_STYLE.fillOpacityDark})`;
+                    ctx.strokeStyle = isLight ? AXLE_STYLE.borderColorLight : AXLE_STYLE.borderColorDark;
+                    ctx.lineWidth = AXLE_STYLE.borderWidth;
+                    ctx.beginPath();
+                    ctx.rect(x0, y0, w, h);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                });
             });
         }
 
@@ -1920,6 +1929,9 @@
             document.body.classList.toggle('light-theme', checked);
             drawAttitudeGraphics();
             drawAxleOverlay();
+            // checked = light theme = "Day". Same toggle now drives the
+            // 3D viewer's sky colour (see set3DEnvironment).
+            if (typeof set3DEnvironment === 'function') set3DEnvironment(!checked);
         }
 
         // ============================================================
@@ -2139,26 +2151,18 @@
             if (deckPlate3d) deckPlate3d.visible = visible;
         }
 
-        // Day/night toggle: swaps scene background, ambient/directional
-        // light levels, and the sea-level water tint. Purely cosmetic —
-        // doesn't touch geometry, fill levels, or trim/heel, so it's cheap
-        // to call any time.
+        // Day/night toggle: ONLY swaps the sky/background colour now.
+        // Ambient + directional lighting and the sea-level water tint stay
+        // fixed at the night-mode look in both modes (per request — the
+        // night ambience is the visual baseline; "day" just lightens the
+        // sky). Doesn't touch geometry, fill levels, or trim/heel.
         function set3DEnvironment(isNight) {
             is3DNightMode = isNight;
             if (!scene3d) return;
-            if (isNight) {
-                scene3d.background = new THREE.Color(0x040508);
-                if (ambientLight3d) ambientLight3d.intensity = 0.22;
-                if (dirLight3d) { dirLight3d.intensity = 0.35; dirLight3d.color.set(0x9bb0d6); }
-                if (waterMesh3d) waterMesh3d.material.color.set(0x06192e);
-            } else {
-                scene3d.background = new THREE.Color(0x0f1115);
-                if (ambientLight3d) ambientLight3d.intensity = 0.65;
-                if (dirLight3d) { dirLight3d.intensity = 0.9; dirLight3d.color.set(0xffffff); }
-                if (waterMesh3d) waterMesh3d.material.color.set(0x1d6fa5);
-            }
-            const lbl = document.getElementById('dayNight3dLabel');
-            if (lbl) lbl.textContent = isNight ? 'Night' : 'Day';
+            if (ambientLight3d) ambientLight3d.intensity = 0.22;
+            if (dirLight3d) { dirLight3d.intensity = 0.35; dirLight3d.color.set(0x9bb0d6); }
+            if (waterMesh3d) waterMesh3d.material.color.set(0x06192e);
+            scene3d.background = new THREE.Color(isNight ? 0x040508 : 0x9fd3ec);
         }
 
         // Disposes every mesh currently in hull3dGroup/world3dGroup so the
@@ -2292,11 +2296,11 @@
 
             // axle markers — TWO boxes per axle position (0.86 x 0.945 x
             // 1.4m each), forming a side-by-side pair across the barge
-            // width (Y/PS-SB direction), 1.45m center-to-center. The pair
-            // is grouped so trailerAxles' real (x,y) from Excel positions
-            // the GROUP's own centroid — i.e. the midpoint between the two
-            // boxes — not either box individually.
-            const AXLE_PAIR_SPACING_M = 1.45;
+            // width (Y/PS-SB direction), 1.45m center-to-center (see
+            // AXLE_PAIR_SPACING_M, global). The pair is grouped so
+            // trailerAxles' real (x,y) from Excel positions the GROUP's
+            // own centroid — i.e. the midpoint between the two boxes —
+            // not either box individually.
             trailerAxles.forEach((axle) => {
                 const axleGroup = new THREE.Group();
                 const halfSpacing = AXLE_PAIR_SPACING_M / 2;
@@ -2378,11 +2382,11 @@
             const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
             const labelY = 1.0; // small lift above deck so labels don't sit inside the hull
 
-            function addAnchor(id, x, y, z, text, cls) {
+            function addAnchor(id, x, y, z, text, cls, cfgId) {
                 const obj = new THREE.Object3D();
                 obj.position.set(x, y, z);
                 hull3dGroup.add(obj);
-                labelAnchors3d.push({ id, obj, text, cls });
+                labelAnchors3d.push({ id, obj, text, cls, cfgId });
             }
 
             // AFT / FWD (along X, centered in Z)
@@ -2391,8 +2395,14 @@
             // PS / SB (along Z, centered in X) — PS = +Y in real-world
             // coordinates, converted through worldYToZ3D() for correct
             // on-screen handedness (see comment on that function).
-            addAnchor('ps', midX, labelY, worldYToZ3D(BARGE_Y_MAX), 'PS', 'edge');
-            addAnchor('sb', midX, labelY, worldYToZ3D(BARGE_Y_MIN), 'SB', 'edge');
+            // Pushed an extra 1.8m OUTSIDE the hull (beyond BARGE_Y_MAX/
+            // MIN) so they no longer land on the exact same world point as
+            // the corner1/corner4 (mid-PS/mid-SB) labels below — that
+            // coincidence was why PS/SB appeared to "not show": the corner
+            // badge was drawing directly on top of them.
+            const EDGE_OUTSET_M = 1.8;
+            addAnchor('ps', midX, labelY, worldYToZ3D(BARGE_Y_MAX + EDGE_OUTSET_M), 'PS', 'edge');
+            addAnchor('sb', midX, labelY, worldYToZ3D(BARGE_Y_MIN - EDGE_OUTSET_M), 'SB', 'edge');
 
             // 6 corner labels, sourced from Load_Editor!I1:I6 via
             // bargeCornerLabels — same indexing as the 2D plan view.
@@ -2402,6 +2412,15 @@
             addAnchor('corner3', BARGE_X_MIN, labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I4 AFT-SB
             addAnchor('corner4', midX,        labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I5 mid-SB
             addAnchor('corner5', BARGE_X_MAX, labelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I6 FWD-SB
+
+            // Per-tank % water level labels, matching the 2D dashboard's
+            // load-percentage badge on each tank card. Positioned at each
+            // tank's real-world center, lifted slightly above deck.
+            TANK_CONFIG.forEach((cfg) => {
+                const geo = getTankGeometry(cfg.id);
+                if (!geo) return;
+                addAnchor('pct' + cfg.id, geo.x, labelY, worldYToZ3D(geo.y), '', 'pct', cfg.id);
+            });
         }
 
         function renderLabels3D() {
@@ -2413,6 +2432,11 @@
             const v = new THREE.Vector3();
             let html = '';
 
+            // Same wording/precision as the 2D plan's updateTrimHeelGridLabels():
+            // only the side that's actually "down" gets the value appended.
+            const trimAbs3d = Math.abs(currentTrimDegrees).toFixed(2) + '\u00b0';
+            const heelAbs3d = Math.abs(currentHeelDegrees).toFixed(2) + '\u00b0';
+
             labelAnchors3d.forEach((a) => {
                 a.obj.getWorldPosition(v);
                 v.project(camera3d);
@@ -2421,30 +2445,28 @@
                 const sy = (-v.y * 0.5 + 0.5) * h;
 
                 if (a.cls === 'edge') {
-                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:12px; font-weight:700; letter-spacing:0.5px; color:#fef3c7; background:rgba(15,17,21,0.55); padding:1px 6px; border-radius:4px; white-space:nowrap;">${a.text}</div>`;
+                    let text = a.text;
+                    let active = false;
+                    if (a.id === 'aft') { active = currentTrimDegrees > 0; text = active ? `AFT ${trimAbs3d}` : 'AFT'; }
+                    else if (a.id === 'fwd') { active = currentTrimDegrees < 0; text = active ? `FWD ${trimAbs3d}` : 'FWD'; }
+                    else if (a.id === 'ps') { active = currentHeelDegrees > 0; text = active ? `PS ${heelAbs3d}` : 'PS'; }
+                    else if (a.id === 'sb') { active = currentHeelDegrees < 0; text = active ? `SB ${heelAbs3d}` : 'SB'; }
+                    const bg = active ? 'rgba(245,158,11,0.75)' : 'rgba(15,17,21,0.55)';
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:12px; font-weight:700; letter-spacing:0.5px; color:#fef3c7; background:${bg}; padding:1px 6px; border-radius:4px; white-space:nowrap;">${text}</div>`;
                 } else if (a.cls === 'corner') {
                     const idx = parseInt(a.id.replace('corner', ''), 10);
                     const text = formatCornerLabelText((bargeCornerLabels[idx] || '').trim());
                     if (!text) return;
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:11px; color:#cbd5e1; background:rgba(15,17,21,0.5); padding:1px 5px; border-radius:4px; white-space:nowrap;">${text}</div>`;
+                } else if (a.cls === 'pct') {
+                    const td = tankData.find((t) => t.row === a.cfgId);
+                    if (!td) return;
+                    const pct = Math.round(Math.max(0, Math.min(1, td.percent)) * 100);
+                    const hot = pct >= 85;
+                    const bg = hot ? 'rgba(240,138,60,0.75)' : 'rgba(56,189,248,0.55)';
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#0f172a; background:${bg}; padding:0px 4px; border-radius:3px; white-space:nowrap;">${pct}%</div>`;
                 }
             });
-
-            // Exact same wording/precision as the 2D plan's
-            // lbl_TrimValue / lbl_HeelValue (drawAttitudeGraphics()):
-            // "X.XX° AFT TRIM" / "FWD TRIM" / "EVEN KEEL", and
-            // "X.XX° PORT HEEL" / "STBD HEEL" / "UPRIGHT".
-            const trimAbs3d = Math.abs(currentTrimDegrees).toFixed(2);
-            const heelAbs3d = Math.abs(currentHeelDegrees).toFixed(2);
-            let trimTxt = `${trimAbs3d}\u00b0 `;
-            if (currentTrimDegrees > 0) trimTxt += 'AFT TRIM';
-            else if (currentTrimDegrees < 0) trimTxt += 'FWD TRIM';
-            else trimTxt += 'EVEN KEEL';
-            let heelTxt = `${heelAbs3d}\u00b0 `;
-            if (currentHeelDegrees > 0) heelTxt += 'PORT HEEL';
-            else if (currentHeelDegrees < 0) heelTxt += 'STBD HEEL';
-            else heelTxt += 'UPRIGHT';
-            html += `<div style="position:absolute; left:8px; top:8px; font-size:11px; line-height:1.6; color:#e2e8f0; background:rgba(15,17,21,0.6); padding:5px 9px; border-radius:6px;">Trim: ${trimTxt}<br>Heel: ${heelTxt}</div>`;
 
             layer.innerHTML = html;
         }
@@ -2461,6 +2483,7 @@
             if (!scene3d) {
                 init3DScene();
                 set3DCamera('iso-fwd-ps');
+                set3DEnvironment(!document.body.classList.contains('light-theme'));
             }
             const signature = TANK_CONFIG.length + '|' + trailerAxles.length + '|' + pumpLocations.length;
             if (signature !== last3DSignature) {
