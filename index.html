@@ -655,8 +655,9 @@
                 <button class="sync-btn" onclick="set3DCamera('iso-aft-sb')" id="cam3d-iso-aft-sb">AFT-SB iso</button>
                 <button class="sync-btn" onclick="set3DCamera('top')" id="cam3d-top">Top-down</button>
                 <button class="sync-btn" onclick="set3DCamera('side')" id="cam3d-side">Side (SB)</button>
-                <button class="sync-btn" onclick="set3DCamera('front')" id="cam3d-front">Front (bow)</button>
                 <button class="sync-btn" onclick="set3DCamera('end')" id="cam3d-end">End (stern)</button>
+                <button class="sync-btn" onclick="saveCurrentView3D()" id="cam3d-save" title="Save current camera position so you can return to it later">💾 Save View</button>
+                <button class="sync-btn" onclick="restoreSavedView3D()" id="cam3d-restore" title="Jump back to the last saved camera position" style="grid-column:span 1;">↩ Restore View</button>
             </div>
             <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0; margin-top: 8px;">
                 <span style="font-size: 12px; color: var(--text-muted);">3D ballast view</span>
@@ -2309,7 +2310,6 @@
             // looking across the beam toward PS (theta=0 puts the camera
             // at +Z = SB, looking toward -Z = PS).
             'side':       { az: 0,    el: 8  },
-            'front':      { az: 90,   el: 6  },
             'end':        { az: -90,  el: 6  }
         };
 
@@ -2535,7 +2535,7 @@
             // Reset any pan offset when jumping to a named preset, so the
             // preset views stay predictable.
             panOffsetX3d = 0; panOffsetY3d = 0; panOffsetZ3d = 0;
-            if (name === 'front' || name === 'end') {
+            if (name === 'end') {
                 radius3d = 180;
             } else {
                 radius3d = 230;
@@ -2958,7 +2958,95 @@
             layer.innerHTML = html;
         }
 
-        // Public entry point — called after every refreshPlanView() so the
+        // ---- Save / Restore current 3D camera view ----
+        // Captures the full camera state (orbit angles, zoom radius, and
+        // any pan offset) into localStorage so the user can freely orbit,
+        // then jump back to their saved viewpoint at any time.
+        const SAVED_VIEW_KEY = 'barge3d_savedView';
+
+        function saveCurrentView3D() {
+            const viewState = {
+                theta: theta3d,
+                phi: phi3d,
+                radius: radius3d,
+                panX: panOffsetX3d,
+                panY: panOffsetY3d,
+                panZ: panOffsetZ3d
+            };
+            try {
+                localStorage.setItem(SAVED_VIEW_KEY, JSON.stringify(viewState));
+            } catch (e) { /* storage unavailable — silently skip */ }
+
+            // Visual feedback: briefly highlight the Save button
+            const btn = document.getElementById('cam3d-save');
+            if (btn) {
+                const orig = btn.textContent;
+                btn.textContent = '✓ Saved';
+                btn.style.color = 'var(--accent-green)';
+                btn.style.borderColor = 'var(--accent-green)';
+                setTimeout(() => {
+                    btn.textContent = orig;
+                    btn.style.color = '';
+                    btn.style.borderColor = '';
+                }, 1400);
+            }
+        }
+
+        function restoreSavedView3D() {
+            let viewState = null;
+            try {
+                const raw = localStorage.getItem(SAVED_VIEW_KEY);
+                if (raw) viewState = JSON.parse(raw);
+            } catch (e) { /* storage unavailable */ }
+
+            if (!viewState) {
+                // Nothing saved yet — flash the Restore button red as a hint
+                const btn = document.getElementById('cam3d-restore');
+                if (btn) {
+                    const orig = btn.textContent;
+                    btn.textContent = '✗ No saved view';
+                    btn.style.color = '#ef4444';
+                    btn.style.borderColor = '#ef4444';
+                    setTimeout(() => {
+                        btn.textContent = orig;
+                        btn.style.color = '';
+                        btn.style.borderColor = '';
+                    }, 1600);
+                }
+                return;
+            }
+
+            theta3d       = viewState.theta  ?? theta3d;
+            phi3d         = viewState.phi    ?? phi3d;
+            radius3d      = viewState.radius ?? radius3d;
+            panOffsetX3d  = viewState.panX   ?? 0;
+            panOffsetY3d  = viewState.panY   ?? 0;
+            panOffsetZ3d  = viewState.panZ   ?? 0;
+            updateCamera3DPosition();
+
+            // Clear any active preset highlight since we're now at a custom angle
+            current3DCamera = '';
+            Object.keys(CAM_PRESETS_3D).forEach((k) => {
+                const b = document.getElementById('cam3d-' + k);
+                if (b) b.style.fontWeight = '400';
+            });
+
+            // Visual feedback: briefly highlight the Restore button
+            const btn = document.getElementById('cam3d-restore');
+            if (btn) {
+                const orig = btn.textContent;
+                btn.textContent = '✓ Restored';
+                btn.style.color = 'var(--accent-blue)';
+                btn.style.borderColor = 'var(--accent-blue)';
+                setTimeout(() => {
+                    btn.textContent = orig;
+                    btn.style.color = '';
+                    btn.style.borderColor = '';
+                }, 1400);
+            }
+        }
+
+
         // 3D view always mirrors whatever the 2D plan just showed. Rebuilds
         // geometry whenever tank, axle, or pump COUNT changed (cheap check
         // covering both an Excel re-sync and demo/mock data), otherwise
