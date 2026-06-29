@@ -645,15 +645,6 @@
             </div>
         </div>
         <div class="tank-grid-container" id="view3dPanel">
-            <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0;">
-                <span style="font-size: 12px; color: var(--text-muted);">3D ballast view</span>
-                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                    <label class="toggle-container" style="margin:0;">
-                        <span style="font-size:11px;">Deck</span>
-                        <input type="checkbox" id="deck3dToggle" checked onchange="set3DDeckVisible(this.checked)">
-                    </label>
-                </div>
-            </div>
             <div style="position:relative; width:100%; height:420px;">
                 <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
                 <div id="labels3d" style="position:absolute; inset:0; pointer-events:none;"></div>
@@ -664,12 +655,26 @@
                 <button class="sync-btn" onclick="set3DCamera('iso-aft-ps')" id="cam3d-iso-aft-ps">AFT-PS iso</button>
                 <button class="sync-btn" onclick="set3DCamera('iso-aft-sb')" id="cam3d-iso-aft-sb">AFT-SB iso</button>
                 <button class="sync-btn" onclick="set3DCamera('top')" id="cam3d-top">Top-down</button>
-                <button class="sync-btn" onclick="set3DCamera('side')" id="cam3d-side">Side</button>
+                <button class="sync-btn" onclick="set3DCamera('side')" id="cam3d-side">Side (SB)</button>
                 <button class="sync-btn" onclick="set3DCamera('front')" id="cam3d-front">Front (bow)</button>
                 <button class="sync-btn" onclick="set3DCamera('end')" id="cam3d-end">End (stern)</button>
             </div>
+            <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0; margin-top: 8px;">
+                <span style="font-size: 12px; color: var(--text-muted);">3D ballast view</span>
+                <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+                    <label class="toggle-container" style="margin:0;">
+                        <span style="font-size:11px;">Deck</span>
+                        <input type="checkbox" id="deck3dToggle" checked onchange="set3DDeckVisible(this.checked)">
+                    </label>
+                    <label class="toggle-container" style="margin:0;">
+                        <span style="font-size:11px;" id="dayNight3dLabel">Day</span>
+                        <input type="checkbox" id="dayNight3dToggle" onchange="set3DEnvironment(this.checked)">
+                    </label>
+                </div>
+            </div>
         </div>
     </div>
+
     <script>
         // ============================================================
         // 1. CUSTOM TANK CONFIGURATION — geometry is now LINKED to the
@@ -2029,32 +2034,38 @@
             'iso-aft-sb': { az: -135, el: 32 },
             'top':        { az: 0,    el: 89 },
             // Camera position model: x-offset = radius*sin(theta),
-            // z-offset = radius*cos(theta). FWD/bow is +X, AFT/stern is -X,
-            // PS is +Z, SB is -Z. So a true bow/stern (fore-aft) view needs
-            // theta = +-90, NOT 0/180 (which is the broadside PS/SB axis).
-            // 'side' looks down the length from the quay end (same azimuth
-            // as 'end'/stern, since the quay sits at low X), pulled back
-            // further so the quay structure is clearly visible in frame.
-            'side':       { az: -90,  el: 8  },
+            // z-offset = radius*cos(theta). FWD/bow is +X, AFT/stern is -X.
+            // After the worldYToZ3D() fix, SB is +Z and PS is -Z on screen
+            // (verified against the 2D plan's left=PS/right=SB convention
+            // when viewed from the quay). A true bow/stern (fore-aft) view
+            // needs theta = +-90 (the broadside PS/SB axis is theta=0/180).
+            // 'side' is a true broadside view standing on the SB side,
+            // looking across the beam toward PS (theta=0 puts the camera
+            // at +Z = SB, looking toward -Z = PS).
+            'side':       { az: 0,    el: 8  },
             'front':      { az: 90,   el: 6  },
             'end':        { az: -90,  el: 6  }
         };
+
+        let ambientLight3d, dirLight3d, waterMesh3d, is3DNightMode = false;
 
         function init3DScene() {
             const container = document.getElementById('viewer3d');
             if (!container || scene3d) return; // already initialized
 
             scene3d = new THREE.Scene();
+            scene3d.background = new THREE.Color(0x0f1115); // day default, overridden by set3DEnvironment
             camera3d = new THREE.PerspectiveCamera(45, container.clientWidth / Math.max(container.clientHeight, 1), 0.1, 2000);
             renderer3d = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer3d.setSize(container.clientWidth, container.clientHeight);
             renderer3d.setPixelRatio(window.devicePixelRatio || 1);
             container.appendChild(renderer3d.domElement);
 
-            scene3d.add(new THREE.AmbientLight(0xffffff, 0.65));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-            dirLight.position.set(40, 60, 30);
-            scene3d.add(dirLight);
+            ambientLight3d = new THREE.AmbientLight(0xffffff, 0.65);
+            scene3d.add(ambientLight3d);
+            dirLight3d = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight3d.position.set(40, 60, 30);
+            scene3d.add(dirLight3d);
 
             world3dGroup = new THREE.Group();
             scene3d.add(world3dGroup);
@@ -2112,9 +2123,7 @@
             current3DCamera = name;
             const tp = azElToThetaPhi3D(p.az, p.el);
             theta3d = tp.theta; phi3d = tp.phi;
-            if (name === 'side') {
-                radius3d = 260; // pulled back further so the quay structure is fully in frame
-            } else if (name === 'front' || name === 'end') {
+            if (name === 'front' || name === 'end') {
                 radius3d = 180;
             } else {
                 radius3d = 230;
@@ -2130,23 +2139,52 @@
             if (deckPlate3d) deckPlate3d.visible = visible;
         }
 
+        // Day/night toggle: swaps scene background, ambient/directional
+        // light levels, and the sea-level water tint. Purely cosmetic —
+        // doesn't touch geometry, fill levels, or trim/heel, so it's cheap
+        // to call any time.
+        function set3DEnvironment(isNight) {
+            is3DNightMode = isNight;
+            if (!scene3d) return;
+            if (isNight) {
+                scene3d.background = new THREE.Color(0x040508);
+                if (ambientLight3d) ambientLight3d.intensity = 0.22;
+                if (dirLight3d) { dirLight3d.intensity = 0.35; dirLight3d.color.set(0x9bb0d6); }
+                if (waterMesh3d) waterMesh3d.material.color.set(0x06192e);
+            } else {
+                scene3d.background = new THREE.Color(0x0f1115);
+                if (ambientLight3d) ambientLight3d.intensity = 0.65;
+                if (dirLight3d) { dirLight3d.intensity = 0.9; dirLight3d.color.set(0xffffff); }
+                if (waterMesh3d) waterMesh3d.material.color.set(0x1d6fa5);
+            }
+            const lbl = document.getElementById('dayNight3dLabel');
+            if (lbl) lbl.textContent = isNight ? 'Night' : 'Day';
+        }
+
         // Disposes every mesh currently in hull3dGroup/world3dGroup so the
         // scene can be rebuilt cleanly whenever TANK_CONFIG changes shape
         // (different number of tanks, different barge length, etc).
+        function disposeMeshDeep(obj) {
+            if (!obj) return;
+            if (obj.children && obj.children.length) {
+                [...obj.children].forEach((child) => disposeMeshDeep(child));
+            }
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) obj.material.dispose();
+        }
+
         function clear3DGeometry() {
             if (!hull3dGroup) return;
             [...hull3dGroup.children].forEach((m) => {
                 hull3dGroup.remove(m);
-                if (m.geometry) m.geometry.dispose();
-                if (m.material) m.material.dispose();
+                disposeMeshDeep(m);
             });
             tankMeshes3d = [];
             pumpMeshes3d = [];
             axleMeshes3d = [];
             quayMeshes3d.forEach((m) => {
                 if (m.parent) m.parent.remove(m);
-                if (m.geometry) m.geometry.dispose();
-                if (m.material) m.material.dispose();
+                disposeMeshDeep(m);
             });
             quayMeshes3d = [];
             deckPlate3d = null;
@@ -2191,14 +2229,14 @@
             // sea level plane — parented to world3dGroup (NOT hull3dGroup),
             // so it stays flat/level and never inherits the hull's
             // trim/heel rotation, matching real physical sea behavior.
-            const water = new THREE.Mesh(
+            waterMesh3d = new THREE.Mesh(
                 new THREE.PlaneGeometry(2000, 2000),
                 new THREE.MeshPhongMaterial({ color: 0x1d6fa5, transparent: true, opacity: 0.32, side: THREE.DoubleSide })
             );
-            water.rotation.x = -Math.PI / 2;
-            water.position.y = TANK_TOP_Y - TANK_DEPTH_M - 3.2;
-            world3dGroup.add(water);
-            quayMeshes3d.push(water);
+            waterMesh3d.rotation.x = -Math.PI / 2;
+            waterMesh3d.position.y = TANK_TOP_Y - TANK_DEPTH_M - 3.2;
+            world3dGroup.add(waterMesh3d);
+            quayMeshes3d.push(waterMesh3d);
 
             // tanks — flat 6m boxes, shrunk by the real footprint gap so
             // neighbouring tanks show true daylight between their shells
@@ -2252,16 +2290,28 @@
                 pumpMeshes3d.push(post, cap);
             });
 
-            // axle markers — amber box (0.86 x 0.945 x 1.4m), base resting
-            // on the deck top surface
+            // axle markers — TWO boxes per axle position (0.86 x 0.945 x
+            // 1.4m each), forming a side-by-side pair across the barge
+            // width (Y/PS-SB direction), 1.45m center-to-center. The pair
+            // is grouped so trailerAxles' real (x,y) from Excel positions
+            // the GROUP's own centroid — i.e. the midpoint between the two
+            // boxes — not either box individually.
+            const AXLE_PAIR_SPACING_M = 1.45;
             trailerAxles.forEach((axle) => {
-                const box = new THREE.Mesh(
-                    new THREE.BoxGeometry(AXLE_BOX.x, AXLE_BOX.z, AXLE_BOX.y),
-                    new THREE.MeshPhongMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.88 })
-                );
-                box.position.set(axle.x, DECK_TOP_Y + AXLE_BOX.z / 2, worldYToZ3D(axle.y));
-                hull3dGroup.add(box);
-                axleMeshes3d.push(box);
+                const axleGroup = new THREE.Group();
+                const halfSpacing = AXLE_PAIR_SPACING_M / 2;
+                [-halfSpacing, halfSpacing].forEach((offsetY) => {
+                    const box = new THREE.Mesh(
+                        new THREE.BoxGeometry(AXLE_BOX.x, AXLE_BOX.z, AXLE_BOX.y),
+                        new THREE.MeshPhongMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.88 })
+                    );
+                    box.position.set(0, DECK_TOP_Y + AXLE_BOX.z / 2, offsetY);
+                    axleGroup.add(box);
+                    axleMeshes3d.push(box);
+                });
+                axleGroup.position.set(axle.x, 0, worldYToZ3D(axle.y));
+                hull3dGroup.add(axleGroup);
+                axleMeshes3d.push(axleGroup);
             });
 
             // quay — leading edge sits exactly BARGE_QUAY_GAP_M short of the
@@ -2374,17 +2424,27 @@
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:12px; font-weight:700; letter-spacing:0.5px; color:#fef3c7; background:rgba(15,17,21,0.55); padding:1px 6px; border-radius:4px; white-space:nowrap;">${a.text}</div>`;
                 } else if (a.cls === 'corner') {
                     const idx = parseInt(a.id.replace('corner', ''), 10);
-                    const text = (bargeCornerLabels[idx] || '').trim();
+                    const text = formatCornerLabelText((bargeCornerLabels[idx] || '').trim());
                     if (!text) return;
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:11px; color:#cbd5e1; background:rgba(15,17,21,0.5); padding:1px 5px; border-radius:4px; white-space:nowrap;">${text}</div>`;
                 }
             });
 
-            const trimAbs3d = Math.abs(currentTrimDegrees).toFixed(1);
-            const heelAbs3d = Math.abs(currentHeelDegrees).toFixed(1);
-            const trimTxt = currentTrimDegrees === 0 ? 'Trim 0.0°' : (currentTrimDegrees > 0 ? `Trim ${trimAbs3d}° (AFT down)` : `Trim ${trimAbs3d}° (FWD down)`);
-            const heelTxt = currentHeelDegrees === 0 ? 'Heel 0.0°' : (currentHeelDegrees > 0 ? `Heel ${heelAbs3d}° (PS down)` : `Heel ${heelAbs3d}° (SB down)`);
-            html += `<div style="position:absolute; left:8px; top:8px; font-size:11px; line-height:1.5; color:#e2e8f0; background:rgba(15,17,21,0.6); padding:5px 9px; border-radius:6px;">${trimTxt}<br>${heelTxt}</div>`;
+            // Exact same wording/precision as the 2D plan's
+            // lbl_TrimValue / lbl_HeelValue (drawAttitudeGraphics()):
+            // "X.XX° AFT TRIM" / "FWD TRIM" / "EVEN KEEL", and
+            // "X.XX° PORT HEEL" / "STBD HEEL" / "UPRIGHT".
+            const trimAbs3d = Math.abs(currentTrimDegrees).toFixed(2);
+            const heelAbs3d = Math.abs(currentHeelDegrees).toFixed(2);
+            let trimTxt = `${trimAbs3d}\u00b0 `;
+            if (currentTrimDegrees > 0) trimTxt += 'AFT TRIM';
+            else if (currentTrimDegrees < 0) trimTxt += 'FWD TRIM';
+            else trimTxt += 'EVEN KEEL';
+            let heelTxt = `${heelAbs3d}\u00b0 `;
+            if (currentHeelDegrees > 0) heelTxt += 'PORT HEEL';
+            else if (currentHeelDegrees < 0) heelTxt += 'STBD HEEL';
+            else heelTxt += 'UPRIGHT';
+            html += `<div style="position:absolute; left:8px; top:8px; font-size:11px; line-height:1.6; color:#e2e8f0; background:rgba(15,17,21,0.6); padding:5px 9px; border-radius:6px;">Trim: ${trimTxt}<br>Heel: ${heelTxt}</div>`;
 
             layer.innerHTML = html;
         }
