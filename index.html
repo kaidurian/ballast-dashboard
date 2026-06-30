@@ -618,6 +618,22 @@
                 <span>⚡ Pump-only input</span>
                 <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
             </div>
+            <button
+    id="btnAutoBallast"
+    onclick="startAutoBallast()">
+
+    🤖 Auto Ballast
+</button>
+
+<button
+    onclick="stopAutoBallast()">
+
+    Stop
+</button>
+
+<span id="autoBallastStatus">
+    Ready
+</span>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
         </div>
@@ -862,6 +878,16 @@
         let currentHeelDegrees = 0.0;
         let trailerAxles = []; // [{ name, x, y }]
         let showTrailer = true;  // new state for trailer toggle
+
+        let autoBallastRunning = false;
+
+        const AUTO_LIMITS = {
+            maxIterations: 100,
+            trimTol: 0.05,
+            heelTol: 0.05,
+            deckTol: 0.01,
+            ballastStep: 10
+        };
 
         // Pump locations, sourced from BALLASTPLAN(mT)!A33:E... (until column
         // A is blank). Column A = tank name (matches Load_Editor/CREST_301
@@ -3073,6 +3099,74 @@
             update3DFillAndAttitude();
             updateLabelAnchorText3D();
             renderLabels3D();
+        }
+
+        function stopAutoBallast() {
+
+            autoBallastRunning = false;
+
+            document.getElementById(
+                "autoBallastStatus"
+            ).innerHTML = "Stopped";
+        }
+
+        async function startAutoBallast() {
+
+            autoBallastRunning = true;
+
+            const s =
+                await readAutoBallastState();
+
+            console.log(s);
+
+            document.getElementById(
+                "autoBallastStatus"
+            ).innerHTML =
+                "Trim="
+                + s.trim +
+                " Heel="
+                + s.heel;
+        }
+
+        async function readAutoBallastState() {
+
+            return await Excel.run(
+                async (context) => {
+
+                    const load =
+                        context.workbook
+                            .worksheets
+                            .getItem(
+                                "Load_Editor"
+                            );
+
+                    const crest =
+                        context.workbook
+                            .worksheets
+                            .getItem(
+                                "CREST_301_ST"
+                            );
+
+                    const trim =
+                        load.getRange("E8");
+
+                    const heel =
+                        load.getRange("E9");
+
+                    trim.load("values");
+                    heel.load("values");
+
+                    await context.sync();
+
+                    return {
+
+                        trim:
+                            trim.values[0][0],
+
+                        heel:
+                            heel.values[0][0]
+                    };
+                });
         }
     </script>  
 </body>
