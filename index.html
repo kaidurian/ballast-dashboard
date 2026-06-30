@@ -3153,8 +3153,12 @@
                     const heel =
                         load.getRange("E9");
 
+                    const deck =
+                        load.getRange("I1:I6");
+
                     trim.load("values");
                     heel.load("values");
+                    deck.load("values");
 
                     await context.sync();
 
@@ -3164,7 +3168,10 @@
                             trim.values[0][0],
 
                         heel:
-                            heel.values[0][0]
+                            heel.values[0][0],
+
+                        deck:
+                            deck.values.flat()
                     };
                 });
         }
