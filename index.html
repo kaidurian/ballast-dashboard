@@ -595,27 +595,156 @@
                 cursor: pointer;
             }
 
-        #autoBallastPanel {
-            position: fixed;
-            right: 10px;
-            top: 120px;
-            width: 250px;
-            background: #111;
-            color: white;
-            border: 1px solid #444;
-            border-radius: 8px;
-            padding: 10px;
-            z-index: 9999;
-            font-size: 12px;
+        /* ============================================================
+           AUTO BALLAST PANEL
+           Implements AUTO_BALLAST_DASHBOARD_PROJECT.docx section 15
+           (feature list) styled to match the existing tank-grid-container
+           panels. All colors reuse the theme's CSS variables so it obeys
+           the Day/Night toggle automatically.
+           ============================================================ */
+        .ab-mode-row {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
         }
 
-            #autoBallastPanel table {
-                width: 100%;
+        .ab-mode-btn {
+            flex: 1 1 120px;
+            min-width: 100px;
+            padding: 8px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            background: var(--tank-box-bg);
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+            .ab-mode-btn:hover {
+                border-color: var(--accent-blue);
             }
 
-            #autoBallastPanel td {
-                padding: 2px;
+            .ab-mode-btn.ab-mode-active {
+                background: var(--accent-blue);
+                border-color: var(--accent-blue);
+                color: #06202e;
             }
+
+        .ab-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+        }
+
+        .ab-stat {
+            background: var(--tank-box-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 6px 10px;
+        }
+
+            .ab-stat-label {
+                font-size: 9px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: var(--text-muted);
+                display: block;
+                margin-bottom: 2px;
+            }
+
+            .ab-stat-value {
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--text-main);
+            }
+
+            .ab-stat-value.ab-ok { color: var(--accent-green); }
+            .ab-stat-value.ab-off { color: #f97316; }
+
+        .ab-deck-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+            gap: 6px;
+        }
+
+        .ab-deck-cell {
+            background: var(--tank-box-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 5px;
+            padding: 4px 6px;
+            text-align: center;
+        }
+
+            .ab-deck-cell .ab-deck-name {
+                font-size: 8px;
+                color: var(--text-muted);
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+                display: block;
+            }
+
+            .ab-deck-cell .ab-deck-cur {
+                font-size: 12px;
+                font-weight: 700;
+                color: var(--text-main);
+            }
+
+            .ab-deck-cell .ab-deck-tgt {
+                font-size: 9px;
+                color: var(--text-muted);
+            }
+
+        .ab-btn-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .ab-btn {
+            flex: 1;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            cursor: pointer;
+        }
+
+            .ab-btn-start {
+                background: rgba(16,185,129,0.12);
+                border-color: var(--accent-green);
+                color: var(--accent-green);
+            }
+
+            .ab-btn-stop {
+                background: rgba(249,115,22,0.12);
+                border-color: #f97316;
+                color: #f97316;
+            }
+
+            .ab-btn:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+
+        .ab-log {
+            background: rgba(0,0,0,0.25);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 10px;
+            font-family: 'Consolas', monospace;
+            color: var(--text-muted);
+            max-height: 110px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        body.light-theme .ab-log {
+            background: rgba(0,0,0,0.05);
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
@@ -642,83 +771,6 @@
             </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
-        </div>
-        <div id="autoBallastPanel">
-
-            <h3>⚓ AUTO BALLAST</h3>
-
-            <table>
-
-                <tr>
-                    <td>Current Heel</td>
-                    <td id="abCurrentHeel">0.00°</td>
-                </tr>
-
-                <tr>
-                    <td>Target Heel</td>
-                    <td id="abTargetHeel">0.00°</td>
-                </tr>
-
-                <tr>
-                    <td>Current Trim</td>
-                    <td id="abCurrentTrim">0.00°</td>
-                </tr>
-
-                <tr>
-                    <td>Target Trim</td>
-                    <td id="abTargetTrim">0.00°</td>
-                </tr>
-
-            </table>
-
-            <hr>
-
-            <div>
-                AFT-PS :
-                <span id="abAftPs">0.00</span>
-            </div>
-
-            <div>
-                PS :
-                <span id="abPs">0.00</span>
-            </div>
-
-            <div>
-                FWD-PS :
-                <span id="abFwdPs">0.00</span>
-            </div>
-
-            <div>
-                AFT-SB :
-                <span id="abAftSb">0.00</span>
-            </div>
-
-            <div>
-                SB :
-                <span id="abSb">0.00</span>
-            </div>
-
-            <div>
-                FWD-SB :
-                <span id="abFwdSb">0.00</span>
-            </div>
-
-            <hr>
-
-            <button id="btnAutoBallast">
-                START AUTO
-            </button>
-
-            <button id="btnStopAuto">
-                STOP
-            </button>
-
-            <hr>
-
-            <div id="abStatus">
-                READY
-            </div>
-
         </div>
     </header>
     <div class="main-layout">
@@ -779,6 +831,70 @@
                     </label>
                 </div>
             </div>
+        </div>
+
+        <!-- ============================================================
+             AUTO BALLAST PANEL
+             Per AUTO_BALLAST_DASHBOARD_PROJECT.docx §15. The dashboard
+             NEVER computes hydrostatics itself — every trim/heel/deck
+             number shown here comes straight from Excel (Load_Editor!E8,
+             E9, I1:I6) and target sheet CREST_301_ST. Auto Fixed / Auto
+             Smart execution (§9-11) only runs when connected live to
+             Excel, since each candidate move must be tested by writing
+             to Excel and letting Excel recalculate — see runAutoBallastLoop().
+             ============================================================ -->
+        <div class="tank-grid-container" id="autoBallastPanel">
+            <div class="section-title">
+                <span>🎯 Auto Ballast</span>
+                <span id="abPriorityLabel" style="font-size:10px; color:var(--text-muted); text-transform:none;">Priority: Heel → Trim → Deck-Quay</span>
+            </div>
+
+            <div class="ab-mode-row">
+                <button class="ab-mode-btn ab-mode-active" data-mode="manual" id="abModeManual" onclick="setAutoBallastMode('manual')">Manual</button>
+                <button class="ab-mode-btn" data-mode="assist" id="abModeAssist" onclick="setAutoBallastMode('assist')">Assist</button>
+                <button class="ab-mode-btn" data-mode="auto-fixed" id="abModeAutoFixed" onclick="setAutoBallastMode('auto-fixed')">Auto Fixed</button>
+                <button class="ab-mode-btn" data-mode="auto-smart" id="abModeAutoSmart" onclick="setAutoBallastMode('auto-smart')">Auto Smart</button>
+            </div>
+
+            <div class="ab-stat-grid">
+                <div class="ab-stat">
+                    <span class="ab-stat-label">Current Heel / Target</span>
+                    <span class="ab-stat-value" id="abCurrentHeel">0.00°</span>
+                    <span class="ab-stat-value" style="font-size:11px; color:var(--text-muted);" id="abTargetHeel">/ 0.00°</span>
+                </div>
+                <div class="ab-stat">
+                    <span class="ab-stat-label">Current Trim / Target</span>
+                    <span class="ab-stat-value" id="abCurrentTrim">0.00°</span>
+                    <span class="ab-stat-value" style="font-size:11px; color:var(--text-muted);" id="abTargetTrim">/ 0.00°</span>
+                </div>
+                <div class="ab-stat">
+                    <span class="ab-stat-label">Error Score</span>
+                    <span class="ab-stat-value" id="abErrorScore">0.00</span>
+                </div>
+                <div class="ab-stat">
+                    <span class="ab-stat-label">Iteration</span>
+                    <span class="ab-stat-value" id="abIteration">0 / 100</span>
+                </div>
+                <div class="ab-stat">
+                    <span class="ab-stat-label">Pump Mode</span>
+                    <span class="ab-stat-value" id="abPumpModeVal" style="font-size:12px;">—</span>
+                </div>
+                <div class="ab-stat">
+                    <span class="ab-stat-label">Est. Operation Time (session)</span>
+                    <span class="ab-stat-value" id="abOpTime" style="font-size:12px;">0 min</span>
+                </div>
+            </div>
+
+            <div class="ab-deck-grid" id="abDeckGrid">
+                <!-- populated by renderAutoBallastDeckGrid() -->
+            </div>
+
+            <div class="ab-btn-row">
+                <button class="ab-btn ab-btn-start" id="abStartBtn" onclick="startAutoBallast()" disabled>▶ Start</button>
+                <button class="ab-btn ab-btn-stop" id="abStopBtn" onclick="stopAutoBallast()" disabled>■ Stop</button>
+            </div>
+
+            <div class="ab-log" id="abLog">Select a mode above, then Start. Auto Fixed/Smart require a live Excel connection.</div>
         </div>
     </div>
 
@@ -959,38 +1075,6 @@
         let isOfficeInitialized = false;
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
-
-        let currentDeck = {
-
-            aftps: 0,
-            ps: 0,
-            fwdps: 0,
-
-            aftsb: 0,
-            sb: 0,
-            fwdsb: 0
-        };
-
-        // ======================================================
-        // AUTO BALLAST VARIABLES
-        // ======================================================
-        let autoBallastRunning = false;
-
-        let targetTrim = 0;
-        let targetHeel = 0;
-
-        let targetDeck = {
-            aftps: 0,
-            ps: 0,
-            fwdps: 0,
-            aftsb: 0,
-            sb: 0,
-            fwdsb: 0
-        };
-
-        let autoBallastError = 0;
-        let autoBallastIteration = 0;
-
         let trailerAxles = []; // [{ name, x, y }]
         let showTrailer = true;  // new state for trailer toggle
 
@@ -1013,6 +1097,53 @@
         // AFT/midship/FWD (X axis), matching the barge's real bounding box
         // (not the quay wall).
         let bargeCornerLabels = ['', '', '', '', '', ''];
+
+        // ============================================================
+        // AUTO BALLAST — data sources & state
+        // Per AUTO_BALLAST_DASHBOARD_PROJECT.docx §3, §13, §15.
+        // Targets come from sheet CREST_301_ST: P1=trim, P2=heel,
+        // P4:P9=deck-to-quay (AFT-PS, PS, FWD-PS, AFT-SB, SB, FWD-SB).
+        // Pump capacity comes from BALLASTPLAN(mT)!C153.
+        // ============================================================
+        const TARGET_SHEET_NAME = "CREST_301_ST";
+        const DECK_KEYS = ['AFT_PS', 'PS', 'FWD_PS', 'AFT_SB', 'SB', 'FWD_SB'];
+        const DECK_LABELS_DISPLAY = ['AFT-PS', 'PS', 'FWD-PS', 'AFT-SB', 'SB', 'FWD-SB'];
+
+        let targetTrimDegrees = 0.0;
+        let targetHeelDegrees = 0.0;
+        let targetDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
+        let currentDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
+        let pumpCapacityMTPerHr = 250; // BALLASTPLAN(mT)!C153, default per §11
+
+        // §13 recommended settings
+        const AB_BALLAST_INCREMENT_T = 5;
+        const AB_MAX_ITERATIONS = 100;
+        const AB_TRIM_TOLERANCE = 0.01;
+        const AB_HEEL_TOLERANCE = 0.01;
+        const AB_DECK_TOLERANCE = 0.01;
+
+        let autoBallastMode = 'manual';       // 'manual' | 'assist' | 'auto-fixed' | 'auto-smart'
+        let autoBallastRunning = false;
+        let autoBallastIteration = 0;
+        let autoBallastTotalTransferredT = 0; // cumulative |Δ| tonnes applied this session, for §14 time estimate
+
+        // Pulls the numeric deck-to-quay value out of a Load_Editor!I1:I6
+        // free-text label (e.g. "AFT-PS 0.32" -> 0.32). Labels with no
+        // number (not yet configured) read as 0.
+        function extractDeckNumberFromLabel(text) {
+            if (text === null || text === undefined || text === '') return 0;
+            const m = String(text).match(/-?\d+(\.\d+)?/);
+            return m ? parseFloat(m[0]) : 0;
+        }
+
+        // Keeps currentDeck{} in sync with whatever bargeCornerLabels[]
+        // currently holds. Call this any time bargeCornerLabels changes
+        // (Excel sync, mock data, Firebase pull).
+        function updateCurrentDeckFromLabels() {
+            DECK_KEYS.forEach((key, i) => {
+                currentDeck[key] = extractDeckNumberFromLabel(bargeCornerLabels[i]);
+            });
+        }
 
         // tank data store (synced with config) — (re)built whenever
         // TANK_CONFIG is (re)built from CREST_301.
@@ -1857,16 +1988,6 @@
                     cellTrim.load("values");
                     cellHeel.load("values");
 
-                    const stSheet =
-                        context.workbook
-                            .worksheets
-                            .getItem("CREST_301_ST");
-
-                    const targetRange =
-                        stSheet.getRange("P1:P9");
-
-                    targetRange.load("values");
-
                     // 6 barge corner/edge labels: Load_Editor!I1:I6
                     const rangeCornerLabels = editorSheet.getRange("I1:I6");
                     rangeCornerLabels.load("values");
@@ -1890,84 +2011,45 @@
                         rangePumps.load("values");
                     } catch (e) { /* sheet not found — pumps simply won't render */ }
 
+                    // Auto Ballast target condition: CREST_301_ST!P1:P9
+                    // (P1=trim, P2=heel, P4:P9=deck-to-quay AFT-PS..FWD-SB).
+                    let rangeTargets = null;
+                    try {
+                        const targetSheet = context.workbook.worksheets.getItem(TARGET_SHEET_NAME);
+                        rangeTargets = targetSheet.getRange("P1:P9");
+                        rangeTargets.load("values");
+                    } catch (e) { /* target sheet not found — targets stay at last-known value */ }
+
+                    // Auto Ballast pump capacity: BALLASTPLAN(mT)!C153.
+                    let rangePumpCap = null;
+                    try {
+                        const pumpCapSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
+                        rangePumpCap = pumpCapSheet.getRange("C153");
+                        rangePumpCap.load("values");
+                    } catch (e) { /* sheet not found — pump capacity stays at last-known value */ }
+
                     await context.sync();
-                    const stSheet =
-
-                        targetTrim =
-                        parseFloat(
-                            targetRange.values[0][0]
-                        ) || 0;
-
-                    targetHeel =
-                        parseFloat(
-                            targetRange.values[1][0]
-                        ) || 0;
-
-                    targetDeck.aftps =
-                        parseFloat(
-                            targetRange.values[3][0]
-                        ) || 0;
-
-                    targetDeck.ps =
-                        parseFloat(
-                            targetRange.values[4][0]
-                        ) || 0;
-
-                    targetDeck.fwdps =
-                        parseFloat(
-                            targetRange.values[5][0]
-                        ) || 0;
-
-                    targetDeck.aftsb =
-                        parseFloat(
-                            targetRange.values[6][0]
-                        ) || 0;
-
-                    targetDeck.sb =
-                        parseFloat(
-                            targetRange.values[7][0]
-                        ) || 0;
-
-                    targetDeck.fwdsb =
-                        parseFloat(
-                            targetRange.values[8][0]
-                        ) || 0;
-
-                    currentDeck.aftps =
-                        parseFloat(
-                            deckRange.values[0][0]
-                        ) || 0;
-
-                    currentDeck.ps =
-                        parseFloat(
-                            deckRange.values[1][0]
-                        ) || 0;
-
-                    currentDeck.fwdps =
-                        parseFloat(
-                            deckRange.values[2][0]
-                        ) || 0;
-
-                    currentDeck.aftsb =
-                        parseFloat(
-                            deckRange.values[3][0]
-                        ) || 0;
-
-                    currentDeck.sb =
-                        parseFloat(
-                            deckRange.values[4][0]
-                        ) || 0;
-
-                    currentDeck.fwdsb =
-                        parseFloat(
-                            deckRange.values[5][0]
-                        ) || 0;
-
 
                     BARGE_NAME = crestSheet.name || CREST_SHEET_NAME;
                     currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
+                    updateCurrentDeckFromLabels();
+
+                    if (rangeTargets) {
+                        const tv = rangeTargets.values; // rows P1..P9 → indices 0..8
+                        targetTrimDegrees = parseFloat(tv[0][0]) || 0;
+                        targetHeelDegrees = parseFloat(tv[1][0]) || 0;
+                        targetDeck.AFT_PS = parseFloat(tv[3][0]) || 0;
+                        targetDeck.PS     = parseFloat(tv[4][0]) || 0;
+                        targetDeck.FWD_PS = parseFloat(tv[5][0]) || 0;
+                        targetDeck.AFT_SB = parseFloat(tv[6][0]) || 0;
+                        targetDeck.SB     = parseFloat(tv[7][0]) || 0;
+                        targetDeck.FWD_SB = parseFloat(tv[8][0]) || 0;
+                    }
+                    if (rangePumpCap) {
+                        pumpCapacityMTPerHr = parseFloat(rangePumpCap.values[0][0]) || pumpCapacityMTPerHr;
+                    }
 
                     // Parse pump rows until column A is blank
                     if (rangePumps) {
@@ -2052,6 +2134,7 @@
                     drawAttitudeGraphics();
                     refreshPlanView();
                     if (typeof refresh3DView === 'function') refresh3DView();
+                    if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
                     dataMode = "excel";
                     publishToFirebase();
                 });
@@ -2059,99 +2142,6 @@
                 console.warn("Excel sync error, using mock", e);
                 generateMockSystemValues();
             }
-        }
-
-        refreshAutoBallastPanel();
-
-        document.getElementById(
-            "abError"
-        ).innerHTML =
-            calculateAutoBallastError()
-                .toFixed(2);
-
-        // ======================================================
-        // AUTO BALLAST ERROR CALCULATION
-        // Priority:
-        // 1. Heel
-        // 2. Trim
-        // 3. Deck-Quay
-        // ======================================================
-
-        function calculateAutoBallastError() {
-
-            let error = 0;
-
-            // HEEL
-            error +=
-                1000 *
-                Math.pow(
-                    currentHeelDegrees -
-                    targetHeel,
-                    2
-                );
-
-            // TRIM
-            error +=
-                500 *
-                Math.pow(
-                    currentTrimDegrees -
-                    targetTrim,
-                    2
-                );
-
-            // DECK DIFFERENCES
-
-            error +=
-                100 *
-                Math.pow(
-                    currentDeck.aftps -
-                    targetDeck.aftps,
-                    2
-                );
-
-            error +=
-                100 *
-                Math.pow(
-                    currentDeck.ps -
-                    targetDeck.ps,
-                    2
-                );
-
-            error +=
-                100 *
-                Math.pow(
-                    currentDeck.fwdps -
-                    targetDeck.fwdps,
-                    2
-                );
-
-            error +=
-                100 *
-                Math.pow(
-                    currentDeck.aftsb -
-                    targetDeck.aftsb,
-                    2
-                );
-
-            error +=
-                100 *
-                Math.pow(
-                    currentDeck.sb -
-                    targetDeck.sb,
-                    2
-                );
-
-            error +=
-                100 *
-                Math.pow(
-                    currentDeck.fwdsb -
-                    targetDeck.fwdsb,
-                    2
-                );
-
-            autoBallastError = error;
-
-            return error;
         }
 
         // ============================================================
@@ -2179,6 +2169,10 @@
                     bargeCornerLabels: bargeCornerLabels,
                     bargeName: BARGE_NAME,
                     showTrailer: showTrailer,
+                    targetTrim: targetTrimDegrees,
+                    targetHeel: targetHeelDegrees,
+                    targetDeck: targetDeck,
+                    pumpCapacityMTPerHr: pumpCapacityMTPerHr,
                     updatedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -2242,6 +2236,11 @@
                 if (Array.isArray(data.trailerAxles)) trailerAxles = data.trailerAxles;
                 if (Array.isArray(data.pumpLocations)) pumpLocations = data.pumpLocations;
                 if (Array.isArray(data.bargeCornerLabels)) bargeCornerLabels = data.bargeCornerLabels;
+                updateCurrentDeckFromLabels();
+                if (typeof data.targetTrim === 'number') targetTrimDegrees = data.targetTrim;
+                if (typeof data.targetHeel === 'number') targetHeelDegrees = data.targetHeel;
+                if (data.targetDeck) targetDeck = Object.assign({}, targetDeck, data.targetDeck);
+                if (typeof data.pumpCapacityMTPerHr === 'number') pumpCapacityMTPerHr = data.pumpCapacityMTPerHr;
                 if (typeof data.showTrailer === 'boolean') {
                     showTrailer = data.showTrailer;
                     const trailerBox = document.getElementById('trailerToggleCheckbox');
@@ -2252,6 +2251,7 @@
                 drawAttitudeGraphics();
                 refreshPlanView();
                 if (typeof refresh3DView === 'function') refresh3DView();
+                if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
 
                 const when = data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "unknown time";
                 document.getElementById('connectionStatus').innerHTML =
@@ -2354,7 +2354,17 @@
             }));
 
             BARGE_NAME = CREST_SHEET_NAME; // demo mode: same name as the real source sheet
-            bargeCornerLabels = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6']; // demo placeholders for Load_Editor!I1:I6
+            // Demo placeholders for Load_Editor!I1:I6, in the real
+            // "<CORNER> <value m>" format so the Auto Ballast panel below
+            // has representative deck-to-quay numbers to display.
+            bargeCornerLabels = ['AFT-PS 0.34', 'PS 0.18', 'FWD-PS 0.05', 'AFT-SB -0.22', 'SB -0.11', 'FWD-SB 0.02'];
+            updateCurrentDeckFromLabels();
+            // Demo targets (Auto Ballast panel) — a level condition at
+            // the quay, matching the CREST_301_ST!P1:P9 mapping.
+            targetTrimDegrees = 0.0;
+            targetHeelDegrees = 0.0;
+            targetDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
+            pumpCapacityMTPerHr = 250;
             // Mock pump locations (demo mode), matching mockNames above —
             // exercises the same name-matching path as the real Excel sync.
             pumpLocations = [
@@ -2394,6 +2404,7 @@
             drawAttitudeGraphics();
             refreshPlanView();
             refresh3DView();
+            if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
             document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span>';
         }
 
@@ -2457,6 +2468,339 @@
                     setTimeout(pullExcelTankData, 300);
                 });
             } catch (e) { console.warn("Excel write error", e); }
+        }
+
+        // ============================================================
+        // 7b. AUTO BALLAST ENGINE
+        // Implements AUTO_BALLAST_DASHBOARD_PROJECT.docx §6-17.
+        //
+        // Architecture reminder (§2, §17): this dashboard NEVER computes
+        // hydrostatics/trim/heel itself. Excel is the hydrostatic solver.
+        // Every candidate ballast move below is tested by WRITING to
+        // Excel, letting Excel recalculate, then READING the results back
+        // — never by estimating trim/heel/deck locally.
+        // ============================================================
+
+        // ---- §8 Error function ----------------------------------------
+        // Error = 1000·Heel² + 500·Trim² + 100·Σ(Deck²)
+        function computeErrorFromState(state) {
+            const heelErr = state.heel - targetHeelDegrees;
+            const trimErr = state.trim - targetTrimDegrees;
+            const deckVals = state.deckLabels.map(extractDeckNumberFromLabel);
+            const deckErrs = DECK_KEYS.map((k, i) => deckVals[i] - targetDeck[k]);
+            const total = 1000 * heelErr * heelErr
+                        + 500 * trimErr * trimErr
+                        + 100 * deckErrs.reduce((s, e) => s + e * e, 0);
+            return { total, heelErr, trimErr, deckErrs };
+        }
+
+        function computeCurrentError() {
+            return computeErrorFromState({
+                trim: currentTrimDegrees,
+                heel: currentHeelDegrees,
+                deckLabels: bargeCornerLabels
+            });
+        }
+
+        // ---- Which factor to correct next, per §7 fixed priority ------
+        // (Heel > Trim > Deck-to-quay). Returns null once everything is
+        // within tolerance (§13) — i.e. target reached.
+        function determineAutoBallastFocus(err) {
+            if (Math.abs(err.heelErr) > AB_HEEL_TOLERANCE) return 'heel';
+            if (Math.abs(err.trimErr) > AB_TRIM_TOLERANCE) return 'trim';
+            if (err.deckErrs.some(e => Math.abs(e) > AB_DECK_TOLERANCE)) return 'deck';
+            return null;
+        }
+
+        // ---- §10 Tank selection logic -> candidate single-tank moves ---
+        // Each Auto Ballast move is ONE tank pumped from sea or discharged
+        // to sea (§6: NOT tank-to-tank transfer, so Added ≠ Removed).
+        // Fixed Pump Mode (Auto Fixed, §11) restricts candidates to tanks
+        // that actually have a pump (tanksWithPump, from BALLASTPLAN(mT)).
+        // Smart Pump Mode (Auto Smart) ignores that restriction and finds
+        // the optimum first — a pump sequence is generated afterwards.
+        function buildAutoBallastCandidates(focus) {
+            const candidates = [];
+            let ids = TANK_CONFIG.map(t => t.id);
+            if (autoBallastMode === 'auto-fixed') {
+                ids = ids.filter(id => tanksWithPump.has(id));
+            }
+            const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+
+            ids.forEach(id => {
+                const cfg = TANK_CONFIG.find(t => t.id === id);
+                const tank = tankData.find(t => t.row === id);
+                if (!cfg || !tank) return;
+                const currentW = parseFloat(tank.weight) || 0;
+                const cap = cfg.capacity || 0;
+                const isPS = cfg.y >= 0;   // §5: Y > 0 = PS
+                const isFwd = cfg.x >= midX;
+
+                let want = null; // 'add' | 'remove' | 'both'
+                if (focus === 'heel') {
+                    if (currentHeelDegrees > 0) want = isPS ? 'remove' : 'add';      // heel to PS: discharge PS, fill SB
+                    else if (currentHeelDegrees < 0) want = isPS ? 'add' : 'remove'; // heel to SB: discharge SB, fill PS
+                } else if (focus === 'trim') {
+                    if (currentTrimDegrees > 0) want = isFwd ? 'add' : 'remove';      // trim by stern: discharge AFT, fill FWD
+                    else if (currentTrimDegrees < 0) want = isFwd ? 'remove' : 'add'; // trim by bow: discharge FWD, fill AFT
+                } else if (focus === 'deck') {
+                    want = 'both'; // fine adjustment — let the error test decide direction
+                }
+                if (!want) return;
+
+                if ((want === 'add' || want === 'both') && currentW + AB_BALLAST_INCREMENT_T <= cap + 1e-6) {
+                    candidates.push({ id, delta: AB_BALLAST_INCREMENT_T, newWeight: currentW + AB_BALLAST_INCREMENT_T, original: currentW });
+                }
+                if ((want === 'remove' || want === 'both') && currentW - AB_BALLAST_INCREMENT_T >= -1e-6) {
+                    candidates.push({ id, delta: -AB_BALLAST_INCREMENT_T, newWeight: Math.max(0, currentW - AB_BALLAST_INCREMENT_T), original: currentW });
+                }
+            });
+            return candidates;
+        }
+
+        // ---- Excel round-trip helpers for candidate testing ------------
+        async function abWriteTankWeight(row, value) {
+            await Excel.run(async (context) => {
+                const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                sheet.getRange(`D${row}`).values = [[value]];
+                await context.sync();
+            });
+        }
+
+        // Forces recalculation, then reads back the three hydrostatic
+        // outputs Excel computes for us (§2-3): trim, heel, deck-to-quay
+        // labels. This is the ONLY place "the answer" comes from — Excel.
+        async function abReadLiveAttitude() {
+            return await Excel.run(async (context) => {
+                const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                context.workbook.application.calculate(Excel.CalculationType.recalculate);
+                const cellTrim = sheet.getRange("E8");
+                const cellHeel = sheet.getRange("E9");
+                const rangeLabels = sheet.getRange("I1:I6");
+                cellTrim.load("values");
+                cellHeel.load("values");
+                rangeLabels.load("values");
+                await context.sync();
+                return {
+                    trim: parseFloat(cellTrim.values[0][0]) || 0,
+                    heel: parseFloat(cellHeel.values[0][0]) || 0,
+                    deckLabels: rangeLabels.values.map(r => r[0])
+                };
+            });
+        }
+
+        // ---- §9 Greedy iterative optimizer loop ------------------------
+        async function runAutoBallastLoop() {
+            if (!isOfficeInitialized) {
+                logAutoBallast('⚠ Auto Fixed / Auto Smart require a live Excel connection.');
+                return;
+            }
+            autoBallastRunning = true;
+            autoBallastIteration = 0;
+            updateAutoBallastButtons();
+
+            while (autoBallastRunning && autoBallastIteration < AB_MAX_ITERATIONS) {
+                const err = computeCurrentError();
+                refreshAutoBallastUI();
+                const focus = determineAutoBallastFocus(err);
+                if (!focus) {
+                    logAutoBallast('✅ Target reached — heel, trim and deck-to-quay all within tolerance.');
+                    break;
+                }
+
+                const candidates = buildAutoBallastCandidates(focus);
+                if (!candidates.length) {
+                    logAutoBallast(`⚠ No candidate tanks available to correct ${focus}. Stopping.`);
+                    break;
+                }
+                logAutoBallast(`Iter ${autoBallastIteration + 1}: testing ${candidates.length} candidate move(s) for ${focus}…`);
+
+                let best = null;
+                for (const cand of candidates) {
+                    if (!autoBallastRunning) break;
+                    await abWriteTankWeight(cand.id, cand.newWeight);
+                    const state = await abReadLiveAttitude();
+                    const candErr = computeErrorFromState(state);
+                    if (!best || candErr.total < best.errTotal) {
+                        best = Object.assign({}, cand, { errTotal: candErr.total });
+                    }
+                    await abWriteTankWeight(cand.id, cand.original); // revert — keep only the winner
+                }
+
+                // §13: "Stop if no improvement" = TRUE
+                if (!best || best.errTotal >= err.total - 1e-6) {
+                    logAutoBallast('⚠ No improving move found — stopping (no-improvement rule).');
+                    break;
+                }
+
+                await abWriteTankWeight(best.id, best.newWeight); // apply winner permanently
+                autoBallastTotalTransferredT += Math.abs(best.delta);
+                autoBallastIteration++;
+                const cfg = TANK_CONFIG.find(t => t.id === best.id);
+                logAutoBallast(`→ ${cfg ? cfg.name : ('Tank ' + best.id)}: ${best.original.toFixed(1)}t → ${best.newWeight.toFixed(1)}t. Error ${err.total.toFixed(1)} → ${best.errTotal.toFixed(1)}`);
+
+                await pullExcelTankData(); // refresh entire dashboard from the newly-applied state
+            }
+
+            autoBallastRunning = false;
+            updateAutoBallastButtons();
+        }
+
+        // ---- Assist mode: propose ONE move, wait for the operator ------
+        let abSuggestedMove = null;
+        async function suggestAutoBallastMove() {
+            if (!isOfficeInitialized) {
+                logAutoBallast('⚠ Assist mode needs a live Excel connection to test candidate moves.');
+                return;
+            }
+            const err = computeCurrentError();
+            const focus = determineAutoBallastFocus(err);
+            if (!focus) {
+                logAutoBallast('✅ Already within tolerance — no move suggested.');
+                return;
+            }
+            const candidates = buildAutoBallastCandidates(focus);
+            if (!candidates.length) {
+                logAutoBallast(`⚠ No candidate tanks available to correct ${focus}.`);
+                return;
+            }
+            logAutoBallast(`Testing ${candidates.length} candidate(s) for ${focus}…`);
+            let best = null;
+            for (const cand of candidates) {
+                await abWriteTankWeight(cand.id, cand.newWeight);
+                const state = await abReadLiveAttitude();
+                const candErr = computeErrorFromState(state);
+                if (!best || candErr.total < best.errTotal) best = Object.assign({}, cand, { errTotal: candErr.total });
+                await abWriteTankWeight(cand.id, cand.original);
+            }
+            if (!best || best.errTotal >= err.total - 1e-6) {
+                logAutoBallast('⚠ No improving move found for the current condition.');
+                abSuggestedMove = null;
+                return;
+            }
+            abSuggestedMove = best;
+            const cfg = TANK_CONFIG.find(t => t.id === best.id);
+            logAutoBallast(`💡 Suggested: ${cfg ? cfg.name : ('Tank ' + best.id)} ${best.delta > 0 ? '+' : ''}${best.delta}t (${best.original.toFixed(1)}t → ${best.newWeight.toFixed(1)}t). Click Start again to apply.`);
+        }
+
+        async function applyOrSuggestAssistMove() {
+            if (abSuggestedMove) {
+                const move = abSuggestedMove;
+                abSuggestedMove = null;
+                await abWriteTankWeight(move.id, move.newWeight);
+                autoBallastTotalTransferredT += Math.abs(move.delta);
+                logAutoBallast('✔ Applied suggested move.');
+                await pullExcelTankData();
+            } else {
+                await suggestAutoBallastMove();
+            }
+        }
+
+        // ---- Start / Stop / Mode UI wiring ------------------------------
+        function startAutoBallast() {
+            if (autoBallastMode === 'manual') return;
+            if (autoBallastMode === 'assist') { applyOrSuggestAssistMove(); return; }
+            if (autoBallastRunning) return;
+            document.getElementById('abLog').textContent = '';
+            runAutoBallastLoop();
+        }
+
+        function stopAutoBallast() {
+            if (!autoBallastRunning) return;
+            autoBallastRunning = false;
+            logAutoBallast('■ Stopped by operator.');
+            updateAutoBallastButtons();
+        }
+
+        function setAutoBallastMode(mode) {
+            if (autoBallastRunning) stopAutoBallast();
+            autoBallastMode = mode;
+            abSuggestedMove = null;
+            document.querySelectorAll('.ab-mode-btn').forEach(b => {
+                b.classList.toggle('ab-mode-active', b.dataset.mode === mode);
+            });
+            const pumpModeEl = document.getElementById('abPumpModeVal');
+            if (pumpModeEl) {
+                pumpModeEl.textContent = mode === 'auto-fixed' ? 'Fixed Pump Mode'
+                                        : mode === 'auto-smart' ? 'Smart Pump Mode'
+                                        : '—';
+            }
+            const startBtn = document.getElementById('abStartBtn');
+            if (startBtn) {
+                startBtn.textContent = mode === 'assist' ? '💡 Suggest Move' : '▶ Start';
+                startBtn.disabled = (mode === 'manual');
+            }
+            const stopBtn = document.getElementById('abStopBtn');
+            if (stopBtn) stopBtn.disabled = true;
+            document.getElementById('abLog').textContent = `Mode set to ${mode}. ` +
+                (mode === 'manual' ? 'Readout only — no automatic moves.' :
+                 mode === 'assist' ? 'Click "Suggest Move" for one recommended change at a time.' :
+                 'Click Start to run the greedy optimizer automatically.');
+        }
+
+        function updateAutoBallastButtons() {
+            const startBtn = document.getElementById('abStartBtn');
+            const stopBtn = document.getElementById('abStopBtn');
+            if (!startBtn || !stopBtn) return;
+            if (autoBallastMode === 'manual') {
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+            } else if (autoBallastMode === 'assist') {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            } else {
+                startBtn.disabled = autoBallastRunning;
+                stopBtn.disabled = !autoBallastRunning;
+            }
+        }
+
+        function logAutoBallast(msg) {
+            const log = document.getElementById('abLog');
+            if (!log) return;
+            log.textContent += (log.textContent ? '\n' : '') + msg;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // ---- §15 stat readout + deck grid -------------------------------
+        function renderAutoBallastDeckGrid() {
+            const grid = document.getElementById('abDeckGrid');
+            if (!grid) return;
+            grid.innerHTML = DECK_KEYS.map((key, i) => {
+                const cur = currentDeck[key] || 0;
+                const tgt = targetDeck[key] || 0;
+                const off = Math.abs(cur - tgt) > AB_DECK_TOLERANCE;
+                return `<div class="ab-deck-cell">
+                    <span class="ab-deck-name">${DECK_LABELS_DISPLAY[i]}</span>
+                    <span class="ab-deck-cur" style="${off ? 'color:#f97316;' : 'color:var(--accent-green);'}">${cur.toFixed(2)}m</span>
+                    <span class="ab-deck-tgt">/ ${tgt.toFixed(2)}m</span>
+                </div>`;
+            }).join('');
+        }
+
+        // Master refresh — call after ANY change to current/target values
+        // (Excel sync, mock data, Firebase pull, or mid-loop iteration).
+        function refreshAutoBallastUI() {
+            const err = computeCurrentError();
+
+            const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+            setText('abCurrentHeel', Math.abs(currentHeelDegrees).toFixed(2) + '°' + (currentHeelDegrees > 0 ? ' PS' : currentHeelDegrees < 0 ? ' SB' : ''));
+            setText('abTargetHeel', '/ ' + Math.abs(targetHeelDegrees).toFixed(2) + '°');
+            setText('abCurrentTrim', Math.abs(currentTrimDegrees).toFixed(2) + '°' + (currentTrimDegrees > 0 ? ' AFT' : currentTrimDegrees < 0 ? ' FWD' : ''));
+            setText('abTargetTrim', '/ ' + Math.abs(targetTrimDegrees).toFixed(2) + '°');
+
+            const errEl = document.getElementById('abErrorScore');
+            if (errEl) {
+                errEl.textContent = err.total.toFixed(1);
+                const withinTol = !determineAutoBallastFocus(err);
+                errEl.className = 'ab-stat-value ' + (withinTol ? 'ab-ok' : 'ab-off');
+            }
+
+            setText('abIteration', autoBallastIteration + ' / ' + AB_MAX_ITERATIONS);
+
+            const opMinutes = pumpCapacityMTPerHr > 0 ? (autoBallastTotalTransferredT / pumpCapacityMTPerHr) * 60 : 0;
+            setText('abOpTime', opMinutes.toFixed(0) + ' min (' + autoBallastTotalTransferredT.toFixed(0) + 't @ ' + pumpCapacityMTPerHr + ' mT/hr)');
+
+            renderAutoBallastDeckGrid();
         }
 
         // ============================================================
@@ -3379,59 +3723,6 @@
             update3DFillAndAttitude();
             updateLabelAnchorText3D();
             renderLabels3D();
-        }
-
-        function refreshAutoBallastPanel() {
-
-            document.getElementById(
-                "abCurrentHeel"
-            ).innerHTML =
-                currentHeelDegrees.toFixed(2);
-
-            document.getElementById(
-                "abTargetHeel"
-            ).innerHTML =
-                targetHeel.toFixed(2);
-
-            document.getElementById(
-                "abCurrentTrim"
-            ).innerHTML =
-                currentTrimDegrees.toFixed(2);
-
-            document.getElementById(
-                "abTargetTrim"
-            ).innerHTML =
-                targetTrim.toFixed(2);
-
-            document.getElementById(
-                "abAftPs"
-            ).innerHTML =
-                targetDeck.aftps;
-
-            document.getElementById(
-                "abPs"
-            ).innerHTML =
-                targetDeck.ps;
-
-            document.getElementById(
-                "abFwdPs"
-            ).innerHTML =
-                targetDeck.fwdps;
-
-            document.getElementById(
-                "abAftSb"
-            ).innerHTML =
-                targetDeck.aftsb;
-
-            document.getElementById(
-                "abSb"
-            ).innerHTML =
-                targetDeck.sb;
-
-            document.getElementById(
-                "abFwdSb"
-            ).innerHTML =
-                targetDeck.fwdsb;
         }
     </script>  
 </body>
