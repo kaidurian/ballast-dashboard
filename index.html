@@ -640,6 +640,48 @@
                 color: #06202e;
             }
 
+            .ab-mode-btn.ab-level-btn.ab-level-active {
+                background: var(--accent-blue);
+                border-color: var(--accent-blue);
+                color: #06202e;
+            }
+
+        .ab-seq-table {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .ab-seq-row {
+            display: grid;
+            grid-template-columns: 28px 1fr 1fr 1fr 24px;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .ab-seq-step {
+            font-size: 9px;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        .ab-seq-remove {
+            background: rgba(239,68,68,0.12);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            border-radius: 4px;
+            font-size: 10px;
+            cursor: pointer;
+            padding: 2px 0;
+        }
+
+        .ab-seq-add {
+            margin-top: 2px;
+            align-self: flex-start;
+            padding: 5px 10px;
+            font-size: 10px;
+        }
+
         .ab-stat-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -863,7 +905,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast index_Autoballast_Phrase2_Inp-5-Clude..html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast index_Autoballast_Phrase5_Inp-6-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -1031,6 +1073,34 @@
                     <div class="ab-pump-chip-list" id="abPumpStatusList">
                         <!-- populated by renderPumpStatusChips() -->
                     </div>
+                </div>
+            </div>
+
+            <div class="ab-protect-section">
+                <div class="ab-protect-row">
+                    <span class="ab-protect-label" title="Holds back extra ballast headroom for anticipated trailer moves, above the Phase 1 10-90% reserve">🚛 Trailer movement prediction</span>
+                </div>
+                <div class="ab-mode-row" id="abTrailerLevelRow">
+                    <button class="ab-mode-btn ab-level-btn ab-level-active" data-level="1" id="abLevel1Btn" onclick="setTrailerPredictionLevel(1)" title="Current trailer only — no future reserve applied (~70% effectiveness)">Lvl 1 · Current only</button>
+                    <button class="ab-mode-btn ab-level-btn" data-level="2" id="abLevel2Btn" onclick="setTrailerPredictionLevel(2)" title="Current + next move — recommended onboard mode (~85-90% effectiveness)">Lvl 2 · Next move</button>
+                    <button class="ab-mode-btn ab-level-btn" data-level="3" id="abLevel3Btn" onclick="setTrailerPredictionLevel(3)" title="Full planned move sequence — engineering/planning mode (~95-99% effectiveness)">Lvl 3 · Full sequence</button>
+                </div>
+
+                <div class="ab-protect-row" id="abLevel2Panel" style="display:none;">
+                    <label class="ab-protect-label" for="abNextMoveX">Next move</label>
+                    <input type="number" step="any" id="abNextMoveX" class="ab-weight-input" placeholder="X (m)" title="X position, meters from AFT" onchange="updateNextTrailerMove('x', this.value)">
+                    <input type="number" step="any" id="abNextMoveY" class="ab-weight-input" placeholder="Y (m)" title="Y position, meters (+ = PS, - = SB)" onchange="updateNextTrailerMove('y', this.value)">
+                    <input type="number" step="any" min="0" id="abNextMoveW" class="ab-weight-input" placeholder="t" title="Trailer weight, tonnes" onchange="updateNextTrailerMove('weightT', this.value)">
+                </div>
+
+                <div class="ab-protect-row" id="abLevel3Panel" style="display:none; flex-direction:column; align-items:stretch;">
+                    <div class="ab-seq-table" id="abLevel3Table">
+                        <!-- populated by renderTrailerSequenceTable() -->
+                    </div>
+                </div>
+
+                <div class="ab-protect-row">
+                    <span class="ab-protect-label" id="abFutureReserveSummary" style="text-transform:none; font-weight:400;">No future reserve applied (Level 1).</span>
                 </div>
             </div>
 
@@ -1310,15 +1380,124 @@
             return false;
         }
 
+        // ============================================================
+        // 7c2. FUTURE RESERVE CAPACITY (Phase 3) +
+        //      TRAILER MOVEMENT PREDICTION (Phase 4 = Level 2, Phase 5 = Level 3)
+        //
+        //      Purpose (spec "Future reserve"): hold back extra ballast
+        //      capacity — ABOVE the 10% reserve floor from Phase 1 — for
+        //      trailer moves the operator already knows are coming, so
+        //      the optimizer never paints itself into a corner by fully
+        //      exhausting a tank's usable range on the CURRENT trailer
+        //      only to find it has nowhere left to go for the NEXT one.
+        //
+        //      IMPORTANT HONESTY NOTE: per the architecture rule (§2/§17,
+        //      see 7b above), this dashboard never runs its own
+        //      hydrostatics — only Excel does, via a live round-trip. A
+        //      hypothetical FUTURE trailer position can't be sent through
+        //      that same round-trip (it hasn't happened yet), so there is
+        //      no way to get an exact predicted heel/trim from Excel for
+        //      it. What follows is therefore a deliberately simple,
+        //      transparent HEURISTIC — not a hydrostatic simulation — that
+        //      biases which tanks get extra headroom based on which side
+        //      (PS/SB) and end (FWD/AFT) the anticipated trailer weight
+        //      lands on:
+        //        - Tanks sharing BOTH the loaded side AND end get extra
+        //          MINIMUM reserve (kept ready to DISCHARGE, since they'll
+        //          likely need to give up ballast to relieve the new load).
+        //        - Tanks sharing NEITHER get extra MAXIMUM headroom cut
+        //          (kept ready to RECEIVE ballast, since they're the
+        //          natural counter-weight side/end).
+        //        - Tanks sharing only one axis get half-strength versions
+        //          of both, since they're only partially implicated.
+        //      Level 1 (no prediction) applies none of this — behavior is
+        //      byte-for-byte identical to before Phase 3.
+        // ============================================================
+        const AB_FUTURE_RESERVE_PCT_PER_MOVE = 0.15; // matches spec example: 1000 m³ cap -> 150 m³ (15%) reserved for one anticipated move
+        const AB_FUTURE_RESERVE_MAX_PCT = 0.30;       // hard cap so future reserve can never swallow more than 30% of any one tank's capacity
+        const AB_FUTURE_RESERVE_BIAS_FACTOR = 0.5;    // tanks that share only one axis (side OR end, not both) get this fraction of the full-strength adjustment
+        const AB_FUTURE_RESERVE_MAX_MOVES = 6;        // Level 3 sequence: only the next N planned moves count toward reserve (spec's "estimated effectiveness" caps out anyway; unbounded lookahead would over-restrict capacity for moves that are still far off)
+
+        // 1 = current trailer only (spec estimated effectiveness ~70%,
+        //     identical to pre-Phase-3 behavior — no future reserve applied)
+        // 2 = current + next move        (Phase 4, "recommended onboard mode", ~85-90%)
+        // 3 = full planned move sequence (Phase 5, "planning mode", ~95-99%)
+        let trailerPredictionLevel = 1;
+
+        // Level 2 input — a single anticipated next trailer position/weight.
+        // Coordinates use the SAME world frame as TANK_CONFIG (x = length
+        // from AFT, y = width, positive = PS per "§5: Y > 0 = PS").
+        let nextTrailerMove = { x: 0, y: 0, weightT: 0 };
+
+        // Level 3 input — ordered list of the same shape, entered by the
+        // operator for engineering/planning use (spec: "Step 1 -> Step 2
+        // -> ... -> Step N").
+        let trailerMoveSequence = [];
+
+        // Returns the list of anticipated moves the CURRENT prediction
+        // level says to account for. Empty at Level 1 by design.
+        function getAnticipatedTrailerMoves() {
+            if (trailerPredictionLevel === 2) {
+                return nextTrailerMove ? [nextTrailerMove] : [];
+            }
+            if (trailerPredictionLevel === 3) {
+                return trailerMoveSequence.slice(0, AB_FUTURE_RESERVE_MAX_MOVES);
+            }
+            return [];
+        }
+
+        // Per-tank {maxCut, minRaise} capacity-fraction adjustment driven
+        // by every anticipated move (see class doc above for the logic).
+        function getFutureReserveAdjustment(cfg) {
+            const moves = getAnticipatedTrailerMoves().filter(m => m && (m.weightT || 0) > 0);
+            if (!cfg || !moves.length) return { maxCut: 0, minRaise: 0 };
+
+            const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
+            const isPS = cfg.y >= 0;
+            const isFwd = cfg.x >= midX;
+
+            let maxCut = 0, minRaise = 0;
+            moves.forEach(m => {
+                const loadIsPS = m.y >= 0;
+                const loadIsFwd = m.x >= midX;
+                const matchAxes = (loadIsPS === isPS ? 1 : 0) + (loadIsFwd === isFwd ? 1 : 0); // 0, 1, or 2
+                const strength = matchAxes === 2 ? 1 : matchAxes === 1 ? AB_FUTURE_RESERVE_BIAS_FACTOR : 0;
+                const counterStrength = matchAxes === 0 ? 1 : matchAxes === 1 ? AB_FUTURE_RESERVE_BIAS_FACTOR : 0;
+                minRaise += AB_FUTURE_RESERVE_PCT_PER_MOVE * strength;
+                maxCut += AB_FUTURE_RESERVE_PCT_PER_MOVE * counterStrength;
+            });
+            return {
+                maxCut: Math.min(maxCut, AB_FUTURE_RESERVE_MAX_PCT),
+                minRaise: Math.min(minRaise, AB_FUTURE_RESERVE_MAX_PCT)
+            };
+        }
+
         // Effective {min, max} weight (same units as tank.weight/capacity)
         // this tank must be kept within. Buffer tanks get the tighter
         // 30-70% band; every other tank gets the 10-90% reserve band.
+        // Phase 3 then narrows that band further (see
+        // getFutureReserveAdjustment) when a trailer prediction level
+        // above 1 is active.
         function getTankReserveBounds(cfg) {
             const cap = (cfg && cfg.capacity) || 0;
-            if (isBufferTank(cfg)) {
-                return { min: cap * AB_BUFFER_MIN_PCT, max: cap * AB_BUFFER_MAX_PCT, buffer: true };
+            const base = isBufferTank(cfg)
+                ? { min: cap * AB_BUFFER_MIN_PCT, max: cap * AB_BUFFER_MAX_PCT, buffer: true }
+                : { min: cap * AB_TANK_RESERVE_MIN_PCT, max: cap * AB_TANK_RESERVE_MAX_PCT, buffer: false };
+
+            const adj = getFutureReserveAdjustment(cfg);
+            let min = base.min + cap * adj.minRaise;
+            let max = base.max - cap * adj.maxCut;
+            // Degenerate-case guard: never let the future-reserve squeeze
+            // invert min > max (can only happen with an extreme manual
+            // capacity/bounds edge case) — fall back to a narrow band
+            // centered on the base bounds' midpoint rather than a broken
+            // (min > max) range that would silently reject every move.
+            if (min > max) {
+                const mid = (base.min + base.max) / 2;
+                min = mid - cap * 0.02;
+                max = mid + cap * 0.02;
             }
-            return { min: cap * AB_TANK_RESERVE_MIN_PCT, max: cap * AB_TANK_RESERVE_MAX_PCT, buffer: false };
+            return { min, max, buffer: base.buffer, futureReserveApplied: (adj.maxCut > 0 || adj.minRaise > 0) };
         }
 
         // A tank is pump-unavailable ONLY if it has at least one pump
@@ -1666,10 +1845,15 @@
                 // a particular tank alone.
                 const isBuffer = typeof isBufferTank === 'function' && isBufferTank(cfg);
                 const bufferBadge = isBuffer ? `<span class="tank-buffer-badge" title="Buffer tank — reserved ${(AB_BUFFER_MIN_PCT*100).toFixed(0)}-${(AB_BUFFER_MAX_PCT*100).toFixed(0)}%">🛡</span>` : '';
+                // Phase 3 badge — 🔮 marks a tank whose min/max bounds are
+                // currently narrowed by trailer-move prediction (Level 2/3).
+                const futureAdj = typeof getFutureReserveAdjustment === 'function' ? getFutureReserveAdjustment(cfg) : { maxCut: 0, minRaise: 0 };
+                const hasFutureReserve = (futureAdj.maxCut > 0 || futureAdj.minRaise > 0);
+                const futureBadge = hasFutureReserve ? `<span class="tank-buffer-badge" title="Future reserve active — headroom cut ${(futureAdj.maxCut*100).toFixed(0)}%, floor raised ${(futureAdj.minRaise*100).toFixed(0)}%">🔮</span>` : '';
                 box.innerHTML += `
                                             <div class="${waterClass}" style="height: ${pct}%"></div>
                                             <div class="tank-header">
-                                                <span class="tank-name">${shortName}${bufferBadge}</span>
+                                                <span class="tank-name">${shortName}${bufferBadge}${futureBadge}</span>
                                                 <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
                                             </div>
                                             <div class="tank-inputs">
@@ -2397,6 +2581,9 @@
                     abHeelWeight: abHeelWeight,
                     abTrimWeight: abTrimWeight,
                     abDeckWeights: abDeckWeights,
+                    trailerPredictionLevel: trailerPredictionLevel,
+                    nextTrailerMove: nextTrailerMove,
+                    trailerMoveSequence: trailerMoveSequence,
                     updatedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -2470,6 +2657,10 @@
                 if (typeof data.abHeelWeight === 'number') abHeelWeight = data.abHeelWeight;
                 if (typeof data.abTrimWeight === 'number') abTrimWeight = data.abTrimWeight;
                 if (data.abDeckWeights) abDeckWeights = Object.assign({}, abDeckWeights, data.abDeckWeights);
+                if (typeof data.trailerPredictionLevel === 'number') trailerPredictionLevel = data.trailerPredictionLevel;
+                if (data.nextTrailerMove) nextTrailerMove = Object.assign({ x: 0, y: 0, weightT: 0 }, data.nextTrailerMove);
+                if (Array.isArray(data.trailerMoveSequence)) trailerMoveSequence = data.trailerMoveSequence;
+                if (typeof syncTrailerLevelUI === 'function') syncTrailerLevelUI();
                 if (typeof data.showTrailer === 'boolean') {
                     showTrailer = data.showTrailer;
                     const trailerBox = document.getElementById('trailerToggleCheckbox');
@@ -3059,10 +3250,12 @@
             renderPumpStatusChips();
             renderDeckWeightInputs();
             syncPriorityWeightFields();
+            syncTrailerMoveFields();
+            updateFutureReserveSummary();
         }
 
         // ============================================================
-        // 7c2. MANUAL DECK WEIGHTING UI (Auto Ballast Phase 2 / spec V2)
+        // 7c3. MANUAL DECK WEIGHTING UI (Auto Ballast Phase 2 / spec V2)
         //     Heel/Trim weight fields plus one weight input per deck
         //     corner, feeding abHeelWeight / abTrimWeight / abDeckWeights
         //     used directly by computeErrorFromState(). The deck weight
@@ -3117,6 +3310,125 @@
             const idx = DECK_KEYS.indexOf(key);
             logAutoBallast(`⚖ ${DECK_LABELS_DISPLAY[idx] || key} weight set to ${w}`);
             refreshAutoBallastUI();
+        }
+
+        // ============================================================
+        // 7c4. TRAILER MOVEMENT PREDICTION UI (Phase 3 future reserve +
+        //      Phase 4 "Level 2" + Phase 5 "Level 3", spec §"Trailer
+        //      Movement Prediction"). One three-way toggle switches
+        //      between:
+        //        Level 1 — current trailer only (no future reserve)
+        //        Level 2 — + a single next-move form                  (Phase 4)
+        //        Level 3 — + a full editable move-sequence table       (Phase 5)
+        //      Both Level 2/3 inputs feed getFutureReserveAdjustment()
+        //      (defined in section 7c2 above) purely through the shared
+        //      nextTrailerMove / trailerMoveSequence state — no separate
+        //      "apply" step, exactly like the Phase 1/2 panels.
+        // ============================================================
+        function setTrailerPredictionLevel(level) {
+            trailerPredictionLevel = level;
+            syncTrailerLevelUI();
+
+            const label = level === 1 ? 'current trailer only, no future reserve'
+                        : level === 2 ? 'current + next move (Phase 4)'
+                        : 'full planned sequence (Phase 5)';
+            logAutoBallast(`🚛 Trailer prediction set to Level ${level} — ${label}.`);
+            refreshPlanView();       // re-badge tank cards with 🔮 as needed
+            refreshAutoBallastUI();
+        }
+
+        // Applies trailerPredictionLevel to the button states + panel
+        // visibility + sequence table. Shared by the operator-driven
+        // setTrailerPredictionLevel() and by the Firebase pull handler
+        // (so a remote level change reflects correctly without a click).
+        function syncTrailerLevelUI() {
+            document.querySelectorAll('.ab-level-btn').forEach(b => {
+                b.classList.toggle('ab-level-active', parseInt(b.dataset.level, 10) === trailerPredictionLevel);
+            });
+            const lvl2 = document.getElementById('abLevel2Panel');
+            if (lvl2) lvl2.style.display = (trailerPredictionLevel === 2) ? '' : 'none';
+            const lvl3 = document.getElementById('abLevel3Panel');
+            if (lvl3) lvl3.style.display = (trailerPredictionLevel === 3) ? '' : 'none';
+            if (trailerPredictionLevel === 3) renderTrailerSequenceTable();
+        }
+
+        function updateNextTrailerMove(field, value) {
+            nextTrailerMove[field] = parseFloat(value) || 0;
+            refreshPlanView();
+            refreshAutoBallastUI();
+        }
+
+        // Keeps the Level 2 X/Y/Weight inputs showing the current
+        // nextTrailerMove values (e.g. after a Firebase pull), without
+        // clobbering a field the operator is actively typing into.
+        function syncTrailerMoveFields() {
+            const xIn = document.getElementById('abNextMoveX');
+            if (xIn && document.activeElement !== xIn) xIn.value = nextTrailerMove.x || '';
+            const yIn = document.getElementById('abNextMoveY');
+            if (yIn && document.activeElement !== yIn) yIn.value = nextTrailerMove.y || '';
+            const wIn = document.getElementById('abNextMoveW');
+            if (wIn && document.activeElement !== wIn) wIn.value = nextTrailerMove.weightT || '';
+        }
+
+        function addTrailerSequenceStep() {
+            trailerMoveSequence.push({ x: 0, y: 0, weightT: 0 });
+            renderTrailerSequenceTable();
+            refreshAutoBallastUI();
+        }
+
+        function removeTrailerSequenceStep(idx) {
+            trailerMoveSequence.splice(idx, 1);
+            renderTrailerSequenceTable();
+            refreshPlanView();
+            refreshAutoBallastUI();
+        }
+
+        function updateTrailerSequenceStep(idx, field, value) {
+            if (!trailerMoveSequence[idx]) return;
+            trailerMoveSequence[idx][field] = parseFloat(value) || 0;
+            refreshPlanView();
+            refreshAutoBallastUI();
+        }
+
+        // Full rebuild (not sync-in-place) — acceptable here because rows
+        // are only added/removed explicitly by the operator clicking
+        // +/✕, not on a timer/poll, so there's no risk of wiping mid-type
+        // focus the way the Phase 1/2 fields had to guard against.
+        function renderTrailerSequenceTable() {
+            const wrap = document.getElementById('abLevel3Table');
+            if (!wrap) return;
+            const rows = trailerMoveSequence.map((m, i) => `
+                <div class="ab-seq-row">
+                    <span class="ab-seq-step">#${i + 1}</span>
+                    <input type="number" step="any" class="ab-weight-input" value="${m.x}" title="X position, m from AFT" onchange="updateTrailerSequenceStep(${i}, 'x', this.value)">
+                    <input type="number" step="any" class="ab-weight-input" value="${m.y}" title="Y position, m (+PS/-SB)" onchange="updateTrailerSequenceStep(${i}, 'y', this.value)">
+                    <input type="number" step="any" min="0" class="ab-weight-input" value="${m.weightT}" title="Trailer weight, t" onchange="updateTrailerSequenceStep(${i}, 'weightT', this.value)">
+                    <button class="ab-seq-remove" onclick="removeTrailerSequenceStep(${i})" title="Remove step">✕</button>
+                </div>
+            `).join('');
+            wrap.innerHTML = rows + `<button class="ab-btn ab-seq-add" onclick="addTrailerSequenceStep()">+ Add step</button>`;
+        }
+
+        // One-line, honest summary of what Phase 3 is currently doing —
+        // deliberately states the number of moves considered and the cap,
+        // rather than implying a precise hydrostatic prediction (see the
+        // "HONESTY NOTE" in section 7c2).
+        function updateFutureReserveSummary() {
+            const el = document.getElementById('abFutureReserveSummary');
+            if (!el) return;
+            const moves = getAnticipatedTrailerMoves().filter(m => m && (m.weightT || 0) > 0);
+            if (trailerPredictionLevel === 1 || !moves.length) {
+                el.textContent = trailerPredictionLevel === 1
+                    ? 'No future reserve applied (Level 1).'
+                    : 'No future reserve applied — enter a move weight above.';
+                return;
+            }
+            const affected = TANK_CONFIG.filter(cfg => {
+                const adj = getFutureReserveAdjustment(cfg);
+                return adj.maxCut > 0 || adj.minRaise > 0;
+            }).length;
+            el.textContent = `Level ${trailerPredictionLevel}: ${moves.length} move${moves.length === 1 ? '' : 's'} considered `
+                + `(max ${AB_FUTURE_RESERVE_MAX_PCT * 100}% capacity reserved/tank) — ${affected} tank(s) currently affected.`;
         }
 
         // ============================================================
