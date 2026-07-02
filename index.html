@@ -913,7 +913,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast - index_Autoballast_Phrase5_Inp-11-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast - index_Autoballast_Phrase5_Inp-12-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -2466,6 +2466,15 @@
         //     — i.e. exactly where the single rectangle used to sit. A
         //     thin connector line ties the two rectangles together so
         //     they read visually as one grouped unit.
+        //
+        //     GHOST target footprint(s) + move arrow(s): at Level 2/3,
+        //     also draws a dashed/translucent copy of this same footprint
+        //     shape at each anticipated move's target centroid (orange,
+        //     to stay visually distinct from the CoG sign's gold/blue/
+        //     red), chained by arrows from the current group centroid
+        //     through each target in order — so a typed target X/Y is
+        //     immediately, visibly confirmed on the plan, not just as a
+        //     number in an input box.
         // ============================================================
         function drawAxleOverlay() {
             const wrap = document.getElementById('tankGridWrap');
@@ -2513,40 +2522,103 @@
                 : `rgba(${AXLE_STYLE.fillColorDark},${AXLE_STYLE.fillOpacityDark})`;
             const strokeStyle = isLight ? AXLE_STYLE.borderColorLight : AXLE_STYLE.borderColorDark;
 
+            // Draws ONE axle-group footprint (connector + two rectangles)
+            // centered at screen point (sx,sy) — shared by the REAL axle
+            // render below and the GHOST target-footprint render further
+            // down, so both always read as "the same shape," just styled
+            // differently (solid vs dashed/translucent).
+            function drawAxleGroupShape(sx, sy, style) {
+                ctx.save();
+                ctx.fillStyle = style.fillStyle || 'transparent';
+                ctx.strokeStyle = style.strokeStyle;
+                ctx.lineWidth = style.lineWidth;
+                if (style.dash) ctx.setLineDash(style.dash);
+
+                ctx.beginPath();
+                ctx.moveTo(sx, sy - pairHalfOffsetPx);
+                ctx.lineTo(sx, sy + pairHalfOffsetPx);
+                ctx.lineWidth = Math.max(style.lineWidth, style.dash ? style.lineWidth : 1.5);
+                ctx.stroke();
+
+                [-pairHalfOffsetPx, pairHalfOffsetPx].forEach((offset) => {
+                    ctx.beginPath();
+                    ctx.rect(sx - rectHalfW, sy + offset - rectHalfH, rectHalfW * 2, rectHalfH * 2);
+                    if (style.fillStyle) ctx.fill();
+                    ctx.stroke();
+                });
+
+                ctx.restore();
+            }
+
+            // Straight arrow (line + triangular head), screen space —
+            // used to show a trailer move's direction/distance at a glance.
+            function drawArrowScreen(x1, y1, x2, y2, color, dash) {
+                const headLen = 9;
+                const angle = Math.atan2(y2 - y1, x2 - x1);
+                ctx.save();
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.lineWidth = 2;
+                if (dash) ctx.setLineDash(dash);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.moveTo(x2, y2);
+                ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+                ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+
             trailerAxles.forEach((axle) => {
                 // p = screen position of the GROUP center, i.e. exactly
                 // the axle's real (x,y) from Excel — unchanged meaning.
                 const p = worldToScreen(axle.x, axle.y);
-                const x0 = p.sx - rectHalfW;
-                const w = rectHalfW * 2;
-
-                ctx.save();
-                ctx.fillStyle = fillStyle;
-                ctx.strokeStyle = strokeStyle;
-                ctx.lineWidth = Math.max(AXLE_STYLE.borderWidth, 1);
-
-                // Thin connector line between the two rectangle centers,
-                // so the pair reads as one grouped unit.
-                ctx.beginPath();
-                ctx.moveTo(p.sx, p.sy - pairHalfOffsetPx);
-                ctx.lineTo(p.sx, p.sy + pairHalfOffsetPx);
-                ctx.lineWidth = Math.max(AXLE_STYLE.borderWidth, 1.5);
-                ctx.stroke();
-
-                // Rectangle 1 — offset -pairHalfOffsetPx along Y from group center
-                ctx.beginPath();
-                ctx.rect(x0, p.sy - pairHalfOffsetPx - rectHalfH, w, rectHalfH * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                // Rectangle 2 — offset +pairHalfOffsetPx along Y from group center
-                ctx.beginPath();
-                ctx.rect(x0, p.sy + pairHalfOffsetPx - rectHalfH, w, rectHalfH * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                ctx.restore();
+                drawAxleGroupShape(p.sx, p.sy, { fillStyle, strokeStyle, lineWidth: Math.max(AXLE_STYLE.borderWidth, 1) });
             });
+
+            // ---- GHOST target footprint(s) + move arrow(s) — Level 2/3 only ----
+            // Shows exactly where the trailer/SPMT group's axle footprint
+            // WILL sit once it reaches each entered target centroid (Level
+            // 2's single target, or every row of Level 3's sequence table
+            // in order), plus an arrow chain from the current group
+            // centroid through each target in turn — visual, immediate
+            // confirmation that a typed X/Y actually moved the target.
+            // Skips a still-blank/untouched sequence row (x=0, y=0,
+            // weightT=0) so a freshly-added Level 3 step doesn't draw a
+            // ghost stacked at the origin before the operator fills it in.
+            if (trailerPredictionLevel > 1 && trailerAxles.length) {
+                const moves = getAnticipatedTrailerMoves().filter(m => m && (m.x !== 0 || m.y !== 0 || (m.weightT || 0) > 0));
+                if (moves.length) {
+                    const ghostColor = '#f97316'; // orange — distinct from the CoG sign's gold/blue/red
+                    const ghostFill = isLight ? 'rgba(249,115,22,0.12)' : 'rgba(249,115,22,0.18)';
+                    let fromPt = getTrailerReferenceCentroid();
+                    moves.forEach((m, i) => {
+                        const footprint = getPredictedAxleFootprint(m);
+                        footprint.forEach((pt) => {
+                            const p = worldToScreen(pt.x, pt.y);
+                            drawAxleGroupShape(p.sx, p.sy, { fillStyle: ghostFill, strokeStyle: ghostColor, lineWidth: 1.5, dash: [4, 3] });
+                        });
+
+                        const p1 = worldToScreen(fromPt.x, fromPt.y);
+                        const p2 = worldToScreen(m.x, m.y);
+                        drawArrowScreen(p1.sx, p1.sy, p2.sx, p2.sy, ghostColor, [5, 3]);
+
+                        ctx.save();
+                        ctx.fillStyle = ghostColor;
+                        ctx.font = 'bold 10px Calibri, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`T${i + 1}`, p2.sx, p2.sy - rectHalfH - pairHalfOffsetPx - 6);
+                        ctx.restore();
+
+                        fromPt = { x: m.x, y: m.y };
+                    });
+                }
+            }
         }
 
         // ============================================================
@@ -4531,6 +4603,10 @@
         // a handful of spheres, no textures) on every update3DFillAndAttitude()
         // call, since it's driven by the same getCoGPathSteps() the 2D
         // overlay uses and needs to track weight/target edits live.
+        // Also carries the Level 2/3 GHOST target axle footprint(s) +
+        // THREE.ArrowHelper move arrow(s) — same idea as the 2D overlay's
+        // ghost/arrow, just parented here since it shares the exact same
+        // rebuild-on-every-edit lifecycle.
         let cogGroup3d = null;
 
         function clearCoGGroup3D() {
@@ -4583,6 +4659,59 @@
                     const line = new THREE.Line(geo, mat);
                     line.computeLineDistances();
                     cogGroup3d.add(line);
+                }
+            }
+
+            // ---- GHOST target axle footprint(s) + move arrow(s) — Level
+            // 2/3 only. Mirrors the 2D overlay's ghost/arrow: a
+            // translucent/orange copy of the real axle-group shape at
+            // each anticipated move's target centroid, chained by
+            // THREE.ArrowHelper arrows from the current group centroid
+            // through each target in order. Parented to this same
+            // cogGroup3d so it shares its clear/rebuild lifecycle — no
+            // separate group or leak risk.
+            if (trailerPredictionLevel > 1 && trailerAxles.length) {
+                const moves = getAnticipatedTrailerMoves().filter(m => m && (m.x !== 0 || m.y !== 0 || (m.weightT || 0) > 0));
+                if (moves.length) {
+                    const ghostColor = 0xf97316; // orange — distinct from the CoG sign's gold/blue/red
+                    const halfPairOffset = AXLE_PAIR_SPACING_Y / 2;
+                    const boxHeight3d = EACH_AXLE_BOX.z * 0.85;
+                    const ghostY = DECK_TOP_Y_M + boxHeight3d / 2;
+
+                    let fromPt = getTrailerReferenceCentroid();
+                    moves.forEach((m) => {
+                        const footprint = getPredictedAxleFootprint(m);
+                        footprint.forEach((pt) => {
+                            [-halfPairOffset, halfPairOffset].forEach((offsetY) => {
+                                const ghostBox = new THREE.Mesh(
+                                    new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
+                                    new THREE.MeshPhongMaterial({ color: ghostColor, transparent: true, opacity: 0.35, wireframe: false })
+                                );
+                                ghostBox.position.set(pt.x, ghostY, worldYToZ3D(pt.y) + offsetY);
+                                cogGroup3d.add(ghostBox);
+                                const wireBox = new THREE.Mesh(
+                                    new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
+                                    new THREE.MeshBasicMaterial({ color: ghostColor, wireframe: true, transparent: true, opacity: 0.7 })
+                                );
+                                wireBox.position.copy(ghostBox.position);
+                                cogGroup3d.add(wireBox);
+                            });
+                        });
+
+                        // Arrow from the previous point (current group
+                        // centroid, or the prior step's target) to this
+                        // move's target centroid, floating at deck level.
+                        const p1 = new THREE.Vector3(fromPt.x, ghostY, worldYToZ3D(fromPt.y));
+                        const p2 = new THREE.Vector3(m.x, ghostY, worldYToZ3D(m.y));
+                        const seg = new THREE.Vector3().subVectors(p2, p1);
+                        const dist = seg.length();
+                        if (dist > 0.01) {
+                            const arrow = new THREE.ArrowHelper(seg.clone().normalize(), p1, dist, ghostColor, Math.min(2, dist * 0.25), Math.min(1, dist * 0.15));
+                            cogGroup3d.add(arrow);
+                        }
+
+                        fromPt = { x: m.x, y: m.y };
+                    });
                 }
             }
 
