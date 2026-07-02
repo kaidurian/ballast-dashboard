@@ -913,7 +913,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast - index_Autoballast_Phrase5_Inp-9-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast - index_Autoballast_Phrase5_Inp-10-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -1029,6 +1029,10 @@
                     <span class="ab-stat-label">Current Trim / Target</span>
                     <span class="ab-stat-value" id="abCurrentTrim">0.00°</span>
                     <span class="ab-stat-value" style="font-size:11px; color:var(--text-muted);" id="abTargetTrim">/ 0.00°</span>
+                </div>
+                <div class="ab-stat">
+                    <span class="ab-stat-label">CoG (LCG / TCG / VCG)</span>
+                    <span class="ab-stat-value" id="abCurrentCoG" style="font-size:12px;">—</span>
                 </div>
                 <div class="ab-stat">
                     <span class="ab-stat-label">Error Score</span>
@@ -1303,6 +1307,19 @@
         let isOfficeInitialized = false;
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
+
+        // Live system CoG, sourced straight from Excel — Load_Editor!P31
+        // (LCG), Q31 (TCG), R31 (VCG). This is Excel's own solved answer
+        // (same "Excel is the solver" rule as trim/heel/deck-to-quay, see
+        // §2/§17), so it reflects tanks + trailer/SPMT load exactly as
+        // Excel accounts for them — not just a JS-side tank-weight
+        // centroid. null until a live Excel value has been read (mock/
+        // Firebase modes fall back to the tank-weight centroid instead —
+        // see computeBaseSystemCoG()).
+        let excelSystemLCG = null;
+        let excelSystemTCG = null;
+        let excelSystemVCG = null;
+
         let trailerAxles = []; // [{ name, x, y }]
         let showTrailer = true;  // new state for trailer toggle
 
@@ -1523,11 +1540,39 @@
             return { x: sumX / sumW, y: sumY / sumW, weight: sumW };
         }
 
-        // Combines the base tank CoG with one optional extra weighted
+        // "CoG sign" base point — the plain gold marker shown at all
+        // times. Prefers Excel's own solved system CoG (Load_Editor!P31
+        // LCG / Q31 TCG / R31 VCG — read live in pullExcelTankData()),
+        // since that's Excel's actual answer for the WHOLE loaded system
+        // (tanks + trailer/SPMT together), not just a JS-side tank-weight
+        // approximation. Falls back to the tank-only weighted centroid
+        // (computeBaseTankCoG) when running without a live Excel
+        // connection (mock/demo data), so the sign still has somewhere
+        // to point. The fallback's total tank weight is always used for
+        // `weight`, so Level 2/3 step math (which layers a trailer point
+        // on top by weighted average) behaves the same either way.
+        function computeBaseSystemCoG() {
+            const tankBase = computeBaseTankCoG();
+            const haveExcelXY = Number.isFinite(excelSystemLCG) && Number.isFinite(excelSystemTCG);
+            if (haveExcelXY) {
+                return {
+                    x: excelSystemLCG,
+                    y: excelSystemTCG,
+                    vcg: Number.isFinite(excelSystemVCG) ? excelSystemVCG : null,
+                    weight: tankBase ? tankBase.weight : 0,
+                    source: 'excel'
+                };
+            }
+            return tankBase ? { ...tankBase, vcg: null, source: 'computed' } : null;
+        }
+
+        // Combines the base system CoG with one optional extra weighted
         // point (e.g. the trailer/SPMT group sitting at a given x,y with
-        // its own weight) into a single system centroid.
+        // its own weight) into a single system centroid. Used for the
+        // Level 2/3 current/target step markers, which layer the
+        // trailer's CURRENT or TARGET position on top of the live base.
         function computeSystemCoG(extraPoint) {
-            const base = computeBaseTankCoG();
+            const base = computeBaseSystemCoG();
             let sumW = base ? base.weight : 0;
             let sumX = base ? base.weight * base.x : 0;
             let sumY = base ? base.weight * base.y : 0;
@@ -1554,7 +1599,7 @@
         // steps are returned in path order so callers can just connect
         // them point-to-point.
         function getCoGPathSteps() {
-            const base = computeBaseTankCoG();
+            const base = computeBaseSystemCoG();
             const steps = [];
             if (!base) return { base, steps };
 
@@ -2569,8 +2614,9 @@
             }
 
             // Small crosshair-in-circle "CoG sign", with an optional text
-            // label floated just above it.
-            function drawCoGMarker(x, y, color, label, radius) {
+            // label floated just above it (and an optional second line
+            // below it, used for the base marker's VCG readout).
+            function drawCoGMarker(x, y, color, label, radius, subLabel) {
                 const p = worldToScreen(x, y);
                 const r = radius || 8;
                 ctx.save();
@@ -2589,11 +2635,23 @@
                     ctx.textAlign = 'center';
                     ctx.fillText(label, p.sx, p.sy - r - 6);
                 }
+                if (subLabel) {
+                    ctx.font = '9px Calibri, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(subLabel, p.sx, p.sy + r + 12);
+                }
                 ctx.restore();
             }
 
             // Ballast-only CoG — always shown when there's weight aboard.
-            if (base) drawCoGMarker(base.x, base.y, baseColor, 'CoG', 8);
+            // Sub-label carries the raw LCG/TCG/VCG readout straight from
+            // Load_Editor!P31:R31 when live (falls back to just LCG/TCG
+            // from the computed centroid, with no VCG, in demo mode).
+            if (base) {
+                const cogSub = 'L ' + base.x.toFixed(2) + '  T ' + base.y.toFixed(2) +
+                    (Number.isFinite(base.vcg) ? '  V ' + base.vcg.toFixed(2) : '');
+                drawCoGMarker(base.x, base.y, baseColor, 'CoG', 8, cogSub);
+            }
 
             // Trailer-projected step CoGs (Level 2/3 only — empty otherwise).
             steps.forEach((s, i) => {
@@ -2645,6 +2703,13 @@
                     const rangeCornerLabels = editorSheet.getRange("I1:I6");
                     rangeCornerLabels.load("values");
 
+                    // Live system CoG (Excel's own solved answer, per §2/
+                    // §17 "Excel is the solver"): Load_Editor!P31 = LCG,
+                    // Q31 = TCG, R31 = VCG. Drives the "CoG sign" base
+                    // marker on both the 2D plan and the 3D scene.
+                    const rangeCoG = editorSheet.getRange("P31:R31");
+                    rangeCoG.load("values");
+
                     // Trailer axle X/Y block: E124:F(124+N) — these (x,y)
                     // pairs remain the CENTER of each axle GROUP (the two
                     // rectangles + connector), so this read is unchanged.
@@ -2688,6 +2753,17 @@
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
                     updateCurrentDeckFromLabels();
+
+                    // Live system CoG — Load_Editor!P31 (LCG) / Q31 (TCG) /
+                    // R31 (VCG). Left null (falls back to the computed
+                    // tank-weight centroid) if the cells are blank/non-numeric.
+                    const cogRow = rangeCoG.values && rangeCoG.values[0] ? rangeCoG.values[0] : [];
+                    const parsedLCG = parseFloat(cogRow[0]);
+                    const parsedTCG = parseFloat(cogRow[1]);
+                    const parsedVCG = parseFloat(cogRow[2]);
+                    excelSystemLCG = Number.isFinite(parsedLCG) ? parsedLCG : null;
+                    excelSystemTCG = Number.isFinite(parsedTCG) ? parsedTCG : null;
+                    excelSystemVCG = Number.isFinite(parsedVCG) ? parsedVCG : null;
 
                     if (rangeTargets) {
                         const tv = rangeTargets.values; // rows P1..P9 → indices 0..8
@@ -2815,6 +2891,9 @@
                 const payload = {
                     trim: currentTrimDegrees,
                     heel: currentHeelDegrees,
+                    excelSystemLCG: excelSystemLCG,
+                    excelSystemTCG: excelSystemTCG,
+                    excelSystemVCG: excelSystemVCG,
                     tanks: tanks,
                     tankConfig: TANK_CONFIG,
                     trailerAxles: trailerAxles,
@@ -2883,6 +2962,10 @@
 
                 currentTrimDegrees = parseFloat(data.trim || 0);
                 currentHeelDegrees = parseFloat(data.heel || 0);
+
+                excelSystemLCG = Number.isFinite(parseFloat(data.excelSystemLCG)) ? parseFloat(data.excelSystemLCG) : null;
+                excelSystemTCG = Number.isFinite(parseFloat(data.excelSystemTCG)) ? parseFloat(data.excelSystemTCG) : null;
+                excelSystemVCG = Number.isFinite(parseFloat(data.excelSystemVCG)) ? parseFloat(data.excelSystemVCG) : null;
 
                 if (data.tanks) {
                     tankData.forEach(tank => {
@@ -3057,6 +3140,13 @@
             });
             currentTrimDegrees = 2.8;
             currentHeelDegrees = -1.9;
+
+            // No live Excel connection in demo mode — clear any stale
+            // Load_Editor!P31:R31 reading so the "CoG sign" falls back to
+            // the computed tank-weight centroid (computeBaseSystemCoG()).
+            excelSystemLCG = null;
+            excelSystemTCG = null;
+            excelSystemVCG = null;
 
             // Mock trailer axle layout: a typical multi-axle trailer footprint
             // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
@@ -3484,6 +3574,19 @@
             setText('abTargetHeel', '/ ' + Math.abs(targetHeelDegrees).toFixed(2) + '°');
             setText('abCurrentTrim', Math.abs(currentTrimDegrees).toFixed(2) + '°' + (currentTrimDegrees > 0 ? ' AFT' : currentTrimDegrees < 0 ? ' FWD' : ''));
             setText('abTargetTrim', '/ ' + Math.abs(targetTrimDegrees).toFixed(2) + '°');
+
+            // CoG readout — live Load_Editor!P31:R31 when connected to
+            // Excel, falls back to the computed tank-weight centroid
+            // (no VCG term available in that fallback) otherwise.
+            const cogBase = (typeof computeBaseSystemCoG === 'function') ? computeBaseSystemCoG() : null;
+            if (cogBase) {
+                const cogTxt = cogBase.x.toFixed(2) + ' / ' + cogBase.y.toFixed(2) + ' / ' +
+                    (Number.isFinite(cogBase.vcg) ? cogBase.vcg.toFixed(2) : '—') +
+                    ' m' + (cogBase.source === 'excel' ? '' : ' (est.)');
+                setText('abCurrentCoG', cogTxt);
+            } else {
+                setText('abCurrentCoG', '—');
+            }
 
             const errEl = document.getElementById('abErrorScore');
             if (errEl) {
@@ -4423,12 +4526,14 @@
             // the rotation sign here is the negative of what it would be
             // under a direct Y->Z mapping — verified numerically.
             hull3dGroup.rotation.x = (-currentHeelDegrees * Math.PI) / 180;
+            // CoG sign (+ Level 2/3 step path) — cheap enough to rebuild
+            // every call, same cadence as the fill/attitude update above.
+            // Runs BEFORE renderLabels3D() so the CoG readout label reflects
+            // this cycle's values instead of lagging a frame behind.
+            updateCoGVisualization3D();
             // Tank %-fill labels (text overlay) track live percent every
             // refresh, same cadence as the ballast mesh height update.
             renderLabels3D();
-            // CoG sign (+ Level 2/3 step path) — cheap enough to rebuild
-            // every call, same cadence as the fill/attitude update above.
-            updateCoGVisualization3D();
         }
 
         // ---- CoG OVERLAY (3D scene) -------------------------------------
@@ -4457,6 +4562,15 @@
 
         function updateCoGVisualization3D() {
             clearCoGGroup3D();
+
+            // Drop any stale CoG readout label from a previous call before
+            // rebuilding (position/values shift on every ballast update,
+            // unlike the corner/edge anchors which are geometry-fixed).
+            labelAnchors3d = labelAnchors3d.filter((a) => {
+                if (a.cls === 'cog' && a.obj && a.obj.parent) a.obj.parent.remove(a.obj);
+                return a.cls !== 'cog';
+            });
+
             if (!hull3dGroup || !TANK_CONFIG.length) return;
 
             const { base, steps } = getCoGPathSteps();
@@ -4467,10 +4581,21 @@
 
             // Ballast-only CoG "sign" — gold sphere, always shown when
             // there's weight aboard, independent of trailer prediction level.
+            // Vertical placement stays just above the deck for visibility
+            // (the 3D model has no real-world baseline/keel scale to place
+            // VCG at true height) — the actual VCG value from Load_Editor!R31
+            // is instead surfaced as a floating text readout next to the sphere.
             if (base) {
                 const sphere = makeCoGSphere3D(0xfacc15, 0.6);
                 sphere.position.set(base.x, cogY, worldYToZ3D(base.y));
                 cogGroup3d.add(sphere);
+
+                const labelObj = new THREE.Object3D();
+                labelObj.position.set(base.x, cogY + 1.1, worldYToZ3D(base.y));
+                hull3dGroup.add(labelObj);
+                const cogText = 'CoG  L ' + base.x.toFixed(2) + '  T ' + base.y.toFixed(2) +
+                    (Number.isFinite(base.vcg) ? '  V ' + base.vcg.toFixed(2) : '');
+                labelAnchors3d.push({ id: 'cog_readout', obj: labelObj, text: cogText, cls: 'cog' });
             }
 
             // Level 2/3 step markers — blue = current step, red = each
@@ -4652,6 +4777,8 @@
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:9px; font-weight:600; ${bg} padding:0px 4px; border-radius:3px; white-space:nowrap;">${pct}%</div>`;
                 } else if (a.cls === 'pump') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:8px; font-weight:700; color:#f5f3ff; background:#7e22ce; padding:0 3px; border-radius:2px; white-space:nowrap;">${a.text}</div>`;
+                } else if (a.cls === 'cog') {
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#1c1917; background:#facc15; padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:31;">${a.text}</div>`;
                 }
             });
 
