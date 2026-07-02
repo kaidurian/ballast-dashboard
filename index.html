@@ -228,6 +228,14 @@
             z-index: 20;
         }
 
+        .cog-overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 21;
+        }
+
         .tank-grid-container {
             background: var(--panel-bg);
             border: 1px solid var(--panel-border);
@@ -946,6 +954,7 @@
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
                 <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
+                <canvas id="cogOverlayCanvas" class="cog-overlay-canvas"></canvas>
             </div>
         </div>
         <div class="tank-grid-container" id="view3dPanel">
@@ -1483,6 +1492,96 @@
                 return trailerMoveSequence.slice(0, AB_FUTURE_RESERVE_MAX_MOVES);
             }
             return [];
+        }
+
+        // ============================================================
+        // CENTER OF GRAVITY (CoG) — sign + step path (2D plan + 3D scene)
+        //     Not a hydrostatic solve (Excel remains the solver, per §2/
+        //     §17) — this is a weight-moment visualization: the ballast
+        //     tanks' own weighted centroid, and (when a trailer prediction
+        //     level is active) how that system's combined centroid shifts
+        //     as the trailer/SPMT group moves through its current -> target
+        //     step(s). Shared by both the 2D overlay (drawCoGOverlay) and
+        //     the 3D overlay (updateCoGVisualization3D) so they always
+        //     agree on the same numbers.
+        // ============================================================
+
+        // Weighted centroid of ballast tank weights only (no trailer/SPMT
+        // load included). Returns null if no weight is currently loaded
+        // anywhere (nothing to compute a meaningful CoG from).
+        function computeBaseTankCoG() {
+            let sumW = 0, sumX = 0, sumY = 0;
+            TANK_CONFIG.forEach((cfg) => {
+                const tank = tankData.find(t => t.row === cfg.id);
+                const w = tank ? (parseFloat(tank.weight) || 0) : 0;
+                if (w <= 0) return;
+                sumW += w;
+                sumX += w * cfg.x;
+                sumY += w * cfg.y;
+            });
+            if (sumW <= 0) return null;
+            return { x: sumX / sumW, y: sumY / sumW, weight: sumW };
+        }
+
+        // Combines the base tank CoG with one optional extra weighted
+        // point (e.g. the trailer/SPMT group sitting at a given x,y with
+        // its own weight) into a single system centroid.
+        function computeSystemCoG(extraPoint) {
+            const base = computeBaseTankCoG();
+            let sumW = base ? base.weight : 0;
+            let sumX = base ? base.weight * base.x : 0;
+            let sumY = base ? base.weight * base.y : 0;
+            if (extraPoint && (extraPoint.weight || 0) > 0) {
+                sumW += extraPoint.weight;
+                sumX += extraPoint.weight * extraPoint.x;
+                sumY += extraPoint.weight * extraPoint.y;
+            }
+            if (sumW <= 0) return null;
+            return { x: sumX / sumW, y: sumY / sumW, weight: sumW };
+        }
+
+        // Builds the full CoG picture for the CURRENT trailer prediction
+        // level:
+        //   - `base`  : ballast-only CoG (always shown as the plain "CoG"
+        //               sign, regardless of level).
+        //   - `steps` : [] at Level 1 (no trailer projection). At Level 2,
+        //               exactly two points — the system CoG with the
+        //               trailer at its CURRENT centroid, then at its
+        //               Level 2 TARGET centroid. At Level 3, one point per
+        //               planned move — current position first, then every
+        //               row of the full sequence table, in order — so the
+        //               path traces the CoG through the whole plan.
+        // steps are returned in path order so callers can just connect
+        // them point-to-point.
+        function getCoGPathSteps() {
+            const base = computeBaseTankCoG();
+            const steps = [];
+            if (!base) return { base, steps };
+
+            if (trailerPredictionLevel === 2) {
+                if (!nextTrailerMove || !((nextTrailerMove.weightT || 0) > 0)) return { base, steps };
+                const ref = getTrailerReferenceCentroid();
+                const cur = computeSystemCoG({ x: ref.x, y: ref.y, weight: nextTrailerMove.weightT });
+                const tgt = computeSystemCoG({ x: nextTrailerMove.x, y: nextTrailerMove.y, weight: nextTrailerMove.weightT });
+                if (cur) steps.push({ x: cur.x, y: cur.y, weight: cur.weight, label: 'Current' });
+                if (tgt) steps.push({ x: tgt.x, y: tgt.y, weight: tgt.weight, label: 'Target' });
+                return { base, steps };
+            }
+
+            if (trailerPredictionLevel === 3) {
+                const seq = trailerMoveSequence.filter(m => m && (m.weightT || 0) > 0);
+                if (!seq.length) return { base, steps };
+                const ref = getTrailerReferenceCentroid();
+                const cur = computeSystemCoG({ x: ref.x, y: ref.y, weight: seq[0].weightT });
+                if (cur) steps.push({ x: cur.x, y: cur.y, weight: cur.weight, label: 'Current' });
+                seq.forEach((m, i) => {
+                    const pt = computeSystemCoG({ x: m.x, y: m.y, weight: m.weightT });
+                    if (pt) steps.push({ x: pt.x, y: pt.y, weight: pt.weight, label: `Target ${i + 1}` });
+                });
+                return { base, steps };
+            }
+
+            return { base, steps };
         }
 
         // Per-tank {maxCut, minRaise} capacity-fraction adjustment driven
@@ -2407,15 +2506,111 @@
             });
         }
 
+        // ============================================================
+        // CoG OVERLAY (2D plan) — draws the ballast CoG "sign" (a small
+        // crosshair-in-circle) at all times, plus, when a trailer
+        // prediction level above 1 is active, the current-step / target
+        // step(s) CoG points and the dashed path line connecting them
+        // (getCoGPathSteps() — see its comment for exactly what each
+        // level shows). Uses the SAME worldToScreen() mapping as the
+        // tanks and the axle overlay, so everything stays pixel-aligned.
+        // ============================================================
+        function drawCoGOverlay() {
+            const wrap = document.getElementById('tankGridWrap');
+            const gridEl = document.getElementById('tankContainer');
+            const canvas = document.getElementById('cogOverlayCanvas');
+            if (!wrap || !gridEl || !canvas) return;
+
+            const rect = gridEl.getBoundingClientRect();
+            const wrapRect = wrap.getBoundingClientRect();
+            const cssW = rect.width;
+            const cssH = rect.height;
+            if (cssW === 0 || cssH === 0) return; // not laid out yet (e.g. hidden tab)
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.style.width = cssW + 'px';
+            canvas.style.height = cssH + 'px';
+            canvas.style.left = (rect.left - wrapRect.left) + 'px';
+            canvas.style.top = (rect.top - wrapRect.top) + 'px';
+            canvas.width = cssW * dpr;
+            canvas.height = cssH * dpr;
+
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, cssW, cssH);
+
+            if (!TANK_CONFIG.length) return; // no geometry loaded yet
+
+            const { base, steps } = getCoGPathSteps();
+            if (!base && !steps.length) return;
+
+            const isLight = document.body.classList.contains('light-theme');
+            const baseColor = isLight ? '#b45309' : '#facc15';   // amber/gold — ballast-only CoG
+            const curColor = isLight ? '#0284c7' : '#38bdf8';    // blue — current step
+            const tgtColor = '#ef4444';                          // red — target step(s)
+            const pathColor = isLight ? '#0284c7' : '#38bdf8';
+
+            // Path line first (so markers draw on top of it), connecting
+            // every step in order — one segment for Level 2 (current ->
+            // target), a full poly-line for Level 3 (current -> target 1
+            // -> target 2 -> ...).
+            if (steps.length >= 2) {
+                ctx.save();
+                ctx.strokeStyle = pathColor;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                steps.forEach((s, i) => {
+                    const p = worldToScreen(s.x, s.y);
+                    if (i === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
+                });
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // Small crosshair-in-circle "CoG sign", with an optional text
+            // label floated just above it.
+            function drawCoGMarker(x, y, color, label, radius) {
+                const p = worldToScreen(x, y);
+                const r = radius || 8;
+                ctx.save();
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(p.sx - r - 3, p.sy); ctx.lineTo(p.sx + r + 3, p.sy);
+                ctx.moveTo(p.sx, p.sy - r - 3); ctx.lineTo(p.sx, p.sy + r + 3);
+                ctx.stroke();
+                if (label) {
+                    ctx.font = 'bold 10px Calibri, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(label, p.sx, p.sy - r - 6);
+                }
+                ctx.restore();
+            }
+
+            // Ballast-only CoG — always shown when there's weight aboard.
+            if (base) drawCoGMarker(base.x, base.y, baseColor, 'CoG', 8);
+
+            // Trailer-projected step CoGs (Level 2/3 only — empty otherwise).
+            steps.forEach((s, i) => {
+                drawCoGMarker(s.x, s.y, i === 0 ? curColor : tgtColor, s.label, 6);
+            });
+        }
+
         function refreshPlanView() {
             drawAxleOverlay();
+            drawCoGOverlay();
             // Re-measure one frame later too, in case fonts/scrollbars shift
             // the grid's rendered box right after the initial paint.
-            requestAnimationFrame(() => drawAxleOverlay());
+            requestAnimationFrame(() => { drawAxleOverlay(); drawCoGOverlay(); });
         }
 
         // Recompute overlay alignment whenever the layout reflows
-        window.addEventListener('resize', () => drawAxleOverlay());
+        window.addEventListener('resize', () => { drawAxleOverlay(); drawCoGOverlay(); });
 
         // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
@@ -2933,6 +3128,7 @@
                 tankRecord.percent = targetPct;
             }
             update3DFillAndAttitude();
+            if (typeof drawCoGOverlay === 'function') drawCoGOverlay();
 
             if (!isOfficeInitialized) return;
             try {
@@ -3390,6 +3586,7 @@
                         : 'full planned sequence (Phase 5)';
             logAutoBallast(`🚛 Trailer prediction set to Level ${level} — ${label}.`);
             refreshPlanView();       // re-badge tank cards with 🔮 as needed
+            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3428,6 +3625,7 @@
         function updateNextTrailerMove(field, value) {
             nextTrailerMove[field] = parseFloat(value) || 0;
             refreshPlanView();
+            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3446,6 +3644,8 @@
         function addTrailerSequenceStep() {
             trailerMoveSequence.push({ x: 0, y: 0, weightT: 0 });
             renderTrailerSequenceTable();
+            refreshPlanView();
+            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3453,6 +3653,7 @@
             trailerMoveSequence.splice(idx, 1);
             renderTrailerSequenceTable();
             refreshPlanView();
+            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3460,6 +3661,7 @@
             if (!trailerMoveSequence[idx]) return;
             trailerMoveSequence[idx][field] = parseFloat(value) || 0;
             refreshPlanView();
+            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3679,6 +3881,13 @@
         const BARGE_QUAY_GAP_M = 1.2;    // real gap between barge leading edge and quay
         const QUAY_SLAB_THICKNESS_M = 0.4;
         const TANK_FOOTPRINT_GAP_M = 0.12; // real gap between adjacent tank footprints (visual daylight)
+        // Deck top height (Y, world-up), mirrors rebuild3DGeometry()'s
+        // local TANK_TOP_Y(0) + TANK_DECK_GAP_M + DECK_THICKNESS_M chain —
+        // kept as a named constant here so the CoG marker (and anything
+        // else placed "on deck") doesn't need rebuild3DGeometry() to run
+        // first to know where the deck surface sits.
+        const DECK_TOP_Y_M = TANK_DECK_GAP_M + DECK_THICKNESS_M;
+        const COG_MARKER_LIFT_Y_M = 0.7; // CoG markers float just above the deck, clear of axle boxes
 
         // Real-world Y (PS = positive, SB = negative, matching the 2D
         // plan's worldToScreen convention) does NOT map directly onto
@@ -4217,6 +4426,74 @@
             // Tank %-fill labels (text overlay) track live percent every
             // refresh, same cadence as the ballast mesh height update.
             renderLabels3D();
+            // CoG sign (+ Level 2/3 step path) — cheap enough to rebuild
+            // every call, same cadence as the fill/attitude update above.
+            updateCoGVisualization3D();
+        }
+
+        // ---- CoG OVERLAY (3D scene) -------------------------------------
+        // Persistent group of small spheres (+ a dashed path line) parented
+        // INSIDE hull3dGroup so they tilt/translate together with the hull,
+        // exactly like the axle groups and tank meshes. Rebuilt (cheaply —
+        // a handful of spheres, no textures) on every update3DFillAndAttitude()
+        // call, since it's driven by the same getCoGPathSteps() the 2D
+        // overlay uses and needs to track weight/target edits live.
+        let cogGroup3d = null;
+
+        function clearCoGGroup3D() {
+            if (cogGroup3d) {
+                if (cogGroup3d.parent) cogGroup3d.parent.remove(cogGroup3d);
+                disposeMeshDeep(cogGroup3d);
+                cogGroup3d = null;
+            }
+        }
+
+        function makeCoGSphere3D(color, radius) {
+            return new THREE.Mesh(
+                new THREE.SphereGeometry(radius, 16, 12),
+                new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.35 })
+            );
+        }
+
+        function updateCoGVisualization3D() {
+            clearCoGGroup3D();
+            if (!hull3dGroup || !TANK_CONFIG.length) return;
+
+            const { base, steps } = getCoGPathSteps();
+            if (!base && !steps.length) return;
+
+            cogGroup3d = new THREE.Group();
+            const cogY = DECK_TOP_Y_M + COG_MARKER_LIFT_Y_M;
+
+            // Ballast-only CoG "sign" — gold sphere, always shown when
+            // there's weight aboard, independent of trailer prediction level.
+            if (base) {
+                const sphere = makeCoGSphere3D(0xfacc15, 0.6);
+                sphere.position.set(base.x, cogY, worldYToZ3D(base.y));
+                cogGroup3d.add(sphere);
+            }
+
+            // Level 2/3 step markers — blue = current step, red = each
+            // target step — plus a dashed path line connecting them in
+            // order (one segment at Level 2, a full poly-line at Level 3).
+            if (steps.length) {
+                steps.forEach((s, i) => {
+                    const sphere = makeCoGSphere3D(i === 0 ? 0x38bdf8 : 0xef4444, 0.5);
+                    sphere.position.set(s.x, cogY, worldYToZ3D(s.y));
+                    cogGroup3d.add(sphere);
+                });
+
+                if (steps.length >= 2) {
+                    const pts = steps.map(s => new THREE.Vector3(s.x, cogY, worldYToZ3D(s.y)));
+                    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+                    const mat = new THREE.LineDashedMaterial({ color: 0x38bdf8, dashSize: 1.2, gapSize: 0.7, linewidth: 2 });
+                    const line = new THREE.Line(geo, mat);
+                    line.computeLineDistances();
+                    cogGroup3d.add(line);
+                }
+            }
+
+            hull3dGroup.add(cogGroup3d);
         }
 
         // ---- label overlay: AFT/FWD/PS/SB, the 6 corner labels, a
