@@ -439,6 +439,13 @@
             min-width: 0;
         }
 
+        .tank-buffer-badge {
+            font-size: 9px;
+            margin-left: 3px;
+            vertical-align: middle;
+            filter: grayscale(0%);
+        }
+
         .tank-inputs {
             z-index: 5;
             display: flex;
@@ -745,6 +752,111 @@
         body.light-theme .ab-log {
             background: rgba(0,0,0,0.05);
         }
+
+        /* ---- Tank protection sub-panel (reserve / buffer / pump status) ---- */
+        .ab-protect-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: rgba(0,0,0,0.15);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+        }
+
+        body.light-theme .ab-protect-section {
+            background: rgba(0,0,0,0.03);
+        }
+
+        .ab-protect-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .ab-protect-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+        }
+
+        .ab-protect-input {
+            flex: 1;
+            min-width: 120px;
+            background: var(--input-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            color: var(--text-main);
+            font-size: 11px;
+            padding: 4px 6px;
+        }
+
+        .ab-pump-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .ab-pump-chip {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 12px;
+            border: 1px solid var(--panel-border);
+            cursor: pointer;
+            user-select: none;
+            background: rgba(16,185,129,0.12);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        .ab-pump-chip.ab-pump-failed {
+            background: rgba(239,68,68,0.12);
+            border-color: #ef4444;
+            color: #ef4444;
+            text-decoration: line-through;
+        }
+
+        .ab-weight-input {
+            width: 60px;
+            background: var(--input-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            color: var(--text-main);
+            font-size: 11px;
+            padding: 3px 4px;
+            text-align: center;
+        }
+
+        .ab-deck-weight-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+            gap: 6px;
+        }
+
+        .ab-weight-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .ab-weight-cell .ab-weight-label {
+            font-size: 8px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .ab-weight-cell .ab-weight-input {
+            width: 100%;
+            max-width: 64px;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
@@ -887,6 +999,39 @@
 
             <div class="ab-deck-grid" id="abDeckGrid">
                 <!-- populated by renderAutoBallastDeckGrid() -->
+            </div>
+
+            <div class="ab-protect-section">
+                <div class="ab-protect-row">
+                    <span class="ab-protect-label" title="Error = HeelWeight·Heel² + TrimWeight·Trim² + Σ(DeckWeight·Deck²)">⚖ Priority weights (manual deck weighting)</span>
+                </div>
+                <div class="ab-protect-row">
+                    <label class="ab-protect-label" for="abHeelWeightInput">Heel</label>
+                    <input type="number" min="0" step="10" id="abHeelWeightInput" class="ab-weight-input" value="1000" onchange="updateHeelWeight(this.value)">
+                    <label class="ab-protect-label" for="abTrimWeightInput">Trim</label>
+                    <input type="number" min="0" step="10" id="abTrimWeightInput" class="ab-weight-input" value="500" onchange="updateTrimWeight(this.value)">
+                </div>
+                <div class="ab-deck-weight-grid" id="abDeckWeightGrid">
+                    <!-- populated once by renderDeckWeightInputs() -->
+                </div>
+            </div>
+
+            <div class="ab-protect-section">
+                <div class="ab-protect-row">
+                    <span class="ab-protect-label" title="Normal tanks 10-90%, buffer tanks 30-70%">🛡 Reserve: 10-90% · Buffer: 30-70%</span>
+                </div>
+                <div class="ab-protect-row">
+                    <label class="ab-protect-label" for="abBufferTanksInput">Buffer tanks</label>
+                    <input type="text" id="abBufferTanksInput" class="ab-protect-input"
+                           placeholder="e.g. 1PS, 1SB, 6PS, 6SB"
+                           onchange="updateBufferTankNames(this.value)">
+                </div>
+                <div class="ab-protect-row" id="abPumpStatusRow" style="display:none;">
+                    <span class="ab-protect-label">Pump status</span>
+                    <div class="ab-pump-chip-list" id="abPumpStatusList">
+                        <!-- populated by renderPumpStatusChips() -->
+                    </div>
+                </div>
             </div>
 
             <div class="ab-btn-row">
@@ -1121,6 +1266,74 @@
         const AB_TRIM_TOLERANCE = 0.01;
         const AB_HEEL_TOLERANCE = 0.01;
         const AB_DECK_TOLERANCE = 0.01;
+
+        // ============================================================
+        // 7c. TANK PROTECTION LOGIC (Auto Ballast Phase 1 / spec V3)
+        //     Three independent safety guards the optimizer must always
+        //     respect, regardless of mode — never sacrificed for a
+        //     "perfect" deck/trim/heel result:
+        //       1. Tank reserve   — keep every normal tank between 10%
+        //          and 90% full so it never becomes unusable.
+        //       2. Buffer tanks   — a smaller, operator-editable set of
+        //          tanks kept even tighter (30-70%) as a reserved
+        //          correction margin for later.
+        //       3. Pump availability — a tank whose only pump(s) have
+        //          been marked FAILED is excluded entirely.
+        // ============================================================
+        const AB_TANK_RESERVE_MIN_PCT = 0.10;   // normal tank floor
+        const AB_TANK_RESERVE_MAX_PCT = 0.90;   // normal tank ceiling
+        const AB_BUFFER_MIN_PCT = 0.30;         // buffer tank floor
+        const AB_BUFFER_MAX_PCT = 0.70;         // buffer tank ceiling
+
+        // Buffer tank names, matched (see isBufferTank) against both the
+        // full Excel tank name and its shortened display form, so either
+        // "WB-01-PS.P"/"1P" or "1PS"-style naming works. Spec example
+        // default: 1PS, 1SB, 6PS, 6SB — edit via the "Buffer tanks" field
+        // in the Auto Ballast panel, or change the defaults below.
+        let bufferTankNames = new Set(['1PS', '1SB', '6PS', '6SB']);
+
+        // Pump names the operator has marked FAILED (dedicated-pump
+        // logic). Populated/edited from the "Pump Status" list in the
+        // Auto Ballast panel, built from the pump labels already parsed
+        // out of BALLASTPLAN(mT) (pumpLocations).
+        let failedPumps = new Set();
+
+        function isBufferTank(cfg) {
+            if (!cfg) return false;
+            const full = normalizeTankName(cfg.name);
+            const short = normalizeTankName(shortenTankName(cfg.name));
+            for (const raw of bufferTankNames) {
+                const n = normalizeTankName(raw);
+                if (!n) continue;
+                if (n === full || n === short) return true;
+            }
+            return false;
+        }
+
+        // Effective {min, max} weight (same units as tank.weight/capacity)
+        // this tank must be kept within. Buffer tanks get the tighter
+        // 30-70% band; every other tank gets the 10-90% reserve band.
+        function getTankReserveBounds(cfg) {
+            const cap = (cfg && cfg.capacity) || 0;
+            if (isBufferTank(cfg)) {
+                return { min: cap * AB_BUFFER_MIN_PCT, max: cap * AB_BUFFER_MAX_PCT, buffer: true };
+            }
+            return { min: cap * AB_TANK_RESERVE_MIN_PCT, max: cap * AB_TANK_RESERVE_MAX_PCT, buffer: false };
+        }
+
+        // A tank is pump-unavailable ONLY if it has at least one pump
+        // assigned (via BALLASTPLAN) AND every pump assigned to it is
+        // marked failed. Tanks with no pump at all are left to the
+        // existing mode logic (Auto Fixed already restricts to
+        // tanksWithPump; Auto Smart allows pump-less tanks and routes a
+        // pump sequence afterwards).
+        function isTankPumpAvailable(cfg) {
+            if (!cfg || !pumpLocations.length) return true;
+            const targetNorm = normalizeTankName(cfg.name);
+            const pumpsForTank = pumpLocations.filter(p => normalizeTankName(p.tankName) === targetNorm);
+            if (!pumpsForTank.length) return true; // no pump assigned -> not this guard's concern
+            return pumpsForTank.some(p => !failedPumps.has(p.pumpName));
+        }
 
         let autoBallastMode = 'manual';       // 'manual' | 'assist' | 'auto-fixed' | 'auto-smart'
         let autoBallastRunning = false;
@@ -1447,10 +1660,16 @@
                 // the box's drawn footprint itself stays exactly to scale.
                 const waterClass = pct >= 85 ? 'tank-water-level tank-water-high' : 'tank-water-level';
                 const shortName = shortenTankName(cfg.name);
+                // Phase 1 tank-protection badge — 🛡 marks a buffer tank
+                // (30-70% reserve band); hover shows the active bounds so
+                // the operator can see at a glance why the optimizer left
+                // a particular tank alone.
+                const isBuffer = typeof isBufferTank === 'function' && isBufferTank(cfg);
+                const bufferBadge = isBuffer ? `<span class="tank-buffer-badge" title="Buffer tank — reserved ${(AB_BUFFER_MIN_PCT*100).toFixed(0)}-${(AB_BUFFER_MAX_PCT*100).toFixed(0)}%">🛡</span>` : '';
                 box.innerHTML += `
                                             <div class="${waterClass}" style="height: ${pct}%"></div>
                                             <div class="tank-header">
-                                                <span class="tank-name">${shortName}</span>
+                                                <span class="tank-name">${shortName}${bufferBadge}</span>
                                                 <span class="tank-coords-badge tank-dim-label">${geo.width.toFixed(2)}×${geo.height.toFixed(2)}m · Row ${excelRow}</span>
                                             </div>
                                             <div class="tank-inputs">
@@ -2173,6 +2392,11 @@
                     targetHeel: targetHeelDegrees,
                     targetDeck: targetDeck,
                     pumpCapacityMTPerHr: pumpCapacityMTPerHr,
+                    bufferTankNames: Array.from(bufferTankNames),
+                    failedPumps: Array.from(failedPumps),
+                    abHeelWeight: abHeelWeight,
+                    abTrimWeight: abTrimWeight,
+                    abDeckWeights: abDeckWeights,
                     updatedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -2241,6 +2465,11 @@
                 if (typeof data.targetHeel === 'number') targetHeelDegrees = data.targetHeel;
                 if (data.targetDeck) targetDeck = Object.assign({}, targetDeck, data.targetDeck);
                 if (typeof data.pumpCapacityMTPerHr === 'number') pumpCapacityMTPerHr = data.pumpCapacityMTPerHr;
+                if (Array.isArray(data.bufferTankNames)) bufferTankNames = new Set(data.bufferTankNames);
+                if (Array.isArray(data.failedPumps)) failedPumps = new Set(data.failedPumps);
+                if (typeof data.abHeelWeight === 'number') abHeelWeight = data.abHeelWeight;
+                if (typeof data.abTrimWeight === 'number') abTrimWeight = data.abTrimWeight;
+                if (data.abDeckWeights) abDeckWeights = Object.assign({}, abDeckWeights, data.abDeckWeights);
                 if (typeof data.showTrailer === 'boolean') {
                     showTrailer = data.showTrailer;
                     const trailerBox = document.getElementById('trailerToggleCheckbox');
@@ -2252,6 +2481,7 @@
                 refreshPlanView();
                 if (typeof refresh3DView === 'function') refresh3DView();
                 if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
+                syncBufferTankInputField();
 
                 const when = data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "unknown time";
                 document.getElementById('connectionStatus').innerHTML =
@@ -2481,16 +2711,29 @@
         // — never by estimating trim/heel/deck locally.
         // ============================================================
 
+        // ---- V2: Manual Deck Weighting ---------------------------------
+        // Operator-editable weights feeding the §8 error function below.
+        // Defaults match the PREVIOUS hardcoded constants exactly (1000 /
+        // 500 / 100 each) so existing behavior is unchanged until the
+        // operator adjusts a weight in the "Priority weights" panel.
+        // Spec's recommended starting point is Heel=1000, Trim=300,
+        // Deck=0-100 per corner — operators can dial each corner in
+        // independently (e.g. AFT-PS=10, FWD-PS=100) to bias the
+        // optimizer toward the corners that matter most for a given lift.
+        let abHeelWeight = 1000;
+        let abTrimWeight = 500;
+        let abDeckWeights = { AFT_PS: 100, PS: 100, FWD_PS: 100, AFT_SB: 100, SB: 100, FWD_SB: 100 };
+
         // ---- §8 Error function ----------------------------------------
-        // Error = 1000·Heel² + 500·Trim² + 100·Σ(Deck²)
+        // Error = HeelWeight·Heel² + TrimWeight·Trim² + Σ(DeckWeight·Deck²)
         function computeErrorFromState(state) {
             const heelErr = state.heel - targetHeelDegrees;
             const trimErr = state.trim - targetTrimDegrees;
             const deckVals = state.deckLabels.map(extractDeckNumberFromLabel);
             const deckErrs = DECK_KEYS.map((k, i) => deckVals[i] - targetDeck[k]);
-            const total = 1000 * heelErr * heelErr
-                        + 500 * trimErr * trimErr
-                        + 100 * deckErrs.reduce((s, e) => s + e * e, 0);
+            const total = abHeelWeight * heelErr * heelErr
+                        + abTrimWeight * trimErr * trimErr
+                        + deckErrs.reduce((s, e, i) => s + (abDeckWeights[DECK_KEYS[i]] ?? 100) * e * e, 0);
             return { total, heelErr, trimErr, deckErrs };
         }
 
@@ -2525,6 +2768,13 @@
             if (autoBallastMode === 'auto-fixed') {
                 ids = ids.filter(id => tanksWithPump.has(id));
             }
+            // Tank protection guard 3/3 — pump availability. Applied in
+            // EVERY mode (not just Auto Fixed): a tank whose dedicated
+            // pump(s) have all been marked failed is never a candidate,
+            // because a "successful" optimization the operator can't
+            // physically execute is worse than no optimization at all.
+            ids = ids.filter(id => isTankPumpAvailable(TANK_CONFIG.find(t => t.id === id)));
+
             const midX = (BARGE_X_MIN + BARGE_X_MAX) / 2;
 
             ids.forEach(id => {
@@ -2532,7 +2782,12 @@
                 const tank = tankData.find(t => t.row === id);
                 if (!cfg || !tank) return;
                 const currentW = parseFloat(tank.weight) || 0;
-                const cap = cfg.capacity || 0;
+                // Tank protection guards 1/3 and 2/3 — reserve (10-90%)
+                // for normal tanks, tighter buffer band (30-70%) for
+                // buffer tanks. These replace the old raw 0..capacity
+                // limits so the optimizer can never pump a tank empty,
+                // top it off solid, or eat into reserved buffer margin.
+                const bounds = getTankReserveBounds(cfg);
                 const isPS = cfg.y >= 0;   // §5: Y > 0 = PS
                 const isFwd = cfg.x >= midX;
 
@@ -2548,11 +2803,11 @@
                 }
                 if (!want) return;
 
-                if ((want === 'add' || want === 'both') && currentW + AB_BALLAST_INCREMENT_T <= cap + 1e-6) {
+                if ((want === 'add' || want === 'both') && currentW + AB_BALLAST_INCREMENT_T <= bounds.max + 1e-6) {
                     candidates.push({ id, delta: AB_BALLAST_INCREMENT_T, newWeight: currentW + AB_BALLAST_INCREMENT_T, original: currentW });
                 }
-                if ((want === 'remove' || want === 'both') && currentW - AB_BALLAST_INCREMENT_T >= -1e-6) {
-                    candidates.push({ id, delta: -AB_BALLAST_INCREMENT_T, newWeight: Math.max(0, currentW - AB_BALLAST_INCREMENT_T), original: currentW });
+                if ((want === 'remove' || want === 'both') && currentW - AB_BALLAST_INCREMENT_T >= bounds.min - 1e-6) {
+                    candidates.push({ id, delta: -AB_BALLAST_INCREMENT_T, newWeight: Math.max(bounds.min, currentW - AB_BALLAST_INCREMENT_T), original: currentW });
                 }
             });
             return candidates;
@@ -2801,6 +3056,130 @@
             setText('abOpTime', opMinutes.toFixed(0) + ' min (' + autoBallastTotalTransferredT.toFixed(0) + 't @ ' + pumpCapacityMTPerHr + ' mT/hr)');
 
             renderAutoBallastDeckGrid();
+            renderPumpStatusChips();
+            renderDeckWeightInputs();
+            syncPriorityWeightFields();
+        }
+
+        // ============================================================
+        // 7c2. MANUAL DECK WEIGHTING UI (Auto Ballast Phase 2 / spec V2)
+        //     Heel/Trim weight fields plus one weight input per deck
+        //     corner, feeding abHeelWeight / abTrimWeight / abDeckWeights
+        //     used directly by computeErrorFromState(). The deck weight
+        //     grid is built ONCE (guarded by dataset.built) rather than
+        //     rebuilt on every refresh, so an operator mid-edit never has
+        //     their keystroke or focus wiped out by a live Excel/Firebase
+        //     poll — the same reasoning as syncBufferTankInputField().
+        // ============================================================
+        function renderDeckWeightInputs() {
+            const wrap = document.getElementById('abDeckWeightGrid');
+            if (!wrap || wrap.dataset.built === '1') return;
+            wrap.innerHTML = DECK_KEYS.map((key, i) => `
+                <div class="ab-weight-cell">
+                    <span class="ab-weight-label">${DECK_LABELS_DISPLAY[i]}</span>
+                    <input type="number" min="0" max="100" step="1" class="ab-weight-input"
+                           id="abDeckWeight_${key}" value="${abDeckWeights[key]}"
+                           onchange="updateDeckWeight('${key}', this.value)">
+                </div>
+            `).join('');
+            wrap.dataset.built = '1';
+        }
+
+        // Pushes the current abHeelWeight/abTrimWeight/abDeckWeights values
+        // into their inputs — used after a Firebase snapshot changes them
+        // remotely. Skips any field the operator is actively editing.
+        function syncPriorityWeightFields() {
+            const heelInput = document.getElementById('abHeelWeightInput');
+            if (heelInput && document.activeElement !== heelInput) heelInput.value = abHeelWeight;
+            const trimInput = document.getElementById('abTrimWeightInput');
+            if (trimInput && document.activeElement !== trimInput) trimInput.value = abTrimWeight;
+            DECK_KEYS.forEach(key => {
+                const input = document.getElementById(`abDeckWeight_${key}`);
+                if (input && document.activeElement !== input) input.value = abDeckWeights[key];
+            });
+        }
+
+        function updateHeelWeight(value) {
+            abHeelWeight = Math.max(0, parseFloat(value) || 0);
+            logAutoBallast(`⚖ Heel weight set to ${abHeelWeight}`);
+            refreshAutoBallastUI();
+        }
+
+        function updateTrimWeight(value) {
+            abTrimWeight = Math.max(0, parseFloat(value) || 0);
+            logAutoBallast(`⚖ Trim weight set to ${abTrimWeight}`);
+            refreshAutoBallastUI();
+        }
+
+        function updateDeckWeight(key, value) {
+            const w = Math.max(0, Math.min(100, parseFloat(value) || 0));
+            abDeckWeights[key] = w;
+            const idx = DECK_KEYS.indexOf(key);
+            logAutoBallast(`⚖ ${DECK_LABELS_DISPLAY[idx] || key} weight set to ${w}`);
+            refreshAutoBallastUI();
+        }
+
+        // ============================================================
+        // 7d. TANK PROTECTION UI — buffer tank editor + pump status chips
+        //     Lets the operator (a) redefine which tanks are treated as
+        //     buffer tanks and (b) mark a pump FAILED/Healthy, both of
+        //     which feed straight into buildAutoBallastCandidates() via
+        //     isBufferTank()/isTankPumpAvailable() — no separate "apply"
+        //     step needed.
+        // ============================================================
+        function updateBufferTankNames(rawValue) {
+            const names = String(rawValue || '')
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean);
+            bufferTankNames = new Set(names);
+            logAutoBallast(`🛡 Buffer tanks set to: ${names.length ? names.join(', ') : '(none)'}`);
+            if (typeof refreshPlanView === 'function') refreshPlanView(); // re-badge tank cards
+        }
+
+        // Populates the buffer-tank text input from the current Set —
+        // called once at startup and whenever a Firebase snapshot arrives
+        // with a different list, so the field never silently drifts out
+        // of sync with what the optimizer is actually using.
+        function syncBufferTankInputField() {
+            const input = document.getElementById('abBufferTanksInput');
+            if (input && document.activeElement !== input) {
+                input.value = Array.from(bufferTankNames).join(', ');
+            }
+        }
+
+        // Builds one chip per distinct pump name found in pumpLocations.
+        // Clicking a chip toggles that pump between Healthy and Failed —
+        // a failed pump immediately removes every tank it (solely)
+        // serves from the optimizer's candidate list (see
+        // isTankPumpAvailable), matching the spec's "P5 failed -> all
+        // tanks on P5 ignored" example.
+        function renderPumpStatusChips() {
+            const row = document.getElementById('abPumpStatusRow');
+            const list = document.getElementById('abPumpStatusList');
+            if (!row || !list) return;
+
+            const pumpNames = Array.from(new Set(pumpLocations.map(p => p.pumpName))).sort();
+            row.style.display = pumpNames.length ? '' : 'none';
+            if (!pumpNames.length) { list.innerHTML = ''; return; }
+
+            list.innerHTML = pumpNames.map(name => {
+                const failed = failedPumps.has(name);
+                return `<span class="ab-pump-chip${failed ? ' ab-pump-failed' : ''}" onclick="togglePumpFailed('${name.replace(/'/g, "\\'")}')" title="${failed ? 'Marked FAILED — click to restore' : 'Healthy — click to mark FAILED'}">${name}</span>`;
+            }).join('');
+
+            syncBufferTankInputField();
+        }
+
+        function togglePumpFailed(pumpName) {
+            if (failedPumps.has(pumpName)) {
+                failedPumps.delete(pumpName);
+                logAutoBallast(`✅ Pump ${pumpName} marked HEALTHY — its tanks are candidates again.`);
+            } else {
+                failedPumps.add(pumpName);
+                logAutoBallast(`⚠ Pump ${pumpName} marked FAILED — its tanks are excluded from Auto Ballast.`);
+            }
+            renderPumpStatusChips();
         }
 
         // ============================================================
