@@ -228,14 +228,6 @@
             z-index: 20;
         }
 
-        .cog-overlay-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            pointer-events: none;
-            z-index: 21;
-        }
-
         .tank-grid-container {
             background: var(--panel-bg);
             border: 1px solid var(--panel-border);
@@ -662,10 +654,29 @@
 
         .ab-seq-row {
             display: grid;
-            grid-template-columns: 28px 1fr 1fr 1fr 24px;
+            grid-template-columns: 28px 1fr 1fr 1fr 24px 24px;
             gap: 4px;
             align-items: center;
         }
+
+        .ab-ghost-toggle {
+            background: rgba(249,115,22,0.14);
+            border: 1px solid #f97316;
+            color: #f97316;
+            border-radius: 4px;
+            font-size: 11px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 3px 4px;
+            opacity: 1;
+        }
+
+            .ab-ghost-toggle.ab-ghost-off {
+                background: transparent;
+                border-color: var(--panel-border);
+                color: var(--text-muted);
+                opacity: 0.5;
+            }
 
         .ab-seq-step {
             font-size: 9px;
@@ -913,7 +924,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast - index_Autoballast_Phrase5_Inp-13-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast index_Autoballast_Phrase5_Inp-14-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -954,7 +965,6 @@
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
                 <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
-                <canvas id="cogOverlayCanvas" class="cog-overlay-canvas"></canvas>
             </div>
         </div>
         <div class="tank-grid-container" id="view3dPanel">
@@ -1095,15 +1105,12 @@
                     <button class="ab-mode-btn ab-level-btn" data-level="3" id="abLevel3Btn" onclick="setTrailerPredictionLevel(3)" title="Full planned move sequence — engineering/planning mode (~95-99% effectiveness)">Lvl 3 · Full sequence</button>
                 </div>
 
-                <div class="ab-protect-row" id="abTrailerRefRow" style="display:none;">
-                    <span class="ab-protect-label" style="text-transform:none; font-weight:400;" id="abTrailerRefLabel">Current group centroid: X=0.0, Y=0.0 (auto, from axle geometry)</span>
-                </div>
-
                 <div class="ab-protect-row" id="abLevel2Panel" style="display:none;">
-                    <label class="ab-protect-label" for="abNextMoveX">Target centroid</label>
-                    <input type="number" step="any" id="abNextMoveX" class="ab-weight-input" placeholder="X (m)" title="Target X for the trailer group's centroid, meters from AFT (whole rigid axle set translates here)" onchange="updateNextTrailerMove('x', this.value)">
-                    <input type="number" step="any" id="abNextMoveY" class="ab-weight-input" placeholder="Y (m)" title="Target Y for the group centroid — usually unchanged for a straight fore/aft move (+ = PS, - = SB, 0 = straddling centerline)" onchange="updateNextTrailerMove('y', this.value)">
-                    <input type="number" step="any" min="0" id="abNextMoveW" class="ab-weight-input" placeholder="t" title="Total trailer/SPMT group weight, tonnes" onchange="updateNextTrailerMove('weightT', this.value)">
+                    <label class="ab-protect-label" for="abNextMoveX">Next move</label>
+                    <input type="number" step="any" id="abNextMoveX" class="ab-weight-input" placeholder="X (m)" title="Target X — meters from 0,0 to the reference axle (Load_Editor E124)" onchange="updateNextTrailerMove('x', this.value)">
+                    <input type="number" step="any" id="abNextMoveY" class="ab-weight-input" placeholder="Y (m)" title="Target Y — meters from 0,0 to the reference axle (Load_Editor F124), + = PS, - = SB" onchange="updateNextTrailerMove('y', this.value)">
+                    <input type="number" step="any" min="0" id="abNextMoveW" class="ab-weight-input" placeholder="t" title="Trailer weight, tonnes" onchange="updateNextTrailerMove('weightT', this.value)">
+                    <button class="ab-ghost-toggle" id="abNextMoveGhostBtn" onclick="toggleNextMoveGhost()" title="Show/hide this move's ghost footprint in the 2D/3D views">👻</button>
                 </div>
 
                 <div class="ab-protect-row" id="abLevel3Panel" style="display:none; flex-direction:column; align-items:stretch;">
@@ -1326,16 +1333,6 @@
         // (not the quay wall).
         let bargeCornerLabels = ['', '', '', '', '', ''];
 
-        // Current system Center of Gravity, sourced directly from Excel:
-        //   Load_Editor!P31 = LCG (x, longitudinal, matches barge world-X)
-        //   Load_Editor!Q31 = TCG (y, transverse, matches barge world-Y)
-        //   Load_Editor!R31 = VCG (z, vertical — display/reference only,
-        //                     no vertical axis exists in this 2D/3D model)
-        // null until a real value has been read (Excel or Firebase); the
-        // CoG "sign" falls back to the ballast-tank weighted centroid
-        // (computeBaseTankCoG) until then — see computeCurrentSystemCoG().
-        let excelCoG = null; // { x: LCG, y: TCG, z: VCG }
-
         // ============================================================
         // AUTO BALLAST — data sources & state
         // Per AUTO_BALLAST_DASHBOARD_PROJECT.docx §3, §13, §15.
@@ -1421,34 +1418,24 @@
         //      that same round-trip (it hasn't happened yet), so there is
         //      no way to get an exact predicted heel/trim from Excel for
         //      it. What follows is therefore a deliberately simple,
-        //      transparent HEURISTIC — not a hydrostatic simulation.
-        //
-        //      RIGID GROUP TRANSLATION: a loaded trailer/SPMT group's
-        //      axle spacing doesn't change once cargo is on it — it only
-        //      translates as a unit. So rather than ask the operator for
-        //      one ambiguous "trailer position" point (which axle? the
-        //      centroid? and what does Y=0 even mean for a group that
-        //      straddles both PS and SB?), Level 2/3 inputs are a target
-        //      for the CURRENT axle group's centroid (auto-computed from
-        //      trailerAxles, itself read live from Excel). The entire
-        //      current axle set is then translated by the same delta to
-        //      predict the future footprint — see getPredictedAxleFootprint.
-        //      Bias is computed from the FRACTION of that real, possibly
-        //      straddling footprint that falls on each side/end, so a
-        //      symmetric group naturally nets to ~0 side bias with no
-        //      hand-picked deadband needed.
-        //        - Tanks on the side/end where MOST of the predicted
-        //          footprint sits get extra MINIMUM reserve (kept ready
-        //          to DISCHARGE, since they'll likely need to give up
-        //          ballast to relieve the new load).
-        //        - Tanks on the side/end where LITTLE of the footprint
-        //          sits get extra MAXIMUM headroom cut (kept ready to
-        //          RECEIVE ballast, as the natural counter-weight side).
+        //      transparent HEURISTIC — not a hydrostatic simulation — that
+        //      biases which tanks get extra headroom based on which side
+        //      (PS/SB) and end (FWD/AFT) the anticipated trailer weight
+        //      lands on:
+        //        - Tanks sharing BOTH the loaded side AND end get extra
+        //          MINIMUM reserve (kept ready to DISCHARGE, since they'll
+        //          likely need to give up ballast to relieve the new load).
+        //        - Tanks sharing NEITHER get extra MAXIMUM headroom cut
+        //          (kept ready to RECEIVE ballast, since they're the
+        //          natural counter-weight side/end).
+        //        - Tanks sharing only one axis get half-strength versions
+        //          of both, since they're only partially implicated.
         //      Level 1 (no prediction) applies none of this — behavior is
         //      byte-for-byte identical to before Phase 3.
         // ============================================================
         const AB_FUTURE_RESERVE_PCT_PER_MOVE = 0.15; // matches spec example: 1000 m³ cap -> 150 m³ (15%) reserved for one anticipated move
         const AB_FUTURE_RESERVE_MAX_PCT = 0.30;       // hard cap so future reserve can never swallow more than 30% of any one tank's capacity
+        const AB_FUTURE_RESERVE_BIAS_FACTOR = 0.5;    // tanks that share only one axis (side OR end, not both) get this fraction of the full-strength adjustment
         const AB_FUTURE_RESERVE_MAX_MOVES = 6;        // Level 3 sequence: only the next N planned moves count toward reserve (spec's "estimated effectiveness" caps out anyway; unbounded lookahead would over-restrict capacity for moves that are still far off)
 
         // 1 = current trailer only (spec estimated effectiveness ~70%,
@@ -1457,40 +1444,20 @@
         // 3 = full planned move sequence (Phase 5, "planning mode", ~95-99%)
         let trailerPredictionLevel = 1;
 
-        // Level 2 input — target (x,y) for the trailer group's CENTROID,
-        // plus the group's total weight. Same world frame as TANK_CONFIG
-        // (x = length from AFT, y = width, positive = PS). For a straight
-        // fore/aft move (the common case) only x changes; y usually stays
-        // equal to the current centroid's y.
-        let nextTrailerMove = { x: 0, y: 0, weightT: 0 };
+        // Level 2 input — a single anticipated next trailer position/weight.
+        // Coordinates use the SAME world frame as TANK_CONFIG (x = length
+        // from AFT, y = width, positive = PS per "§5: Y > 0 = PS").
+        // showGhost: per-move toggle for the orange ghost footprint +
+        // arrow drawn in the 2D/3D views (see drawTrailerGhostOverlay /
+        // updateTrailerGhostVisualization3D). Defaults to visible; the
+        // operator can hide an individual step's ghost without deleting
+        // the step itself (e.g. to declutter a long Level 3 sequence).
+        let nextTrailerMove = { x: 0, y: 0, weightT: 0, showGhost: true };
 
-        // Level 3 input — ordered list of the same shape (spec: "Step 1
-        // -> Step 2 -> ... -> Step N"), each a centroid target + weight.
+        // Level 3 input — ordered list of the same shape, entered by the
+        // operator for engineering/planning use (spec: "Step 1 -> Step 2
+        // -> ... -> Step N").
         let trailerMoveSequence = [];
-
-        // Centroid of the CURRENT axle group, as read live from Excel
-        // (trailerAxles) or mock data. This is the reference origin for
-        // every Level 2/3 target — computed automatically, never typed in.
-        function getTrailerReferenceCentroid() {
-            if (!trailerAxles.length) return { x: 0, y: 0 };
-            const sumX = trailerAxles.reduce((s, a) => s + a.x, 0);
-            const sumY = trailerAxles.reduce((s, a) => s + a.y, 0);
-            return { x: sumX / trailerAxles.length, y: sumY / trailerAxles.length };
-        }
-
-        // Translates the CURRENT rigid axle set by (move.x,move.y) minus
-        // the current centroid, producing the predicted future axle
-        // footprint as a set of points — not one ambiguous point. Falls
-        // back to treating the move itself as a single point only if no
-        // axle geometry is available yet (e.g. before the first Excel sync).
-        function getPredictedAxleFootprint(move) {
-            if (!move) return [];
-            if (!trailerAxles.length) return [{ x: move.x || 0, y: move.y || 0 }];
-            const ref = getTrailerReferenceCentroid();
-            const deltaX = (move.x || 0) - ref.x;
-            const deltaY = (move.y || 0) - ref.y;
-            return trailerAxles.map(a => ({ x: a.x + deltaX, y: a.y + deltaY }));
-        }
 
         // Returns the list of anticipated moves the CURRENT prediction
         // level says to account for. Empty at Level 1 by design.
@@ -1504,134 +1471,41 @@
             return [];
         }
 
-        // ============================================================
-        // CENTER OF GRAVITY (CoG) — sign + step path (2D plan + 3D scene)
-        //     Not a hydrostatic solve (Excel remains the solver, per §2/
-        //     §17) — this is a weight-moment visualization: the ballast
-        //     tanks' own weighted centroid, and (when a trailer prediction
-        //     level is active) how that system's combined centroid shifts
-        //     as the trailer/SPMT group moves through its current -> target
-        //     step(s). Shared by both the 2D overlay (drawCoGOverlay) and
-        //     the 3D overlay (updateCoGVisualization3D) so they always
-        //     agree on the same numbers.
-        // ============================================================
-
-        // Weighted centroid of ballast tank weights only (no trailer/SPMT
-        // load included). Returns null if no weight is currently loaded
-        // anywhere (nothing to compute a meaningful CoG from).
-        function computeBaseTankCoG() {
-            let sumW = 0, sumX = 0, sumY = 0;
-            TANK_CONFIG.forEach((cfg) => {
-                const tank = tankData.find(t => t.row === cfg.id);
-                const w = tank ? (parseFloat(tank.weight) || 0) : 0;
-                if (w <= 0) return;
-                sumW += w;
-                sumX += w * cfg.x;
-                sumY += w * cfg.y;
-            });
-            if (sumW <= 0) return null;
-            return { x: sumX / sumW, y: sumY / sumW, weight: sumW };
+        // Reference axle POINT that every Level 2/3 target move (X, Y) is
+        // measured from/to — this is the FIRST axle row read from Excel,
+        // i.e. Load_Editor cell E124 (X, measured from 0,0) and F124 (Y,
+        // measured from the centerline), AXLE_START_ROW below. It is
+        // deliberately NOT an average/centroid of the whole axle group:
+        // a typed target of x=10, y=2 means "move this specific reference
+        // axle (E124/F124) to x=10 from 0,0 and y=2 from the centerline",
+        // and the rest of the (rigid) axle group is translated by the
+        // same delta so the whole group keeps its real, Excel-defined
+        // shape — same methodology used for both the 2D and 3D ghost
+        // footprint below.
+        function getTrailerReferenceAxlePoint() {
+            if (!trailerAxles.length) return { x: 0, y: 0 };
+            return { x: trailerAxles[0].x, y: trailerAxles[0].y };
         }
+        // Back-compat alias — keep old name working for any other callers.
+        const getTrailerReferenceCentroid = getTrailerReferenceAxlePoint;
 
-        // The CoG "sign" anchor point: the current, actual system CoG.
-        // Prefers the Excel-linked value (Load_Editor!P31:R31 = LCG/TCG/
-        // VCG — the workbook's own solved CoG) since that's the source of
-        // truth; falls back to the ballast-tank weighted centroid
-        // (computeBaseTankCoG) if Excel hasn't supplied a value yet (e.g.
-        // demo/mock mode, or before the first sync). The "weight" carried
-        // on the returned point is always the ballast-tank weight-aboard
-        // total — it's only used to weight this anchor against a trailer
-        // move's centroid in computeSystemCoG() below, never displayed.
-        function computeCurrentSystemCoG() {
-            const tankBase = computeBaseTankCoG();
-            if (!excelCoG && !tankBase) return null;
-            const weight = tankBase ? tankBase.weight : 0;
-            if (excelCoG) {
-                return { x: excelCoG.x, y: excelCoG.y, z: excelCoG.z || 0, weight, lcg: excelCoG.x, tcg: excelCoG.y, vcg: excelCoG.z || 0 };
-            }
-            return { x: tankBase.x, y: tankBase.y, z: 0, weight: tankBase.weight };
-        }
-
-        // Combines the current system CoG (computeCurrentSystemCoG — Excel
-        // LCG/TCG/VCG when available) with one optional extra weighted
-        // point (e.g. the trailer/SPMT group sitting at a given x,y with
-        // its own weight) into a single system centroid. This is how the
-        // Level 2/3 "current step" and "target step" CoG points are built:
-        // current system CoG + that step's trailer centroid.
-        function computeSystemCoG(extraPoint) {
-            const base = computeCurrentSystemCoG();
-            let sumW = base ? base.weight : 0;
-            let sumX = base ? base.weight * base.x : 0;
-            let sumY = base ? base.weight * base.y : 0;
-            let sumZ = base ? base.weight * (base.z || 0) : 0;
-            if (extraPoint && (extraPoint.weight || 0) > 0) {
-                sumW += extraPoint.weight;
-                sumX += extraPoint.weight * extraPoint.x;
-                sumY += extraPoint.weight * extraPoint.y;
-                // No known VCG for the trailer/SPMT group — approximate it
-                // at the current system's own VCG (deck-level cargo, so
-                // this is a small, acceptable approximation) rather than
-                // pulling the blended VCG toward zero.
-                sumZ += extraPoint.weight * (base ? (base.z || 0) : 0);
-            }
-            if (sumW <= 0) return null;
-            return { x: sumX / sumW, y: sumY / sumW, z: sumZ / sumW, weight: sumW };
-        }
-
-        // Builds the full CoG picture for the CURRENT trailer prediction
-        // level:
-        //   - `base`  : the current system CoG — Load_Editor!P31/Q31/R31
-        //               (LCG/TCG/VCG) straight from Excel when available
-        //               (see computeCurrentSystemCoG), else the ballast-
-        //               tank weighted centroid. Always shown as the plain
-        //               "CoG" sign, regardless of level.
-        //   - `steps` : [] at Level 1 (no trailer projection). At Level 2,
-        //               exactly two points — CoG current (base) + the
-        //               trailer's CURRENT centroid, then CoG current
-        //               (base) + its Level 2 TARGET centroid. At Level 3,
-        //               one point per planned move — CoG current (base) +
-        //               the trailer's current centroid first, then CoG
-        //               current (base) + every target centroid in the full
-        //               sequence table, in order — so the path traces the
-        //               CoG through the whole plan.
-        // steps are returned in path order so callers can just connect
-        // them point-to-point.
-        function getCoGPathSteps() {
-            const base = computeCurrentSystemCoG();
-            const steps = [];
-            if (!base) return { base, steps };
-
-            if (trailerPredictionLevel === 2) {
-                if (!nextTrailerMove || !((nextTrailerMove.weightT || 0) > 0)) return { base, steps };
-                const ref = getTrailerReferenceCentroid();
-                const cur = computeSystemCoG({ x: ref.x, y: ref.y, weight: nextTrailerMove.weightT });
-                const tgt = computeSystemCoG({ x: nextTrailerMove.x, y: nextTrailerMove.y, weight: nextTrailerMove.weightT });
-                if (cur) steps.push({ x: cur.x, y: cur.y, weight: cur.weight, label: 'Current' });
-                if (tgt) steps.push({ x: tgt.x, y: tgt.y, weight: tgt.weight, label: 'Target' });
-                return { base, steps };
-            }
-
-            if (trailerPredictionLevel === 3) {
-                const seq = trailerMoveSequence.filter(m => m && (m.weightT || 0) > 0);
-                if (!seq.length) return { base, steps };
-                const ref = getTrailerReferenceCentroid();
-                const cur = computeSystemCoG({ x: ref.x, y: ref.y, weight: seq[0].weightT });
-                if (cur) steps.push({ x: cur.x, y: cur.y, weight: cur.weight, label: 'Current' });
-                seq.forEach((m, i) => {
-                    const pt = computeSystemCoG({ x: m.x, y: m.y, weight: m.weightT });
-                    if (pt) steps.push({ x: pt.x, y: pt.y, weight: pt.weight, label: `Target ${i + 1}` });
-                });
-                return { base, steps };
-            }
-
-            return { base, steps };
+        // Translates the CURRENT rigid axle set by (move.x,move.y) minus
+        // the reference axle point (E124/F124), producing the predicted
+        // future axle footprint as a set of points — not one ambiguous
+        // point. Falls back to treating the move itself as a single point
+        // only if no axle geometry is available yet (e.g. before the
+        // first Excel sync).
+        function getPredictedAxleFootprint(move) {
+            if (!move) return [];
+            if (!trailerAxles.length) return [{ x: move.x || 0, y: move.y || 0 }];
+            const ref = getTrailerReferenceAxlePoint();
+            const deltaX = (move.x || 0) - ref.x;
+            const deltaY = (move.y || 0) - ref.y;
+            return trailerAxles.map(a => ({ x: a.x + deltaX, y: a.y + deltaY }));
         }
 
         // Per-tank {maxCut, minRaise} capacity-fraction adjustment driven
         // by every anticipated move (see class doc above for the logic).
-        // Uses the REAL predicted axle footprint's side/end fractions
-        // (continuous 0..1), not a single point's binary side — so a
-        // straddling trailer group naturally produces ~0 side bias.
         function getFutureReserveAdjustment(cfg) {
             const moves = getAnticipatedTrailerMoves().filter(m => m && (m.weightT || 0) > 0);
             if (!cfg || !moves.length) return { maxCut: 0, minRaise: 0 };
@@ -1642,24 +1516,11 @@
 
             let maxCut = 0, minRaise = 0;
             moves.forEach(m => {
-                const footprint = getPredictedAxleFootprint(m);
-                if (!footprint.length) return;
-
-                // Fraction of the predicted footprint on THIS tank's side
-                // / end. 0.5 = footprint straddles evenly = neutral.
-                const psFraction = footprint.filter(a => a.y >= 0).length / footprint.length;
-                const fwdFraction = footprint.filter(a => a.x >= midX).length / footprint.length;
-                const sideFraction = isPS ? psFraction : (1 - psFraction);
-                const endFraction = isFwd ? fwdFraction : (1 - fwdFraction);
-
-                // Combine both axes (0..1, 0.5 = fully neutral on both),
-                // then rescale around that neutral midpoint so a fully
-                // straddling / dead-center footprint contributes exactly
-                // zero to either maxCut or minRaise — no manual deadband.
-                const matchStrength = (sideFraction + endFraction) / 2;
-                const strength = Math.max(0, (matchStrength - 0.5) * 2);        // 0 at neutral, 1 at fully same side+end
-                const counterStrength = Math.max(0, (0.5 - matchStrength) * 2); // 0 at neutral, 1 at fully opposite side+end
-
+                const loadIsPS = m.y >= 0;
+                const loadIsFwd = m.x >= midX;
+                const matchAxes = (loadIsPS === isPS ? 1 : 0) + (loadIsFwd === isFwd ? 1 : 0); // 0, 1, or 2
+                const strength = matchAxes === 2 ? 1 : matchAxes === 1 ? AB_FUTURE_RESERVE_BIAS_FACTOR : 0;
+                const counterStrength = matchAxes === 0 ? 1 : matchAxes === 1 ? AB_FUTURE_RESERVE_BIAS_FACTOR : 0;
                 minRaise += AB_FUTURE_RESERVE_PCT_PER_MOVE * strength;
                 maxCut += AB_FUTURE_RESERVE_PCT_PER_MOVE * counterStrength;
             });
@@ -2470,11 +2331,10 @@
         //     GHOST target footprint(s) + move arrow(s): at Level 2/3,
         //     also draws a dashed/translucent copy of this same footprint
         //     shape at each anticipated move's target centroid (orange,
-        //     to stay visually distinct from the CoG sign's gold/blue/
-        //     red), chained by arrows from the current group centroid
-        //     through each target in order — so a typed target X/Y is
-        //     immediately, visibly confirmed on the plan, not just as a
-        //     number in an input box.
+        //     to stay visually distinct from the real axle's amber), chained
+        //     by arrows from the current group centroid through each
+        //     target in order — so a typed target X/Y is immediately,
+        //     visibly confirmed on the plan, not just a number in a box.
         // ============================================================
         function drawAxleOverlay() {
             const wrap = document.getElementById('tankGridWrap');
@@ -2594,10 +2454,16 @@
             if (trailerPredictionLevel > 1 && trailerAxles.length) {
                 const moves = getAnticipatedTrailerMoves().filter(m => m && (m.x !== 0 || m.y !== 0 || (m.weightT || 0) > 0));
                 if (moves.length) {
-                    const ghostColor = '#f97316'; // orange — distinct from the CoG sign's gold/blue/red
+                    const ghostColor = '#f97316'; // orange — distinct from the real axle's amber
                     const ghostFill = isLight ? 'rgba(249,115,22,0.12)' : 'rgba(249,115,22,0.18)';
-                    let fromPt = getTrailerReferenceCentroid();
+                    let fromPt = getTrailerReferenceAxlePoint();
                     moves.forEach((m, i) => {
+                        // Per-step ghost show/hide toggle — still advances
+                        // fromPt so the arrow chain stays geometrically
+                        // correct for the next VISIBLE step, it just skips
+                        // drawing this step's own footprint/arrow/label.
+                        if (m.showGhost === false) { fromPt = { x: m.x, y: m.y }; return; }
+
                         const footprint = getPredictedAxleFootprint(m);
                         footprint.forEach((pt) => {
                             const p = worldToScreen(pt.x, pt.y);
@@ -2621,124 +2487,15 @@
             }
         }
 
-        // ============================================================
-        // CoG OVERLAY (2D plan) — draws the ballast CoG "sign" (a small
-        // crosshair-in-circle) at all times, plus, when a trailer
-        // prediction level above 1 is active, the current-step / target
-        // step(s) CoG points and the dashed path line connecting them
-        // (getCoGPathSteps() — see its comment for exactly what each
-        // level shows). Uses the SAME worldToScreen() mapping as the
-        // tanks and the axle overlay, so everything stays pixel-aligned.
-        // ============================================================
-        function drawCoGOverlay() {
-            const wrap = document.getElementById('tankGridWrap');
-            const gridEl = document.getElementById('tankContainer');
-            const canvas = document.getElementById('cogOverlayCanvas');
-            if (!wrap || !gridEl || !canvas) return;
-
-            const rect = gridEl.getBoundingClientRect();
-            const wrapRect = wrap.getBoundingClientRect();
-            const cssW = rect.width;
-            const cssH = rect.height;
-            if (cssW === 0 || cssH === 0) return; // not laid out yet (e.g. hidden tab)
-
-            const dpr = window.devicePixelRatio || 1;
-            canvas.style.width = cssW + 'px';
-            canvas.style.height = cssH + 'px';
-            canvas.style.left = (rect.left - wrapRect.left) + 'px';
-            canvas.style.top = (rect.top - wrapRect.top) + 'px';
-            canvas.width = cssW * dpr;
-            canvas.height = cssH * dpr;
-
-            const ctx = canvas.getContext('2d');
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.clearRect(0, 0, cssW, cssH);
-
-            if (!TANK_CONFIG.length) return; // no geometry loaded yet
-
-            const { base, steps } = getCoGPathSteps();
-            if (!base && !steps.length) return;
-
-            const isLight = document.body.classList.contains('light-theme');
-            const baseColor = isLight ? '#b45309' : '#facc15';   // amber/gold — ballast-only CoG
-            const curColor = isLight ? '#0284c7' : '#38bdf8';    // blue — current step
-            const tgtColor = '#ef4444';                          // red — target step(s)
-            const pathColor = isLight ? '#0284c7' : '#38bdf8';
-
-            // Path line first (so markers draw on top of it), connecting
-            // every step in order — one segment for Level 2 (current ->
-            // target), a full poly-line for Level 3 (current -> target 1
-            // -> target 2 -> ...).
-            if (steps.length >= 2) {
-                ctx.save();
-                ctx.strokeStyle = pathColor;
-                ctx.lineWidth = 2;
-                ctx.setLineDash([6, 4]);
-                ctx.beginPath();
-                steps.forEach((s, i) => {
-                    const p = worldToScreen(s.x, s.y);
-                    if (i === 0) ctx.moveTo(p.sx, p.sy); else ctx.lineTo(p.sx, p.sy);
-                });
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // Small crosshair-in-circle "CoG sign", with an optional text
-            // label (and optional smaller sub-label, e.g. LCG/TCG/VCG
-            // values) floated just above it.
-            function drawCoGMarker(x, y, color, label, radius, subLabel) {
-                const p = worldToScreen(x, y);
-                const r = radius || 8;
-                ctx.save();
-                ctx.strokeStyle = color;
-                ctx.fillStyle = color;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(p.sx - r - 3, p.sy); ctx.lineTo(p.sx + r + 3, p.sy);
-                ctx.moveTo(p.sx, p.sy - r - 3); ctx.lineTo(p.sx, p.sy + r + 3);
-                ctx.stroke();
-                if (label) {
-                    ctx.font = 'bold 10px Calibri, sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(label, p.sx, p.sy - r - 6);
-                }
-                if (subLabel) {
-                    ctx.font = '9px Calibri, sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(subLabel, p.sx, p.sy - r - 18);
-                }
-                ctx.restore();
-            }
-
-            // Current system CoG — Load_Editor!P31:R31 (LCG/TCG/VCG) when
-            // available, else the ballast-tank weighted centroid. Always
-            // shown when there's weight aboard, regardless of level.
-            if (base) {
-                const subLabel = (base.lcg !== undefined)
-                    ? `LCG ${base.lcg.toFixed(2)} / TCG ${base.tcg.toFixed(2)} / VCG ${base.vcg.toFixed(2)}`
-                    : null;
-                drawCoGMarker(base.x, base.y, baseColor, 'CoG', 8, subLabel);
-            }
-
-            // Trailer-projected step CoGs (Level 2/3 only — empty otherwise).
-            steps.forEach((s, i) => {
-                drawCoGMarker(s.x, s.y, i === 0 ? curColor : tgtColor, s.label, 6);
-            });
-        }
-
         function refreshPlanView() {
             drawAxleOverlay();
-            drawCoGOverlay();
             // Re-measure one frame later too, in case fonts/scrollbars shift
             // the grid's rendered box right after the initial paint.
-            requestAnimationFrame(() => { drawAxleOverlay(); drawCoGOverlay(); });
+            requestAnimationFrame(() => drawAxleOverlay());
         }
 
         // Recompute overlay alignment whenever the layout reflows
-        window.addEventListener('resize', () => { drawAxleOverlay(); drawCoGOverlay(); });
+        window.addEventListener('resize', () => drawAxleOverlay());
 
         // ============================================================
         // 5. EXCEL SYNC (with custom tank mapping + trailer axles)
@@ -2772,16 +2529,6 @@
                     // 6 barge corner/edge labels: Load_Editor!I1:I6
                     const rangeCornerLabels = editorSheet.getRange("I1:I6");
                     rangeCornerLabels.load("values");
-
-                    // Current system CoG: Load_Editor!P31 (LCG), Q31 (TCG),
-                    // R31 (VCG) — the workbook's own solved center of
-                    // gravity, used as the "CoG sign" anchor on both the
-                    // 2D plan and the 3D scene.
-                    let rangeCoG = null;
-                    try {
-                        rangeCoG = editorSheet.getRange("P31:R31");
-                        rangeCoG.load("values");
-                    } catch (e) { /* cells not found — CoG sign falls back to computed tank centroid */ }
 
                     // Trailer axle X/Y block: E124:F(124+N) — these (x,y)
                     // pairs remain the CENTER of each axle GROUP (the two
@@ -2826,22 +2573,6 @@
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
                     updateCurrentDeckFromLabels();
-
-                    // Load_Editor!P31:R31 -> LCG/TCG/VCG (world X/Y/Z for
-                    // the CoG sign). Only accepted if all three parse as
-                    // real numbers; otherwise leave excelCoG as-is (last
-                    // known good value, or null -> tank-centroid fallback).
-                    if (rangeCoG) {
-                        const [rawLCG, rawTCG, rawVCG] = rangeCoG.values[0];
-                        const lcg = parseFloat(rawLCG), tcg = parseFloat(rawTCG), vcg = parseFloat(rawVCG);
-                        if (!isNaN(lcg) && !isNaN(tcg) && !isNaN(vcg)) {
-                            excelCoG = { x: lcg, y: tcg, z: vcg };
-                        } else {
-                            excelCoG = null;
-                        }
-                    } else {
-                        excelCoG = null;
-                    }
 
                     if (rangeTargets) {
                         const tv = rangeTargets.values; // rows P1..P9 → indices 0..8
@@ -2988,7 +2719,6 @@
                     trailerPredictionLevel: trailerPredictionLevel,
                     nextTrailerMove: nextTrailerMove,
                     trailerMoveSequence: trailerMoveSequence,
-                    excelCoG: excelCoG,
                     updatedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -3063,12 +2793,11 @@
                 if (typeof data.abTrimWeight === 'number') abTrimWeight = data.abTrimWeight;
                 if (data.abDeckWeights) abDeckWeights = Object.assign({}, abDeckWeights, data.abDeckWeights);
                 if (typeof data.trailerPredictionLevel === 'number') trailerPredictionLevel = data.trailerPredictionLevel;
-                if (data.nextTrailerMove) nextTrailerMove = Object.assign({ x: 0, y: 0, weightT: 0 }, data.nextTrailerMove);
-                if (Array.isArray(data.trailerMoveSequence)) trailerMoveSequence = data.trailerMoveSequence;
-                if (data.excelCoG && typeof data.excelCoG.x === 'number' && typeof data.excelCoG.y === 'number') {
-                    excelCoG = data.excelCoG;
-                } else if (data.excelCoG === null) {
-                    excelCoG = null;
+                if (data.nextTrailerMove) nextTrailerMove = Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, data.nextTrailerMove);
+                if (Array.isArray(data.trailerMoveSequence)) {
+                    // showGhost defaults to true for steps synced from an
+                    // older snapshot that predates the ghost toggle.
+                    trailerMoveSequence = data.trailerMoveSequence.map(m => Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, m));
                 }
                 if (typeof syncTrailerLevelUI === 'function') syncTrailerLevelUI();
                 if (typeof data.showTrailer === 'boolean') {
@@ -3218,11 +2947,6 @@
             currentTrimDegrees = 2.8;
             currentHeelDegrees = -1.9;
 
-            // Demo CoG (stands in for Load_Editor!P31:R31 = LCG/TCG/VCG)
-            // — roughly midship, a touch off centerline, matching the
-            // mock trim/heel above.
-            excelCoG = { x: 56.5, y: -0.8, z: 5.2 };
-
             // Mock trailer axle layout: a typical multi-axle trailer footprint
             // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
             // Each (x,y) here is the CENTER of an axle GROUP (the two
@@ -3293,7 +3017,6 @@
                 tankRecord.percent = targetPct;
             }
             update3DFillAndAttitude();
-            if (typeof drawCoGOverlay === 'function') drawCoGOverlay();
 
             if (!isOfficeInitialized) return;
             try {
@@ -3667,7 +3390,6 @@
             renderDeckWeightInputs();
             syncPriorityWeightFields();
             syncTrailerMoveFields();
-            updateTrailerReferenceLabel();
             updateFutureReserveSummary();
         }
 
@@ -3751,7 +3473,7 @@
                         : 'full planned sequence (Phase 5)';
             logAutoBallast(`🚛 Trailer prediction set to Level ${level} — ${label}.`);
             refreshPlanView();       // re-badge tank cards with 🔮 as needed
-            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3763,34 +3485,17 @@
             document.querySelectorAll('.ab-level-btn').forEach(b => {
                 b.classList.toggle('ab-level-active', parseInt(b.dataset.level, 10) === trailerPredictionLevel);
             });
-            const refRow = document.getElementById('abTrailerRefRow');
-            if (refRow) refRow.style.display = (trailerPredictionLevel !== 1) ? '' : 'none';
             const lvl2 = document.getElementById('abLevel2Panel');
             if (lvl2) lvl2.style.display = (trailerPredictionLevel === 2) ? '' : 'none';
             const lvl3 = document.getElementById('abLevel3Panel');
             if (lvl3) lvl3.style.display = (trailerPredictionLevel === 3) ? '' : 'none';
             if (trailerPredictionLevel === 3) renderTrailerSequenceTable();
-            updateTrailerReferenceLabel();
-        }
-
-        // Shows the CURRENT axle group's centroid — the auto-computed
-        // origin every Level 2/3 target is measured from — so the
-        // operator never has to guess it. Updates live as trailerAxles
-        // refreshes from Excel.
-        function updateTrailerReferenceLabel() {
-            const el = document.getElementById('abTrailerRefLabel');
-            if (!el) return;
-            const ref = getTrailerReferenceCentroid();
-            const n = trailerAxles.length;
-            el.textContent = n
-                ? `Current group centroid: X=${ref.x.toFixed(1)}, Y=${ref.y.toFixed(1)} (auto, from ${n} axle group${n === 1 ? '' : 's'})`
-                : `Current group centroid: unavailable — no axle geometry loaded yet`;
         }
 
         function updateNextTrailerMove(field, value) {
             nextTrailerMove[field] = parseFloat(value) || 0;
             refreshPlanView();
-            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3804,13 +3509,15 @@
             if (yIn && document.activeElement !== yIn) yIn.value = nextTrailerMove.y || '';
             const wIn = document.getElementById('abNextMoveW');
             if (wIn && document.activeElement !== wIn) wIn.value = nextTrailerMove.weightT || '';
+            const ghostBtn = document.getElementById('abNextMoveGhostBtn');
+            if (ghostBtn) ghostBtn.classList.toggle('ab-ghost-off', nextTrailerMove.showGhost === false);
         }
 
         function addTrailerSequenceStep() {
-            trailerMoveSequence.push({ x: 0, y: 0, weightT: 0 });
+            trailerMoveSequence.push({ x: 0, y: 0, weightT: 0, showGhost: true });
             renderTrailerSequenceTable();
             refreshPlanView();
-            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3818,7 +3525,7 @@
             trailerMoveSequence.splice(idx, 1);
             renderTrailerSequenceTable();
             refreshPlanView();
-            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
             refreshAutoBallastUI();
         }
 
@@ -3826,8 +3533,33 @@
             if (!trailerMoveSequence[idx]) return;
             trailerMoveSequence[idx][field] = parseFloat(value) || 0;
             refreshPlanView();
-            if (typeof updateCoGVisualization3D === 'function') updateCoGVisualization3D();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
             refreshAutoBallastUI();
+        }
+
+        // ---- Ghost show/hide toggles ----
+        // Level 2 has a single anticipated move, so one toggle button
+        // controls its ghost footprint/arrow in both the 2D and 3D views.
+        function toggleNextMoveGhost() {
+            nextTrailerMove.showGhost = !(nextTrailerMove.showGhost !== false);
+            const btn = document.getElementById('abNextMoveGhostBtn');
+            if (btn) btn.classList.toggle('ab-ghost-off', nextTrailerMove.showGhost === false);
+            refreshPlanView();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
+        }
+
+        // Level 3 — each row in the sequence gets its own independent
+        // ghost toggle, so a long planned sequence can be decluttered by
+        // hiding steps the operator isn't currently focused on, without
+        // removing them from the sequence (and without affecting the
+        // future-reserve calculation, which still accounts for every step).
+        function toggleTrailerSequenceGhost(idx) {
+            if (!trailerMoveSequence[idx]) return;
+            const m = trailerMoveSequence[idx];
+            m.showGhost = !(m.showGhost !== false);
+            renderTrailerSequenceTable();
+            refreshPlanView();
+            if (typeof updateTrailerGhostVisualization3D === 'function') updateTrailerGhostVisualization3D();
         }
 
         // Full rebuild (not sync-in-place) — acceptable here because rows
@@ -3837,15 +3569,22 @@
         function renderTrailerSequenceTable() {
             const wrap = document.getElementById('abLevel3Table');
             if (!wrap) return;
-            const rows = trailerMoveSequence.map((m, i) => `
+            // Same box style/order as the Level 2 panel: step label, then
+            // X / Y / weight ab-weight-input boxes with matching
+            // placeholders, then the per-step ghost toggle, then remove.
+            const rows = trailerMoveSequence.map((m, i) => {
+                const ghostOn = m.showGhost !== false;
+                return `
                 <div class="ab-seq-row">
                     <span class="ab-seq-step">#${i + 1}</span>
-                    <input type="number" step="any" class="ab-weight-input" value="${m.x}" title="Target centroid X, m from AFT (whole rigid axle group translates here)" onchange="updateTrailerSequenceStep(${i}, 'x', this.value)">
-                    <input type="number" step="any" class="ab-weight-input" value="${m.y}" title="Target centroid Y, m (+PS/-SB, 0 = straddling centerline)" onchange="updateTrailerSequenceStep(${i}, 'y', this.value)">
-                    <input type="number" step="any" min="0" class="ab-weight-input" value="${m.weightT}" title="Trailer/SPMT group weight, t" onchange="updateTrailerSequenceStep(${i}, 'weightT', this.value)">
+                    <input type="number" step="any" class="ab-weight-input" value="${m.x}" placeholder="X (m)" title="Target X — meters from 0,0 to the reference axle (Load_Editor E124)" onchange="updateTrailerSequenceStep(${i}, 'x', this.value)">
+                    <input type="number" step="any" class="ab-weight-input" value="${m.y}" placeholder="Y (m)" title="Target Y — meters from 0,0 to the reference axle (Load_Editor F124), + = PS, - = SB" onchange="updateTrailerSequenceStep(${i}, 'y', this.value)">
+                    <input type="number" step="any" min="0" class="ab-weight-input" value="${m.weightT}" placeholder="t" title="Trailer weight, t" onchange="updateTrailerSequenceStep(${i}, 'weightT', this.value)">
+                    <button class="ab-ghost-toggle${ghostOn ? '' : ' ab-ghost-off'}" onclick="toggleTrailerSequenceGhost(${i})" title="Show/hide this step's ghost footprint in the 2D/3D views">👻</button>
                     <button class="ab-seq-remove" onclick="removeTrailerSequenceStep(${i})" title="Remove step">✕</button>
                 </div>
-            `).join('');
+            `;
+            }).join('');
             wrap.innerHTML = rows + `<button class="ab-btn ab-seq-add" onclick="addTrailerSequenceStep()">+ Add step</button>`;
         }
 
@@ -3959,7 +3698,7 @@
             const checked = document.getElementById('trailerToggleCheckbox').checked;
             showTrailer = checked;
             drawAxleOverlay();  // immediately show/hide (2D)
-            if (typeof set3DAxlesVisible === 'function') set3DAxlesVisible(checked); // (3D)
+            if (typeof set3DAxlesVisible === 'function') set3DAxlesVisible(checked); // (3D, incl. ghost group)
         }
 
         // ============================================================
@@ -4046,13 +3785,6 @@
         const BARGE_QUAY_GAP_M = 1.2;    // real gap between barge leading edge and quay
         const QUAY_SLAB_THICKNESS_M = 0.4;
         const TANK_FOOTPRINT_GAP_M = 0.12; // real gap between adjacent tank footprints (visual daylight)
-        // Deck top height (Y, world-up), mirrors rebuild3DGeometry()'s
-        // local TANK_TOP_Y(0) + TANK_DECK_GAP_M + DECK_THICKNESS_M chain —
-        // kept as a named constant here so the CoG marker (and anything
-        // else placed "on deck") doesn't need rebuild3DGeometry() to run
-        // first to know where the deck surface sits.
-        const DECK_TOP_Y_M = TANK_DECK_GAP_M + DECK_THICKNESS_M;
-        const COG_MARKER_LIFT_Y_M = 0.7; // CoG markers float just above the deck, clear of axle boxes
 
         // Real-world Y (PS = positive, SB = negative, matching the 2D
         // plan's worldToScreen convention) does NOT map directly onto
@@ -4162,6 +3894,96 @@
         // checkbox that toggles the 2D axle overlay (see toggleTrailerOverlay).
         function set3DAxlesVisible(visible) {
             axleGroups3d.forEach(g => { g.visible = visible; });
+            if (trailerGhostGroup3d) trailerGhostGroup3d.visible = visible;
+        }
+
+        // ---- TRAILER GHOST TARGET FOOTPRINT + MOVE ARROW(S) (3D) --------
+        // Mirrors the 2D overlay's ghost/arrow: at Level 2/3, a
+        // translucent + wireframe orange copy of the real axle-group
+        // shape at each anticipated move's target centroid, chained by
+        // THREE.ArrowHelper arrows from the current group centroid
+        // through each target in order. Kept as its OWN small persistent
+        // group (not folded into axleGroups3d) so it can be cheaply
+        // cleared/rebuilt on every X/Y/weight edit without touching the
+        // real axle meshes or triggering a full rebuild3DGeometry().
+        // Parented to hull3dGroup so it tilts/translates with trim/heel
+        // exactly like the real axles and tanks.
+        let trailerGhostGroup3d = null;
+
+        function clearTrailerGhostGroup3D() {
+            if (trailerGhostGroup3d) {
+                if (trailerGhostGroup3d.parent) trailerGhostGroup3d.parent.remove(trailerGhostGroup3d);
+                disposeMeshDeep(trailerGhostGroup3d);
+                trailerGhostGroup3d = null;
+            }
+        }
+
+        function updateTrailerGhostVisualization3D() {
+            clearTrailerGhostGroup3D();
+            if (!hull3dGroup || !TANK_CONFIG.length || !trailerAxles.length) return;
+            if (trailerPredictionLevel <= 1) return;
+
+            // Same "blank/untouched row" skip as the 2D overlay.
+            const moves = getAnticipatedTrailerMoves().filter(m => m && (m.x !== 0 || m.y !== 0 || (m.weightT || 0) > 0));
+            if (!moves.length) return;
+
+            trailerGhostGroup3d = new THREE.Group();
+
+            const DECK_TOP_Y_M = TANK_DECK_GAP_M + DECK_THICKNESS_M; // 0 (TANK_TOP_Y) + gap + deck plate
+            const halfPairOffset = AXLE_PAIR_SPACING_Y / 2;
+            const boxHeight3d = EACH_AXLE_BOX.z * 0.85; // same scale-down the real axle boxes use
+            const ghostY = DECK_TOP_Y_M + boxHeight3d / 2;
+            const ghostColor = 0xf97316; // orange — distinct from the real axle's amber (AXLE_STYLE_3D)
+
+            let fromPt = getTrailerReferenceAxlePoint();
+            moves.forEach((m) => {
+                // Per-step ghost show/hide toggle — mirrors the 2D
+                // overlay: still advances fromPt for the next visible
+                // step's arrow, just skips this step's own mesh/arrow.
+                if (m.showGhost === false) { fromPt = { x: m.x, y: m.y }; return; }
+
+                const footprint = getPredictedAxleFootprint(m);
+                footprint.forEach((pt) => {
+                    [-halfPairOffset, halfPairOffset].forEach((offsetZ) => {
+                        const ghostBox = new THREE.Mesh(
+                            new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
+                            new THREE.MeshPhongMaterial({ color: ghostColor, transparent: true, opacity: 0.35 })
+                        );
+                        ghostBox.position.set(pt.x, ghostY, worldYToZ3D(pt.y) + offsetZ);
+                        trailerGhostGroup3d.add(ghostBox);
+
+                        // Wireframe outline on top, so the ghost footprint
+                        // still reads clearly even at low fill opacity.
+                        const wireBox = new THREE.Mesh(
+                            new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
+                            new THREE.MeshBasicMaterial({ color: ghostColor, wireframe: true, transparent: true, opacity: 0.7 })
+                        );
+                        wireBox.position.copy(ghostBox.position);
+                        trailerGhostGroup3d.add(wireBox);
+                    });
+                });
+
+                // Arrow from the previous point (current group centroid,
+                // or the prior step's target) to this move's target
+                // centroid, floating at the ghost footprint's height.
+                const p1 = new THREE.Vector3(fromPt.x, ghostY, worldYToZ3D(fromPt.y));
+                const p2 = new THREE.Vector3(m.x, ghostY, worldYToZ3D(m.y));
+                const seg = new THREE.Vector3().subVectors(p2, p1);
+                const dist = seg.length();
+                if (dist > 0.01) {
+                    const arrow = new THREE.ArrowHelper(
+                        seg.clone().normalize(), p1, dist, ghostColor,
+                        Math.min(2, dist * 0.25), Math.min(1, dist * 0.15)
+                    );
+                    trailerGhostGroup3d.add(arrow);
+                }
+
+                fromPt = { x: m.x, y: m.y };
+            });
+
+            const trailerToggleEl = document.getElementById('trailerToggleCheckbox');
+            trailerGhostGroup3d.visible = trailerToggleEl ? trailerToggleEl.checked : true;
+            hull3dGroup.add(trailerGhostGroup3d);
         }
 
         function init3DScene() {
@@ -4387,6 +4209,11 @@
             });
             quayMeshes3d = [];
             deckPlate3d = null;
+            // hull3dGroup.children was just wiped wholesale above, which
+            // also removed/disposed the ghost group if it was present —
+            // null the reference too so clearTrailerGhostGroup3D() doesn't
+            // later try to touch an already-disposed object.
+            trailerGhostGroup3d = null;
         }
 
         // Rebuilds the entire 3D scene from the CURRENT TANK_CONFIG,
@@ -4565,6 +4392,11 @@
             quaySlab.position.set(quayXStart + quayLen / 2, QUAY_TOP_Y - QUAY_SLAB_THICKNESS_M / 2, 0);
             world3dGroup.add(quaySlab);
             quayMeshes3d.push(quaySlab);
+
+            // Ghost target footprint(s) + move arrow(s) — rebuilt fresh
+            // here too, since clear3DGeometry() above just wiped any
+            // previous instance along with everything else.
+            updateTrailerGhostVisualization3D();
         }
 
         // Updates ONLY fill heights + hull rotation — cheap, safe to call
@@ -4591,131 +4423,6 @@
             // Tank %-fill labels (text overlay) track live percent every
             // refresh, same cadence as the ballast mesh height update.
             renderLabels3D();
-            // CoG sign (+ Level 2/3 step path) — cheap enough to rebuild
-            // every call, same cadence as the fill/attitude update above.
-            updateCoGVisualization3D();
-        }
-
-        // ---- CoG OVERLAY (3D scene) -------------------------------------
-        // Persistent group of small spheres (+ a dashed path line) parented
-        // INSIDE hull3dGroup so they tilt/translate together with the hull,
-        // exactly like the axle groups and tank meshes. Rebuilt (cheaply —
-        // a handful of spheres, no textures) on every update3DFillAndAttitude()
-        // call, since it's driven by the same getCoGPathSteps() the 2D
-        // overlay uses and needs to track weight/target edits live.
-        // Also carries the Level 2/3 GHOST target axle footprint(s) +
-        // THREE.ArrowHelper move arrow(s) — same idea as the 2D overlay's
-        // ghost/arrow, just parented here since it shares the exact same
-        // rebuild-on-every-edit lifecycle.
-        let cogGroup3d = null;
-
-        function clearCoGGroup3D() {
-            if (cogGroup3d) {
-                if (cogGroup3d.parent) cogGroup3d.parent.remove(cogGroup3d);
-                disposeMeshDeep(cogGroup3d);
-                cogGroup3d = null;
-            }
-        }
-
-        function makeCoGSphere3D(color, radius) {
-            return new THREE.Mesh(
-                new THREE.SphereGeometry(radius, 16, 12),
-                new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.35 })
-            );
-        }
-
-        function updateCoGVisualization3D() {
-            clearCoGGroup3D();
-            if (!hull3dGroup || !TANK_CONFIG.length) return;
-
-            const { base, steps } = getCoGPathSteps();
-            if (!base && !steps.length) return;
-
-            cogGroup3d = new THREE.Group();
-            const cogY = DECK_TOP_Y_M + COG_MARKER_LIFT_Y_M;
-
-            // Ballast-only CoG "sign" — gold sphere, always shown when
-            // there's weight aboard, independent of trailer prediction level.
-            if (base) {
-                const sphere = makeCoGSphere3D(0xfacc15, 0.6);
-                sphere.position.set(base.x, cogY, worldYToZ3D(base.y));
-                cogGroup3d.add(sphere);
-            }
-
-            // Level 2/3 step markers — blue = current step, red = each
-            // target step — plus a dashed path line connecting them in
-            // order (one segment at Level 2, a full poly-line at Level 3).
-            if (steps.length) {
-                steps.forEach((s, i) => {
-                    const sphere = makeCoGSphere3D(i === 0 ? 0x38bdf8 : 0xef4444, 0.5);
-                    sphere.position.set(s.x, cogY, worldYToZ3D(s.y));
-                    cogGroup3d.add(sphere);
-                });
-
-                if (steps.length >= 2) {
-                    const pts = steps.map(s => new THREE.Vector3(s.x, cogY, worldYToZ3D(s.y)));
-                    const geo = new THREE.BufferGeometry().setFromPoints(pts);
-                    const mat = new THREE.LineDashedMaterial({ color: 0x38bdf8, dashSize: 1.2, gapSize: 0.7, linewidth: 2 });
-                    const line = new THREE.Line(geo, mat);
-                    line.computeLineDistances();
-                    cogGroup3d.add(line);
-                }
-            }
-
-            // ---- GHOST target axle footprint(s) + move arrow(s) — Level
-            // 2/3 only. Mirrors the 2D overlay's ghost/arrow: a
-            // translucent/orange copy of the real axle-group shape at
-            // each anticipated move's target centroid, chained by
-            // THREE.ArrowHelper arrows from the current group centroid
-            // through each target in order. Parented to this same
-            // cogGroup3d so it shares its clear/rebuild lifecycle — no
-            // separate group or leak risk.
-            if (trailerPredictionLevel > 1 && trailerAxles.length) {
-                const moves = getAnticipatedTrailerMoves().filter(m => m && (m.x !== 0 || m.y !== 0 || (m.weightT || 0) > 0));
-                if (moves.length) {
-                    const ghostColor = 0xf97316; // orange — distinct from the CoG sign's gold/blue/red
-                    const halfPairOffset = AXLE_PAIR_SPACING_Y / 2;
-                    const boxHeight3d = EACH_AXLE_BOX.z * 0.85;
-                    const ghostY = DECK_TOP_Y_M + boxHeight3d / 2;
-
-                    let fromPt = getTrailerReferenceCentroid();
-                    moves.forEach((m) => {
-                        const footprint = getPredictedAxleFootprint(m);
-                        footprint.forEach((pt) => {
-                            [-halfPairOffset, halfPairOffset].forEach((offsetY) => {
-                                const ghostBox = new THREE.Mesh(
-                                    new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
-                                    new THREE.MeshPhongMaterial({ color: ghostColor, transparent: true, opacity: 0.35, wireframe: false })
-                                );
-                                ghostBox.position.set(pt.x, ghostY, worldYToZ3D(pt.y) + offsetY);
-                                cogGroup3d.add(ghostBox);
-                                const wireBox = new THREE.Mesh(
-                                    new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
-                                    new THREE.MeshBasicMaterial({ color: ghostColor, wireframe: true, transparent: true, opacity: 0.7 })
-                                );
-                                wireBox.position.copy(ghostBox.position);
-                                cogGroup3d.add(wireBox);
-                            });
-                        });
-
-                        // Arrow from the previous point (current group
-                        // centroid, or the prior step's target) to this
-                        // move's target centroid, floating at deck level.
-                        const p1 = new THREE.Vector3(fromPt.x, ghostY, worldYToZ3D(fromPt.y));
-                        const p2 = new THREE.Vector3(m.x, ghostY, worldYToZ3D(m.y));
-                        const seg = new THREE.Vector3().subVectors(p2, p1);
-                        const dist = seg.length();
-                        if (dist > 0.01) {
-                            const arrow = new THREE.ArrowHelper(seg.clone().normalize(), p1, dist, ghostColor, Math.min(2, dist * 0.25), Math.min(1, dist * 0.15));
-                            cogGroup3d.add(arrow);
-                        }
-
-                        fromPt = { x: m.x, y: m.y };
-                    });
-                }
-            }
-
-            hull3dGroup.add(cogGroup3d);
         }
 
         // ---- label overlay: AFT/FWD/PS/SB, the 6 corner labels, a
@@ -4982,6 +4689,11 @@
                 // theme change or other no-rebuild refresh).
                 const trailerToggleEl = document.getElementById('trailerToggleCheckbox');
                 if (trailerToggleEl) set3DAxlesVisible(trailerToggleEl.checked);
+                // Ghost group isn't tied to the tank/axle/pump-count
+                // signature (it only depends on move data + level), so
+                // refresh it every call regardless of whether a full
+                // geometry rebuild happened.
+                updateTrailerGhostVisualization3D();
             }
             update3DFillAndAttitude();
             updateLabelAnchorText3D();
