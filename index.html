@@ -655,7 +655,7 @@
         .ab-seq-row {
             display: grid;
             grid-template-columns: 28px 1fr 1fr 1fr 24px 24px;
-            gap: 4px;
+            gap: 8px; /* matches .ab-protect-row's gap, i.e. the Level 2 panel's input spacing */
             align-items: center;
         }
 
@@ -924,7 +924,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast index_Autoballast_Phrase5_Inp-14-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast index_Autoballast_Phrase5_Inp-15-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -1222,6 +1222,23 @@
             borderWidth: 0.2               // border thickness in px
         };
 
+        // ---- CoG (center of gravity) sign constants ----
+        // Read from Load_Editor!P31 (LCG), Q31 (TCG), R31 (VCG). LCG/TCG
+        // use the SAME world frame as everything else (x = length from
+        // AFT, y = width, + = PS) so the sign drops straight onto the 2D
+        // plan / 3D scene with worldToScreen() / worldYToZ3D() like every
+        // other real-world point in this file. VCG (height) has no true
+        // baseline/keel reference available in this app, so it is shown
+        // as a text value on the sign rather than an accurate 3D height.
+        // *** HOW TO CHANGE COG SIGN COLOR ***
+        // Edit color (real sign) / ghostColor (predicted/ghost sign)
+        // below — purple, distinct from the axle's amber and the axle
+        // ghost's orange.
+        const COG_STYLE = {
+            color: '#a855f7',       // real CoG sign colour (purple)
+            ghostColor: '#c084fc'   // predicted/ghost CoG sign colour (lighter purple)
+        };
+
         // Barge extents (derived from TANK_CONFIG once loaded). Default to a
         // sane placeholder range until the real CREST_301 data arrives.
         let BARGE_X_MIN = 0;
@@ -1312,6 +1329,14 @@
         let currentHeelDegrees = 0.0;
         let trailerAxles = []; // [{ name, x, y }]
         let showTrailer = true;  // new state for trailer toggle
+
+        // Barge CoG (center of gravity), sourced from Load_Editor!P31
+        // (LCG), Q31 (TCG), R31 (VCG). lcg/tcg use the same world frame
+        // as TANK_CONFIG/trailerAxles (x = length from AFT, y = width,
+        // + = PS); vcg is height, shown as text only (see COG_STYLE
+        // comment above). valid=false until a real read has succeeded,
+        // so the sign simply doesn't draw before the first sync.
+        let bargeCoG = { lcg: 0, tcg: 0, vcg: 0, valid: false };
 
         // Pump locations, sourced from BALLASTPLAN(mT)!A33:E... (until column
         // A is blank). Column A = tank name (matches Load_Editor/CREST_301
@@ -1502,6 +1527,30 @@
             const deltaX = (move.x || 0) - ref.x;
             const deltaY = (move.y || 0) - ref.y;
             return trailerAxles.map(a => ({ x: a.x + deltaX, y: a.y + deltaY }));
+        }
+
+        // Current CoG point (LCG/TCG), in the SAME world frame as
+        // everything else. Falls back to the trailer reference axle point
+        // if no CoG has been read from Excel yet, so ghost/arrow code
+        // always has somewhere sane to start from before the first sync.
+        function getCurrentCoGPoint() {
+            if (bargeCoG && bargeCoG.valid) return { x: bargeCoG.lcg, y: bargeCoG.tcg };
+            return getTrailerReferenceAxlePoint();
+        }
+
+        // Predicted CoG point for an anticipated trailer move — NOT a
+        // real hydrostatic recomputation (this app doesn't model loading
+        // moments), just the CURRENT CoG translated by the same
+        // rigid-body delta used for the predicted axle footprint (move
+        // target minus the reference axle), so the ghost CoG sign moves
+        // in lockstep with the ghost axle group. Same honesty-first
+        // approach as getFutureReserveAdjustment()'s reserve estimate.
+        function getPredictedCoGPoint(move) {
+            const ref = getTrailerReferenceAxlePoint();
+            const cog = getCurrentCoGPoint();
+            const deltaX = (move.x || 0) - ref.x;
+            const deltaY = (move.y || 0) - ref.y;
+            return { x: cog.x + deltaX, y: cog.y + deltaY };
         }
 
         // Per-tank {maxCut, minRaise} capacity-fraction adjustment driven
@@ -2361,14 +2410,86 @@
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, cssW, cssH);
 
-            // if trailer overlay is hidden, just return (canvas cleared)
-            if (!showTrailer) return;
             if (!TANK_CONFIG.length) return; // no geometry loaded yet
 
             const isLight = document.body.classList.contains('light-theme');
 
             // SAME mapping the tanks use — guarantees pixel alignment.
             const { scaleX, scaleY } = getPlanScale();
+
+            // ---- CoG (center of gravity) sign — always drawn (both the
+            // real sign at G's current position, and its ghost/predicted
+            // copy at Level 2/3), independent of the Trailer overlay
+            // toggle below: CoG isn't a trailer/axle feature, it's the
+            // barge's own load state. See COG_STYLE/getCurrentCoGPoint(). ----
+            const cogRadius = 8; // fixed screen-px radius — a symbol, not to-scale geometry
+
+            // Draws the standard naval-architecture "center of gravity"
+            // sign: a circle split into 4 quadrants with alternating
+            // fill, crossed by a horizontal/vertical line through its
+            // center. ghost=true renders the lighter, dashed variant used
+            // for the Level 2/3 predicted position.
+            function drawCoGGlyph(sx, sy, color, ghost) {
+                ctx.save();
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.lineWidth = ghost ? 1.3 : 1.6;
+                if (ghost) ctx.setLineDash([3, 2]);
+
+                ctx.globalAlpha = ghost ? 0.4 : 0.9;
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.arc(sx, sy, cogRadius, 0, Math.PI / 2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.arc(sx, sy, cogRadius, Math.PI, Math.PI * 1.5);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.globalAlpha = 1;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.arc(sx, sy, cogRadius, 0, Math.PI * 2);
+                ctx.stroke();
+
+                if (ghost) ctx.setLineDash([3, 2]);
+                ctx.beginPath();
+                ctx.moveTo(sx - cogRadius, sy);
+                ctx.lineTo(sx + cogRadius, sy);
+                ctx.moveTo(sx, sy - cogRadius);
+                ctx.lineTo(sx, sy + cogRadius);
+                ctx.stroke();
+
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+
+            // Real CoG sign, at Load_Editor!P31/Q31 (LCG/TCG). Labeled
+            // with LCG/TCG/VCG so the exact Excel values are always
+            // readable next to the sign, not just its screen position.
+            function drawCoGSign2D() {
+                if (!bargeCoG || !bargeCoG.valid) return;
+                const p = worldToScreen(bargeCoG.lcg, bargeCoG.tcg);
+                drawCoGGlyph(p.sx, p.sy, COG_STYLE.color, false);
+                ctx.save();
+                ctx.fillStyle = COG_STYLE.color;
+                ctx.font = 'bold 10px Calibri, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(
+                    `G  LCG ${bargeCoG.lcg.toFixed(2)}  TCG ${bargeCoG.tcg.toFixed(2)}  VCG ${bargeCoG.vcg.toFixed(2)}`,
+                    p.sx, p.sy - cogRadius - 6
+                );
+                ctx.restore();
+            }
+            drawCoGSign2D();
+
+            // if trailer overlay is hidden, stop here — everything below
+            // (real axle groups + Level 2/3 ghost axle/CoG prediction)
+            // belongs to the Trailer overlay only; the CoG sign above is
+            // already drawn regardless.
+            if (!showTrailer) return;
 
             // Each rectangle's own footprint (real meters -> px)
             const rectHalfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 4);
@@ -2445,9 +2566,13 @@
             // Shows exactly where the trailer/SPMT group's axle footprint
             // WILL sit once it reaches each entered target centroid (Level
             // 2's single target, or every row of Level 3's sequence table
-            // in order), plus an arrow chain from the current group
-            // centroid through each target in turn — visual, immediate
-            // confirmation that a typed X/Y actually moved the target.
+            // in order), plus a ghost CoG sign at G's predicted position
+            // for that same step. The direction arrow chain is rooted at
+            // the CoG sign (not the axle group) — it leads INTO each
+            // step's ghost G, from the previous step's G (or the real,
+            // current G for the first step) — since G's position is what
+            // actually matters for stability/trim, not the axle position
+            // itself. See getCurrentCoGPoint() / getPredictedCoGPoint().
             // Skips a still-blank/untouched sequence row (x=0, y=0,
             // weightT=0) so a freshly-added Level 3 step doesn't draw a
             // ghost stacked at the origin before the operator fills it in.
@@ -2456,13 +2581,14 @@
                 if (moves.length) {
                     const ghostColor = '#f97316'; // orange — distinct from the real axle's amber
                     const ghostFill = isLight ? 'rgba(249,115,22,0.12)' : 'rgba(249,115,22,0.18)';
-                    let fromPt = getTrailerReferenceAxlePoint();
+                    let fromPt = getCurrentCoGPoint();
                     moves.forEach((m, i) => {
                         // Per-step ghost show/hide toggle — still advances
-                        // fromPt so the arrow chain stays geometrically
+                        // fromPt (now G's predicted point, not the axle
+                        // target) so the arrow chain stays geometrically
                         // correct for the next VISIBLE step, it just skips
                         // drawing this step's own footprint/arrow/label.
-                        if (m.showGhost === false) { fromPt = { x: m.x, y: m.y }; return; }
+                        if (m.showGhost === false) { fromPt = getPredictedCoGPoint(m); return; }
 
                         const footprint = getPredictedAxleFootprint(m);
                         footprint.forEach((pt) => {
@@ -2470,18 +2596,22 @@
                             drawAxleGroupShape(p.sx, p.sy, { fillStyle: ghostFill, strokeStyle: ghostColor, lineWidth: 1.5, dash: [4, 3] });
                         });
 
+                        // Ghost CoG sign at G's predicted position for this
+                        // step, plus the arrow leading into it.
+                        const cogPt = getPredictedCoGPoint(m);
                         const p1 = worldToScreen(fromPt.x, fromPt.y);
-                        const p2 = worldToScreen(m.x, m.y);
+                        const p2 = worldToScreen(cogPt.x, cogPt.y);
                         drawArrowScreen(p1.sx, p1.sy, p2.sx, p2.sy, ghostColor, [5, 3]);
+                        drawCoGGlyph(p2.sx, p2.sy, ghostColor, true);
 
                         ctx.save();
                         ctx.fillStyle = ghostColor;
                         ctx.font = 'bold 10px Calibri, sans-serif';
                         ctx.textAlign = 'center';
-                        ctx.fillText(`T${i + 1}`, p2.sx, p2.sy - rectHalfH - pairHalfOffsetPx - 6);
+                        ctx.fillText(`T${i + 1} G`, p2.sx, p2.sy - cogRadius - 6);
                         ctx.restore();
 
-                        fromPt = { x: m.x, y: m.y };
+                        fromPt = cogPt;
                     });
                 }
             }
@@ -2530,6 +2660,11 @@
                     const rangeCornerLabels = editorSheet.getRange("I1:I6");
                     rangeCornerLabels.load("values");
 
+                    // CoG (center of gravity): Load_Editor!P31 (LCG),
+                    // Q31 (TCG), R31 (VCG) — one row, three columns.
+                    const rangeCoG = editorSheet.getRange("P31:R31");
+                    rangeCoG.load("values");
+
                     // Trailer axle X/Y block: E124:F(124+N) — these (x,y)
                     // pairs remain the CENTER of each axle GROUP (the two
                     // rectangles + connector), so this read is unchanged.
@@ -2573,6 +2708,22 @@
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
                     updateCurrentDeckFromLabels();
+
+                    // CoG: Load_Editor!P31 (LCG), Q31 (TCG), R31 (VCG)
+                    if (rangeCoG && rangeCoG.values && rangeCoG.values[0]) {
+                        const cg = rangeCoG.values[0];
+                        const lcg = parseFloat(cg[0]);
+                        const tcg = parseFloat(cg[1]);
+                        const vcg = parseFloat(cg[2]);
+                        bargeCoG.valid = !isNaN(lcg) && !isNaN(tcg);
+                        if (bargeCoG.valid) {
+                            bargeCoG.lcg = lcg;
+                            bargeCoG.tcg = tcg;
+                            bargeCoG.vcg = isNaN(vcg) ? 0 : vcg;
+                        }
+                    } else {
+                        bargeCoG.valid = false;
+                    }
 
                     if (rangeTargets) {
                         const tv = rangeTargets.values; // rows P1..P9 → indices 0..8
@@ -2703,6 +2854,7 @@
                     tanks: tanks,
                     tankConfig: TANK_CONFIG,
                     trailerAxles: trailerAxles,
+                    bargeCoG: bargeCoG,
                     pumpLocations: pumpLocations,
                     bargeCornerLabels: bargeCornerLabels,
                     bargeName: BARGE_NAME,
@@ -2780,6 +2932,9 @@
                     });
                 }
                 if (Array.isArray(data.trailerAxles)) trailerAxles = data.trailerAxles;
+                if (data.bargeCoG && typeof data.bargeCoG === 'object') {
+                    bargeCoG = Object.assign({ lcg: 0, tcg: 0, vcg: 0, valid: false }, data.bargeCoG);
+                }
                 if (Array.isArray(data.pumpLocations)) pumpLocations = data.pumpLocations;
                 if (Array.isArray(data.bargeCornerLabels)) bargeCornerLabels = data.bargeCornerLabels;
                 updateCurrentDeckFromLabels();
@@ -2959,6 +3114,10 @@
                 { row: AXLE_START_ROW + 4, x: 60, y: 3.2 },
                 { row: AXLE_START_ROW + 5, x: 60, y: -3.2 }
             ];
+
+            // Mock CoG (Load_Editor!P31/Q31/R31 in the real workbook) —
+            // roughly midship, slightly PS-biased, at a plausible deck height.
+            bargeCoG = { lcg: (BARGE_X_MIN + BARGE_X_MAX) / 2, tcg: 0.8, vcg: 4.2, valid: true };
 
             initTankMatrix();
             drawAttitudeGraphics();
@@ -3864,6 +4023,13 @@
             opacity: 0.88,         // axle rectangle transparency
             transparent: true
         };
+        // CoG sign (3D) — same purple family as COG_STYLE (2D), color
+        // for the real sign, ghostColor for the Level 2/3 predicted sign.
+        const COG_STYLE_3D = {
+            color: 0xa855f7,
+            ghostColor: 0xc084fc,
+            opacity: 0.92
+        };
         const WATER_FILL_STYLE_3D = {
             colorNormal: 0x3aa6e8, // ballast colour below the 85% high-fill threshold
             colorHigh: 0xf08a3c,   // ballast colour at/above the 85% high-fill threshold
@@ -3918,6 +4084,76 @@
             }
         }
 
+        // Reusable "center of gravity" sign mesh — a small sphere at G's
+        // point plus a flat ring around it (viewed from above, like a
+        // target), shared by the real CoG marker and its Level 2/3 ghost
+        // copies so both always read as "the same shape," matching the
+        // 2D overlay's drawCoGGlyph() convention.
+        function makeCoGGlyph3D(color, opacity) {
+            const group = new THREE.Group();
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.35, 12, 10),
+                new THREE.MeshPhongMaterial({ color, transparent: true, opacity })
+            );
+            group.add(sphere);
+            const ring = new THREE.Mesh(
+                new THREE.TorusGeometry(0.9, 0.07, 8, 24),
+                new THREE.MeshPhongMaterial({ color, transparent: true, opacity: opacity * 0.9 })
+            );
+            ring.rotation.x = Math.PI / 2; // lay flat (XZ plane), like a target seen from above
+            group.add(ring);
+            return group;
+        }
+
+        // Real CoG sign — its OWN small persistent group (mirrors
+        // trailerGhostGroup3d's pattern), rebuilt every refresh (not
+        // gated by the tank/axle/pump-count signature, since LCG/TCG/VCG
+        // can change on every Excel sync without any count changing).
+        // Parented to hull3dGroup so it tilts/translates with trim/heel.
+        let cogMarkerGroup3d = null;
+        let cogLabelObj3d = null;
+
+        function clearCoGMarkerGroup3D() {
+            if (cogMarkerGroup3d) {
+                if (cogMarkerGroup3d.parent) cogMarkerGroup3d.parent.remove(cogMarkerGroup3d);
+                disposeMeshDeep(cogMarkerGroup3d);
+                cogMarkerGroup3d = null;
+            }
+            if (cogLabelObj3d) {
+                if (cogLabelObj3d.parent) cogLabelObj3d.parent.remove(cogLabelObj3d);
+                cogLabelObj3d = null;
+            }
+            // Drop any stale "cog" entry so renderLabels3D never draws a
+            // duplicate/orphaned label after a rebuild.
+            labelAnchors3d = labelAnchors3d.filter(a => a.id !== 'cog');
+        }
+
+        // Places the real CoG sign at (LCG, TCG). VCG (height) has no
+        // true baseline/keel reference available in this app, so the
+        // marker floats at a fixed height above the deck for visibility
+        // — the label text below carries the real VCG number instead.
+        function updateCoGMarker3D() {
+            clearCoGMarkerGroup3D();
+            if (!hull3dGroup || !TANK_CONFIG.length || !bargeCoG || !bargeCoG.valid) return;
+
+            const DECK_TOP_Y_M = TANK_DECK_GAP_M + DECK_THICKNESS_M;
+            const cogY = DECK_TOP_Y_M + 1.6; // fixed float height above deck, for visibility only
+
+            cogMarkerGroup3d = makeCoGGlyph3D(COG_STYLE_3D.color, COG_STYLE_3D.opacity);
+            cogMarkerGroup3d.position.set(bargeCoG.lcg, cogY, worldYToZ3D(bargeCoG.tcg));
+            hull3dGroup.add(cogMarkerGroup3d);
+
+            cogLabelObj3d = new THREE.Object3D();
+            cogLabelObj3d.position.set(bargeCoG.lcg, cogY + 1.1, worldYToZ3D(bargeCoG.tcg));
+            hull3dGroup.add(cogLabelObj3d);
+            labelAnchors3d.push({
+                id: 'cog',
+                obj: cogLabelObj3d,
+                text: `G  LCG ${bargeCoG.lcg.toFixed(2)}  TCG ${bargeCoG.tcg.toFixed(2)}  VCG ${bargeCoG.vcg.toFixed(2)}`,
+                cls: 'cog'
+            });
+        }
+
         function updateTrailerGhostVisualization3D() {
             clearTrailerGhostGroup3D();
             if (!hull3dGroup || !TANK_CONFIG.length || !trailerAxles.length) return;
@@ -3933,14 +4169,21 @@
             const halfPairOffset = AXLE_PAIR_SPACING_Y / 2;
             const boxHeight3d = EACH_AXLE_BOX.z * 0.85; // same scale-down the real axle boxes use
             const ghostY = DECK_TOP_Y_M + boxHeight3d / 2;
+            const cogGhostY = DECK_TOP_Y_M + 1.6; // matches updateCoGMarker3D's real-sign float height
             const ghostColor = 0xf97316; // orange — distinct from the real axle's amber (AXLE_STYLE_3D)
 
-            let fromPt = getTrailerReferenceAxlePoint();
+            // The direction arrow chain is rooted at the CoG sign (not
+            // the axle group) — it leads INTO each step's ghost G, from
+            // the previous step's G (or the real, current G for the
+            // first step). Mirrors the 2D overlay's change; see
+            // getCurrentCoGPoint() / getPredictedCoGPoint().
+            let fromPt = getCurrentCoGPoint();
             moves.forEach((m) => {
                 // Per-step ghost show/hide toggle — mirrors the 2D
-                // overlay: still advances fromPt for the next visible
-                // step's arrow, just skips this step's own mesh/arrow.
-                if (m.showGhost === false) { fromPt = { x: m.x, y: m.y }; return; }
+                // overlay: still advances fromPt (now G's predicted
+                // point) for the next visible step's arrow, just skips
+                // this step's own mesh/arrow.
+                if (m.showGhost === false) { fromPt = getPredictedCoGPoint(m); return; }
 
                 const footprint = getPredictedAxleFootprint(m);
                 footprint.forEach((pt) => {
@@ -3963,11 +4206,17 @@
                     });
                 });
 
-                // Arrow from the previous point (current group centroid,
-                // or the prior step's target) to this move's target
-                // centroid, floating at the ghost footprint's height.
-                const p1 = new THREE.Vector3(fromPt.x, ghostY, worldYToZ3D(fromPt.y));
-                const p2 = new THREE.Vector3(m.x, ghostY, worldYToZ3D(m.y));
+                // Ghost CoG sign at G's predicted position for this step
+                // (same rigid-body delta as the axle footprint above —
+                // see getPredictedCoGPoint()), plus the arrow leading
+                // into it.
+                const cogPt = getPredictedCoGPoint(m);
+                const cogGhost = makeCoGGlyph3D(COG_STYLE_3D.ghostColor, 0.55);
+                cogGhost.position.set(cogPt.x, cogGhostY, worldYToZ3D(cogPt.y));
+                trailerGhostGroup3d.add(cogGhost);
+
+                const p1 = new THREE.Vector3(fromPt.x, cogGhostY, worldYToZ3D(fromPt.y));
+                const p2 = new THREE.Vector3(cogPt.x, cogGhostY, worldYToZ3D(cogPt.y));
                 const seg = new THREE.Vector3().subVectors(p2, p1);
                 const dist = seg.length();
                 if (dist > 0.01) {
@@ -3978,7 +4227,7 @@
                     trailerGhostGroup3d.add(arrow);
                 }
 
-                fromPt = { x: m.x, y: m.y };
+                fromPt = cogPt;
             });
 
             const trailerToggleEl = document.getElementById('trailerToggleCheckbox');
@@ -4212,8 +4461,11 @@
             // hull3dGroup.children was just wiped wholesale above, which
             // also removed/disposed the ghost group if it was present —
             // null the reference too so clearTrailerGhostGroup3D() doesn't
-            // later try to touch an already-disposed object.
+            // later try to touch an already-disposed object. Same for the
+            // CoG marker/label (updateCoGMarker3D rebuilds them fresh).
             trailerGhostGroup3d = null;
+            cogMarkerGroup3d = null;
+            cogLabelObj3d = null;
         }
 
         // Rebuilds the entire 3D scene from the CURRENT TANK_CONFIG,
@@ -4581,6 +4833,8 @@
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:9px; font-weight:600; ${bg} padding:0px 4px; border-radius:3px; white-space:nowrap;">${pct}%</div>`;
                 } else if (a.cls === 'pump') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:8px; font-weight:700; color:#f5f3ff; background:#7e22ce; padding:0 3px; border-radius:2px; white-space:nowrap;">${a.text}</div>`;
+                } else if (a.cls === 'cog') {
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#f5f3ff; background:rgba(168,85,247,0.85); padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:30;">${a.text}</div>`;
                 }
             });
 
@@ -4695,6 +4949,10 @@
                 // geometry rebuild happened.
                 updateTrailerGhostVisualization3D();
             }
+            // CoG isn't tied to the tank/axle/pump-count signature either
+            // (LCG/TCG/VCG can change on every Excel sync with the counts
+            // unchanged), so it's rebuilt every call, same as the ghost group.
+            updateCoGMarker3D();
             update3DFillAndAttitude();
             updateLabelAnchorText3D();
             renderLabels3D();
