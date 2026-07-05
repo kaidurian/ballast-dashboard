@@ -918,13 +918,178 @@
             width: 100%;
             max-width: 64px;
         }
+
+        /* ============================================================
+           TRAILER GENERATOR MODAL
+           Lets the operator define N trailer trains (each with its own
+           name, line count, line spacing, reference X/Y axle position,
+           VCG, and per-line load), then writes the expanded per-line
+           rows straight into Load_Editor!D:G starting at AXLE_START_ROW
+           (D=Line load t, E=X, F=Y, G=VCG). Styling reuses the same
+           theme CSS variables as the rest of the dashboard.
+           ============================================================ */
+        .tg-btn {
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+            background: var(--tank-box-bg);
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+        .tg-btn:hover { border-color: var(--accent-blue); color: var(--text-main); }
+
+        .tg-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 1000;
+            align-items: flex-start;
+            justify-content: center;
+            overflow-y: auto;
+            padding: 40px 16px;
+        }
+        .tg-overlay.tg-open { display: flex; }
+
+        .tg-modal {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            width: 100%;
+            max-width: 780px;
+            padding: 18px 20px 20px;
+            color: var(--text-main);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+        }
+
+        .tg-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .tg-modal-header h2 { font-size: 15px; margin: 0; }
+        .tg-modal-sub { font-size: 11px; color: var(--text-muted); margin: 0 0 14px; }
+
+        .tg-close-x {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 18px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .tg-close-x:hover { color: var(--text-main); }
+
+        .tg-train-card {
+            border: 1px solid var(--panel-border);
+            background: var(--tank-box-bg);
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+        }
+        .tg-train-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .tg-train-name-input {
+            flex: 1 1 auto;
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .tg-remove-train {
+            background: none;
+            border: 1px solid var(--panel-border);
+            color: #ef4444;
+            border-radius: 6px;
+            width: 26px;
+            height: 26px;
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
+        .tg-remove-train:hover { border-color: #ef4444; }
+
+        .tg-field-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px 12px;
+        }
+        .tg-field label {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-muted);
+            margin-bottom: 3px;
+        }
+        .tg-field input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            font-size: 12px;
+            border-radius: 5px;
+            border: 1px solid var(--panel-border);
+            background: var(--input-bg);
+            color: var(--text-main);
+        }
+        .tg-field input:focus { outline: none; border-color: var(--accent-blue); }
+
+        .tg-train-summary {
+            margin-top: 8px;
+            font-size: 10.5px;
+            color: var(--text-muted);
+        }
+
+        .tg-add-train-btn {
+            width: 100%;
+            padding: 10px;
+            border: 1px dashed var(--panel-border);
+            background: transparent;
+            color: var(--accent-blue);
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-bottom: 14px;
+        }
+        .tg-add-train-btn:hover { border-color: var(--accent-blue); }
+
+        .tg-totals {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            background: var(--tank-box-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 14px;
+        }
+        .tg-totals strong { color: var(--text-main); }
+        .tg-totals.tg-totals-error { color: #ef4444; border-color: #ef4444; }
+
+        .tg-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .tg-footer .tg-btn-primary {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: #06202e;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast index_Autoballast_Phrase5_Inp-16-Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 17-index_Autoballast_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -934,6 +1099,7 @@
                 <span>🚛 Trailer</span>
                 <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
             </div>
+            <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
                 <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
@@ -4957,6 +5123,260 @@
             updateLabelAnchorText3D();
             renderLabels3D();
         }
+
+        // ============================================================
+        // 8. TRAILER GENERATOR
+        //    Builds trailer axle-line data from N user-defined "trains"
+        //    (Train 1, Train 2, ...), each with its own line count, line
+        //    spacing, reference X/Y axle position, VCG, and per-line
+        //    load — then writes the expanded per-line rows into
+        //    Load_Editor!D:G starting at AXLE_START_ROW (124):
+        //        D = Line load (metric ton)
+        //        E = X position axle (m)
+        //        F = Y position axle (m)
+        //        G = VCG trailer from deck (m)
+        //    Lines within a train are spread symmetrically about the
+        //    train's Y position (transverse), spaced by "Line spacing",
+        //    all sharing the same X, VCG and line load. This mirrors how
+        //    trailerAxles/E:F is already read back by pullExcelTankData()
+        //    for the plan-view axle overlay.
+        // ============================================================
+        let trailerGenTrains = [];
+        let trailerGenNextId = 1;
+
+        function defaultTrailerGenTrain(index) {
+            return {
+                id: trailerGenNextId++,
+                name: `Train ${index}`,
+                lines: 4,
+                spacing: 1.45,
+                x: 30 + (index - 1) * 15,
+                y: 0,
+                vcg: 4.2,
+                load: 25
+            };
+        }
+
+        function openTrailerGeneratorModal() {
+            const startLabel = document.getElementById('tgStartRowLabel');
+            if (startLabel) startLabel.textContent = String(AXLE_START_ROW);
+
+            if (trailerGenTrains.length === 0) {
+                // Seed from whatever axle data is already loaded (if any),
+                // else start with a single blank train.
+                trailerGenTrains.push(defaultTrailerGenTrain(1));
+            }
+            renderTrailerGeneratorModal();
+            document.getElementById('tgOverlay').classList.add('tg-open');
+        }
+
+        function closeTrailerGeneratorModal() {
+            document.getElementById('tgOverlay').classList.remove('tg-open');
+        }
+
+        function addTrailerGenTrain() {
+            trailerGenTrains.push(defaultTrailerGenTrain(trailerGenTrains.length + 1));
+            renderTrailerGeneratorModal();
+        }
+
+        function removeTrailerGenTrain(id) {
+            trailerGenTrains = trailerGenTrains.filter(t => t.id !== id);
+            if (trailerGenTrains.length === 0) trailerGenTrains.push(defaultTrailerGenTrain(1));
+            renderTrailerGeneratorModal();
+        }
+
+        function updateTrailerGenField(id, field, rawValue) {
+            const train = trailerGenTrains.find(t => t.id === id);
+            if (!train) return;
+            if (field === 'name') {
+                train.name = rawValue || train.name;
+            } else if (field === 'lines') {
+                train.lines = Math.max(1, Math.round(parseFloat(rawValue)) || 1);
+            } else {
+                train[field] = parseFloat(rawValue);
+                if (isNaN(train[field])) train[field] = 0;
+            }
+            renderTrailerGeneratorTotals();
+        }
+
+        // Expands all trains into individual axle-line rows, in train
+        // order, matching the write order used for Load_Editor!D:G.
+        function computeTrailerGenRows() {
+            const rows = [];
+            trailerGenTrains.forEach(train => {
+                const n = Math.max(1, Math.round(train.lines) || 1);
+                const spacing = parseFloat(train.spacing) || 0;
+                const offset = ((n - 1) / 2) * spacing;
+                for (let i = 0; i < n; i++) {
+                    rows.push({
+                        trainName: train.name,
+                        lineIndex: i + 1,
+                        load: parseFloat(train.load) || 0,
+                        x: parseFloat(train.x) || 0,
+                        y: (parseFloat(train.y) || 0) - offset + (i * spacing),
+                        vcg: parseFloat(train.vcg) || 0
+                    });
+                }
+            });
+            return rows;
+        }
+
+        function renderTrailerGeneratorModal() {
+            const list = document.getElementById('tgTrainList');
+            if (!list) return;
+            list.innerHTML = trailerGenTrains.map(train => `
+                <div class="tg-train-card">
+                    <div class="tg-train-card-header">
+                        <input type="text" class="tg-train-name-input" value="${train.name}"
+                               onchange="updateTrailerGenField(${train.id}, 'name', this.value)">
+                        <button type="button" class="tg-remove-train" title="Remove train"
+                                onclick="removeTrailerGenTrain(${train.id})"
+                                ${trailerGenTrains.length <= 1 ? 'disabled' : ''}>✕</button>
+                    </div>
+                    <div class="tg-field-grid">
+                        <div class="tg-field">
+                            <label>Number of lines</label>
+                            <input type="number" min="1" step="1" value="${train.lines}"
+                                   onchange="updateTrailerGenField(${train.id}, 'lines', this.value)">
+                        </div>
+                        <div class="tg-field">
+                            <label>Line spacing (m)</label>
+                            <input type="number" step="any" value="${train.spacing}"
+                                   onchange="updateTrailerGenField(${train.id}, 'spacing', this.value)">
+                        </div>
+                        <div class="tg-field">
+                            <label>Line load (t)</label>
+                            <input type="number" step="any" min="0" value="${train.load}"
+                                   onchange="updateTrailerGenField(${train.id}, 'load', this.value)">
+                        </div>
+                        <div class="tg-field">
+                            <label>X position axle (m)</label>
+                            <input type="number" step="any" value="${train.x}"
+                                   onchange="updateTrailerGenField(${train.id}, 'x', this.value)">
+                        </div>
+                        <div class="tg-field">
+                            <label>Y position axle (m)</label>
+                            <input type="number" step="any" value="${train.y}"
+                                   onchange="updateTrailerGenField(${train.id}, 'y', this.value)">
+                        </div>
+                        <div class="tg-field">
+                            <label>VCG from deck (m)</label>
+                            <input type="number" step="any" value="${train.vcg}"
+                                   onchange="updateTrailerGenField(${train.id}, 'vcg', this.value)">
+                        </div>
+                    </div>
+                    <div class="tg-train-summary">${train.lines} line(s) · ${(parseFloat(train.load) || 0) * (Math.max(1, Math.round(train.lines) || 1))} t total for this train</div>
+                </div>
+            `).join('');
+            renderTrailerGeneratorTotals();
+        }
+
+        function renderTrailerGeneratorTotals() {
+            const totalsEl = document.getElementById('tgTotals');
+            if (!totalsEl) return;
+            const rows = computeTrailerGenRows();
+            const totalLoad = rows.reduce((s, r) => s + r.load, 0);
+            const lastRow = AXLE_START_ROW + rows.length - 1;
+            const overflow = rows.length > AXLE_MAX_ROWS;
+            totalsEl.classList.toggle('tg-totals-error', overflow);
+            if (overflow) {
+                totalsEl.innerHTML = `⚠ ${rows.length} total lines exceeds the ${AXLE_MAX_ROWS}-row axle block ` +
+                    `(Load_Editor!${AXLE_START_ROW}:${AXLE_START_ROW + AXLE_MAX_ROWS - 1}). Reduce line counts before generating.`;
+            } else {
+                totalsEl.innerHTML = `<strong>${trailerGenTrains.length}</strong> train(s) · ` +
+                    `<strong>${rows.length}</strong> total line(s) · ` +
+                    `<strong>${totalLoad.toFixed(2)} t</strong> total load &rarr; ` +
+                    `will write Load_Editor!D${AXLE_START_ROW}:G${lastRow}`;
+            }
+        }
+
+        // Writes the generated rows to Load_Editor!D:G starting at
+        // AXLE_START_ROW. Clears the full AXLE_MAX_ROWS block first so a
+        // shorter regeneration doesn't leave stale rows behind (mirrors
+        // the "stop at first blank pair" read logic in pullExcelTankData).
+        async function generateTrailerAndWriteToExcel() {
+            const rows = computeTrailerGenRows();
+            if (rows.length === 0) {
+                alert('Add at least one train with at least one line before generating.');
+                return;
+            }
+            if (rows.length > AXLE_MAX_ROWS) {
+                alert(`${rows.length} total lines exceeds the ${AXLE_MAX_ROWS}-row axle block. Reduce line counts and try again.`);
+                return;
+            }
+
+            if (!isOfficeInitialized) {
+                // Not running inside Excel (mock/demo mode) — update the
+                // in-memory overlay directly so the plan/3D views still
+                // reflect the generated trailer.
+                trailerAxles = rows.map((r, i) => ({ row: AXLE_START_ROW + i, x: r.x, y: r.y }));
+                initTankMatrix();
+                refreshPlanView();
+                if (typeof refresh3DView === 'function') refresh3DView();
+                logAutoBallast(`🚂 Generated ${rows.length} trailer line(s) across ${trailerGenTrains.length} train(s) (mock mode — not connected to Excel).`);
+                closeTrailerGeneratorModal();
+                return;
+            }
+
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const blockEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
+
+                    // Clear the whole D:G block first.
+                    const clearRange = sheet.getRange(`D${AXLE_START_ROW}:G${blockEndRow}`);
+                    clearRange.clear(Excel.ClearApplyTo.contents);
+
+                    // Then write the new rows.
+                    const values = rows.map(r => [r.load, r.x, r.y, r.vcg]);
+                    const writeEndRow = AXLE_START_ROW + rows.length - 1;
+                    const writeRange = sheet.getRange(`D${AXLE_START_ROW}:G${writeEndRow}`);
+                    writeRange.values = values;
+
+                    await context.sync();
+                });
+                logAutoBallast(`🚂 Wrote ${rows.length} trailer line(s) across ${trailerGenTrains.length} train(s) to Load_Editor!D${AXLE_START_ROW}:G${AXLE_START_ROW + rows.length - 1}.`);
+                closeTrailerGeneratorModal();
+                setTimeout(pullExcelTankData, 300);
+            } catch (e) {
+                console.warn("Trailer generator Excel write error", e);
+                alert('Could not write trailer data to Excel. See console for details.');
+            }
+        }
     </script>  
+
+    <!-- ============================================================
+         TRAILER GENERATOR MODAL (markup)
+         Populated/rendered by renderTrailerGeneratorModal() in the
+         script above. Writes to Load_Editor!D:G starting at
+         AXLE_START_ROW (124): D=Line load (t), E=X, F=Y, G=VCG.
+         ============================================================ -->
+    <div class="tg-overlay" id="tgOverlay" onclick="if(event.target===this) closeTrailerGeneratorModal()">
+        <div class="tg-modal">
+            <div class="tg-modal-header">
+                <h2>🚂 Generate Trailer</h2>
+                <button type="button" class="tg-close-x" title="Close" onclick="closeTrailerGeneratorModal()">✕</button>
+            </div>
+            <p class="tg-modal-sub">
+                Define one or more trailer trains. Each train's lines are spread
+                symmetrically across its Y position (transverse) at the given
+                line spacing, all sharing the same X position, VCG and per-line
+                load. Rows are written to <strong>Load_Editor!D:G</strong>
+                starting at row <strong id="tgStartRowLabel">124</strong>
+                (D&nbsp;=&nbsp;Line load t, E&nbsp;=&nbsp;X, F&nbsp;=&nbsp;Y, G&nbsp;=&nbsp;VCG).
+            </p>
+
+            <div id="tgTrainList"><!-- train cards rendered by JS --></div>
+
+            <button type="button" class="tg-add-train-btn" onclick="addTrailerGenTrain()">+ Add Train</button>
+
+            <div class="tg-totals" id="tgTotals"></div>
+
+            <div class="tg-footer">
+                <button type="button" class="tg-btn" onclick="closeTrailerGeneratorModal()">Cancel</button>
+                <button type="button" class="tg-btn tg-btn-primary" onclick="generateTrailerAndWriteToExcel()">Generate &amp; Write to Excel</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
