@@ -964,6 +964,47 @@
             padding: 18px 20px 20px;
             color: var(--text-main);
             box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            transition: max-width 0.2s;
+        }
+        /* Widened automatically while the "preview beside input data"
+           toggle is on, so the two columns have room to sit side by
+           side instead of squeezing the train cards. */
+        .tg-modal.tg-modal-wide { max-width: 1180px; }
+
+        /* Wraps the train-list column and the preview/totals column.
+           Stacked (column) by default — identical to the old single-
+           column layout. Switches to a row layout when the operator
+           ticks "Show preview beside input data", pinning the live
+           axle graphic next to the trailer inputs instead of below
+           them. */
+        .tg-modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        .tg-modal-body.tg-side-layout {
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 18px;
+        }
+        .tg-modal-col-left {
+            width: 100%;
+            min-width: 0;
+        }
+        .tg-modal-body.tg-side-layout .tg-modal-col-left {
+            flex: 1 1 52%;
+            max-height: 64vh;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .tg-modal-col-right {
+            width: 100%;
+            min-width: 0;
+        }
+        .tg-modal-body.tg-side-layout .tg-modal-col-right {
+            flex: 1 1 48%;
+            position: sticky;
+            top: 0;
         }
 
         .tg-modal-header {
@@ -1023,7 +1064,8 @@
             display: flex;
             align-items: center;
             justify-content: flex-end;
-            gap: 6px;
+            gap: 14px;
+            flex-wrap: wrap;
             padding: 0 6px 6px;
         }
         .tg-preview-toggle {
@@ -1101,6 +1143,17 @@
             margin-bottom: 14px;
         }
         .tg-add-train-btn:hover { border-color: var(--accent-blue); }
+
+        .tg-train-list-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .tg-train-list-actions .tg-add-train-btn {
+            width: auto;
+            flex: 1 1 50%;
+            margin-bottom: 0;
+        }
 
         .tg-totals {
             font-size: 11.5px;
@@ -5381,7 +5434,7 @@
             return {
                 id: trailerGenNextId++,
                 name: `Train ${index}`,
-                spacing: 1.45,
+                spacing: 1.40,
                 x: 30 + (index - 1) * 15,
                 y: (index % 2 === 1) ? 3.2 : -3.2,
                 vcg: 4.2,
@@ -5407,8 +5460,135 @@
         }
 
         function addTrailerGenTrain() {
-            trailerGenTrains.push(defaultTrailerGenTrain(trailerGenTrains.length + 1));
+            // New trains start from the same "line spacing" and "X
+            // position — axle 1" values as the PREVIOUS trailer (instead
+            // of always resetting to the generic defaults), since in
+            // practice consecutive trailers on the same job usually share
+            // the same axle spacing and starting X. Y/VCG keep their own
+            // sensible defaults (alternating sides) so trailers don't
+            // stack on top of one another in the preview.
+            const prevTrain = trailerGenTrains[trailerGenTrains.length - 1];
+            const newTrain = defaultTrailerGenTrain(trailerGenTrains.length + 1);
+            if (prevTrain) {
+                newTrain.spacing = prevTrain.spacing;
+                newTrain.x = prevTrain.x;
+            }
+            trailerGenTrains.push(newTrain);
             renderTrailerGeneratorModal();
+        }
+
+        // ---- Pull existing trailer axle data back from Excel ----
+        // The sheet only stores axle-level rows (name, load, X, Y, VCG) —
+        // there's no "train" concept persisted there — so this
+        // reconstructs trains by clustering rows that share the same Y
+        // and VCG (every axle in one trailer shares both), then recovers
+        // axle order within each cluster (highest X = axle #1, walking
+        // down) and re-groups contiguous runs of the same group number
+        // back into axle-group ranges. This cleanly reconstructs data
+        // that was written by this same generator (names following the
+        // Group_n_line_m convention); anything else still loads, just as
+        // a single "Group 1" range per train.
+        async function pullTrailerDataFromExcel() {
+            if (!isOfficeInitialized) {
+                alert('Not connected to Excel — open this add-in inside an Excel workbook to pull trailer data.');
+                return;
+            }
+            try {
+                let names = [], values = [];
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const blockEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
+                    const rangeNames = sheet.getRange(`B${AXLE_START_ROW}:B${blockEndRow}`);
+                    const rangeValues = sheet.getRange(`D${AXLE_START_ROW}:G${blockEndRow}`);
+                    rangeNames.load("values");
+                    rangeValues.load("values");
+                    await context.sync();
+                    names = rangeNames.values;
+                    values = rangeValues.values;
+                });
+
+                // Stop at the first row with neither a name nor any
+                // load/X/Y/VCG value — same "stop at first blank" rule
+                // used elsewhere when reading fixed-size blocks.
+                const parsed = [];
+                for (let i = 0; i < names.length; i++) {
+                    const nm = (names[i][0] || '').toString().trim();
+                    const [load, x, y, vcg] = values[i];
+                    const hasData = nm !== '' || [load, x, y, vcg].some(v => v !== '' && v !== null && v !== undefined);
+                    if (!hasData) break;
+                    parsed.push({
+                        name: nm,
+                        load: parseFloat(load) || 0,
+                        x: parseFloat(x) || 0,
+                        y: parseFloat(y) || 0,
+                        vcg: parseFloat(vcg) || 0
+                    });
+                }
+
+                if (parsed.length === 0) {
+                    alert(`No trailer axle data found in Load_Editor!B${AXLE_START_ROW}:G${AXLE_START_ROW + AXLE_MAX_ROWS - 1}.`);
+                    return;
+                }
+
+                // Cluster rows into trains by (Y, VCG).
+                const clusters = [];
+                parsed.forEach(row => {
+                    let cluster = clusters.find(c => Math.abs(c.y - row.y) < 1e-6 && Math.abs(c.vcg - row.vcg) < 1e-6);
+                    if (!cluster) {
+                        cluster = { y: row.y, vcg: row.vcg, rows: [] };
+                        clusters.push(cluster);
+                    }
+                    cluster.rows.push(row);
+                });
+
+                const rebuiltTrains = clusters.map((cluster, idx) => {
+                    // Axle #1 = highest X, walking down; recover spacing
+                    // from the first consecutive gap (falls back to the
+                    // current default spacing when there's only one axle).
+                    const rows = cluster.rows.slice().sort((a, b) => b.x - a.x);
+                    const spacing = rows.length > 1 ? (rows[0].x - rows[1].x) : 1.40;
+
+                    const groups = [];
+                    rows.forEach((row, i) => {
+                        const axleNum = i + 1;
+                        const m = /^Group_(\d+)_line_(\d+)$/i.exec(row.name);
+                        const groupNumber = m ? (parseInt(m[1], 10) || 1) : 1;
+                        const noLoad = row.load === 0;
+                        const last = groups[groups.length - 1];
+                        if (last && last.groupNumber === groupNumber && last.noLoad === noLoad &&
+                            Math.abs(last.load - row.load) < 1e-6 && last.to === axleNum - 1) {
+                            last.to = axleNum;
+                        } else {
+                            groups.push({
+                                id: trailerGenNextGroupId++,
+                                groupNumber,
+                                from: axleNum,
+                                to: axleNum,
+                                load: row.load,
+                                noLoad,
+                                color: getGroupColor(groupNumber)
+                            });
+                        }
+                    });
+
+                    return {
+                        id: trailerGenNextId++,
+                        name: `Train ${idx + 1}`,
+                        spacing: spacing,
+                        x: rows[0].x,
+                        y: cluster.y,
+                        vcg: cluster.vcg,
+                        groups: groups.length ? groups : [defaultAxleGroup(1, 1, 0, 1)]
+                    };
+                });
+
+                trailerGenTrains = rebuiltTrains;
+                renderTrailerGeneratorModal();
+                logAutoBallast(`↺ Pulled ${parsed.length} trailer axle row(s) from Excel into ${rebuiltTrains.length} train(s) for editing.`);
+            } catch (e) {
+                console.warn("Trailer generator Excel pull error", e);
+                alert('Could not pull trailer data from Excel. See console for details.');
+            }
         }
 
         function removeTrailerGenTrain(id) {
@@ -5662,6 +5842,20 @@
             doc.body.style.background = mainCs.getPropertyValue('--tank-box-bg').trim() || '#0b1220';
         }
 
+        // ---- Optional side-by-side layout for the modal ----
+        // Off by default (train inputs stacked above the preview, same
+        // as before). When ticked, widens the modal and lays the train
+        // inputs and the live preview/totals out as two columns instead,
+        // so the graphic sits next to the data being edited rather than
+        // below it. Independent of, and can be combined with, the
+        // separate pop-out window toggle above.
+        function toggleTgPreviewSide(checked) {
+            const body = document.getElementById('tgModalBody');
+            const modal = document.getElementById('tgModal');
+            if (body) body.classList.toggle('tg-side-layout', checked);
+            if (modal) modal.classList.toggle('tg-modal-wide', checked);
+        }
+
         function toggleTgPreviewWindow(checked) {
             const toggleEl = document.getElementById('tgPreviewExternalToggle');
             if (checked) {
@@ -5753,6 +5947,11 @@
 
             let linesSvg = '';
             let axlesSvg = '';
+            // Centers of each train-cluster (one per group dropdown
+            // selection that appears in that train), kept in the same
+            // order the groups are entered/appear along the train, so a
+            // spine line can join them below.
+            const trainSpines = {}; // trainName -> [{centerX, centerY}]
             trainClusterOrder.forEach(key => {
                 const c = trainClusters[key];
                 const y = sy(c.rows[0].y);
@@ -5763,6 +5962,26 @@
                     const cx = sx(r.x);
                     axlesSvg += `<rect x="${cx - 5}" y="${y - 12}" width="10" height="24" rx="3" fill="${c.color}" opacity="${r.noLoad ? 0.35 : 0.9}"/>`;
                 });
+                const centerX = pts.reduce((a, b) => a + b, 0) / pts.length;
+                if (!trainSpines[c.trainName]) trainSpines[c.trainName] = [];
+                trainSpines[c.trainName].push({ centerX, centerY: y });
+            });
+
+            // Spine line: within each train, connect the center of each
+            // axle-group dropdown's cluster to the next one along the
+            // train (in axle order), so the whole train reads as one
+            // continuous connected structure even where it changes
+            // group/color partway through — not just isolated colored
+            // clusters. Drawn as a thin neutral line UNDER everything
+            // else added so far but distinct from the per-group dashed
+            // "same group across trailers" connector below.
+            let spineSvg = '';
+            Object.values(trainSpines).forEach(points => {
+                for (let i = 0; i < points.length - 1; i++) {
+                    const a = points[i], b = points[i + 1];
+                    spineSvg += `<line x1="${a.centerX}" y1="${a.centerY}" x2="${b.centerX}" y2="${b.centerY}" ` +
+                        `stroke="var(--text-muted, #94a3b8)" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/>`;
+                }
             });
 
             // Pass 2 — one entry per GROUP NUMBER (1-4), gathering every
@@ -5836,7 +6055,7 @@
 
             wrap.innerHTML = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="display:block;">
                 <rect x="${padL - 10}" y="${padT - 10}" width="${plotW + 20}" height="${plotH + 20}" rx="10" fill="none" stroke="var(--panel-border, #242f41)" stroke-width="1"/>
-                ${linesSvg}${axlesSvg}${connectSvg}${labelsSvg}
+                ${spineSvg}${linesSvg}${axlesSvg}${connectSvg}${labelsSvg}
             </svg>`;
         }
 
@@ -5991,7 +6210,7 @@
          AXLE_START_ROW (124): D=Line load (t), E=X, F=Y, G=VCG.
          ============================================================ -->
     <div class="tg-overlay" id="tgOverlay" onclick="if(event.target===this) closeTrailerGeneratorModal()">
-        <div class="tg-modal">
+        <div class="tg-modal" id="tgModal">
             <div class="tg-modal-header">
                 <h2>🚂 Generate Trailer</h2>
                 <button type="button" class="tg-close-x" title="Close" onclick="closeTrailerGeneratorModal()">✕</button>
@@ -6000,7 +6219,9 @@
                 Define one or more trailer trains. Axle #1 of each train sits at
                 the entered X position; every following axle = previous axle's
                 X &minus; line spacing, all sharing the same Y position and VCG.
-                Split each train's axle range into <strong>axle groups</strong>
+                New trains start with the same line spacing and X position as
+                the trailer above them. Split each train's axle range into
+                <strong>axle groups</strong>
                 (e.g. axles 1&ndash;5 @ 25&nbsp;t, axles 6&ndash;10 @ 50&nbsp;t)
                 and pick one of the <strong>4 fixed groups</strong> for each
                 range from the dropdown &mdash; or mark a group
@@ -6012,25 +6233,41 @@
                 <em>Group_1_line_1</em>) and <strong>D:G</strong>
                 starting at row <strong id="tgStartRowLabel">124</strong>
                 (D&nbsp;=&nbsp;Line load t, E&nbsp;=&nbsp;X, F&nbsp;=&nbsp;Y, G&nbsp;=&nbsp;VCG).
-                Tick "Show axle preview in separate window" below to keep the
-                live graphic visible in its own pop-out while you edit.
+                Use "Load from Excel" to pull an already-generated trailer
+                back in for editing. Tick "Show preview beside input data" or
+                "Show axle preview in separate window" below to keep the live
+                graphic visible while you edit.
             </p>
 
-            <div id="tgTrainList"><!-- train cards rendered by JS --></div>
+            <div class="tg-modal-body" id="tgModalBody">
+                <div class="tg-modal-col-left">
+                    <div id="tgTrainList"><!-- train cards rendered by JS --></div>
 
-            <button type="button" class="tg-add-train-btn" onclick="addTrailerGenTrain()">+ Add Train</button>
-
-            <div class="tg-preview-wrap">
-                <div class="tg-preview-toolbar">
-                    <label class="tg-preview-toggle">
-                        <input type="checkbox" id="tgPreviewExternalToggle" onchange="toggleTgPreviewWindow(this.checked)">
-                        ⧉ Show axle preview in separate window
-                    </label>
+                    <div class="tg-train-list-actions">
+                        <button type="button" class="tg-add-train-btn" onclick="addTrailerGenTrain()">+ Add Train</button>
+                        <button type="button" class="tg-add-train-btn" title="Read existing trailer axle data back from Load_Editor!B/D:G into these trains for editing"
+                                onclick="pullTrailerDataFromExcel()">⇩ Load from Excel</button>
+                    </div>
                 </div>
-                <div id="tgPreview"><!-- live plan-view preview rendered by JS --></div>
-            </div>
 
-            <div class="tg-totals" id="tgTotals"></div>
+                <div class="tg-modal-col-right">
+                    <div class="tg-preview-wrap">
+                        <div class="tg-preview-toolbar">
+                            <label class="tg-preview-toggle">
+                                <input type="checkbox" id="tgPreviewSideToggle" onchange="toggleTgPreviewSide(this.checked)">
+                                ⬌ Show preview beside input data
+                            </label>
+                            <label class="tg-preview-toggle">
+                                <input type="checkbox" id="tgPreviewExternalToggle" onchange="toggleTgPreviewWindow(this.checked)">
+                                ⧉ Show axle preview in separate window
+                            </label>
+                        </div>
+                        <div id="tgPreview"><!-- live plan-view preview rendered by JS --></div>
+                    </div>
+
+                    <div class="tg-totals" id="tgTotals"></div>
+                </div>
+            </div>
 
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeTrailerGeneratorModal()">Cancel</button>
