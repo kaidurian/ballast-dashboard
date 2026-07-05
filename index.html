@@ -998,10 +998,26 @@
             gap: 8px;
             margin-bottom: 10px;
         }
+        .tg-swatch {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 4px;
+            flex: 0 0 auto;
+        }
+
         .tg-train-name-input {
             flex: 1 1 auto;
             font-weight: 700;
             font-size: 13px;
+        }
+
+        .tg-preview-wrap {
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 8px 4px 4px;
+            margin-bottom: 14px;
+            background: var(--tank-box-bg);
         }
         .tg-remove-train {
             background: none;
@@ -1089,7 +1105,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 17-index_Autoballast_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 18-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -5135,23 +5151,38 @@
         //        E = X position axle (m)
         //        F = Y position axle (m)
         //        G = VCG trailer from deck (m)
-        //    Lines within a train are spread symmetrically about the
-        //    train's Y position (transverse), spaced by "Line spacing",
-        //    all sharing the same X, VCG and line load. This mirrors how
-        //    trailerAxles/E:F is already read back by pullExcelTankData()
-        //    for the plan-view axle overlay.
+        //    Lines within a train are spread along X (length), centered
+        //    on the train's X position and spaced by "Line spacing",
+        //    with every line in that train sharing the same Y and VCG.
+        //    This mirrors how trailerAxles/E:F is already read back by
+        //    pullExcelTankData() for the plan-view axle overlay.
+        //    Each train also gets a persistent color (cycled from
+        //    TRAILER_GEN_PALETTE) so the train cards, the live plan-view
+        //    preview, and the written rows can all be visually traced
+        //    back to the same group.
         // ============================================================
         let trailerGenTrains = [];
         let trailerGenNextId = 1;
+
+        const TRAILER_GEN_PALETTE = [
+            '#D85A30', // coral
+            '#1D9E75', // teal
+            '#7F77DD', // purple
+            '#D4537E', // pink
+            '#BA7517', // amber
+            '#378ADD', // blue
+            '#639922'  // green
+        ];
 
         function defaultTrailerGenTrain(index) {
             return {
                 id: trailerGenNextId++,
                 name: `Train ${index}`,
+                color: TRAILER_GEN_PALETTE[(index - 1) % TRAILER_GEN_PALETTE.length],
                 lines: 4,
                 spacing: 1.45,
                 x: 30 + (index - 1) * 15,
-                y: 0,
+                y: (index % 2 === 1) ? 3.2 : -3.2,
                 vcg: 4.2,
                 load: 25
             };
@@ -5196,24 +5227,31 @@
                 train[field] = parseFloat(rawValue);
                 if (isNaN(train[field])) train[field] = 0;
             }
+            // Lightweight refresh only (no full re-render) so the input
+            // the operator is actively typing in never loses focus.
             renderTrailerGeneratorTotals();
+            renderTrailerGenPreview();
         }
 
         // Expands all trains into individual axle-line rows, in train
         // order, matching the write order used for Load_Editor!D:G.
+        // Lines are centered on the train's X position and spread along
+        // X using the line spacing; Y and VCG stay constant per train.
         function computeTrailerGenRows() {
             const rows = [];
             trailerGenTrains.forEach(train => {
                 const n = Math.max(1, Math.round(train.lines) || 1);
                 const spacing = parseFloat(train.spacing) || 0;
                 const offset = ((n - 1) / 2) * spacing;
+                const baseX = parseFloat(train.x) || 0;
                 for (let i = 0; i < n; i++) {
                     rows.push({
                         trainName: train.name,
+                        color: train.color,
                         lineIndex: i + 1,
                         load: parseFloat(train.load) || 0,
-                        x: parseFloat(train.x) || 0,
-                        y: (parseFloat(train.y) || 0) - offset + (i * spacing),
+                        x: baseX - offset + (i * spacing),
+                        y: parseFloat(train.y) || 0,
                         vcg: parseFloat(train.vcg) || 0
                     });
                 }
@@ -5225,8 +5263,9 @@
             const list = document.getElementById('tgTrainList');
             if (!list) return;
             list.innerHTML = trailerGenTrains.map(train => `
-                <div class="tg-train-card">
+                <div class="tg-train-card" style="border-left: 4px solid ${train.color};">
                     <div class="tg-train-card-header">
+                        <span class="tg-swatch" style="background:${train.color};" title="Group color for this train"></span>
                         <input type="text" class="tg-train-name-input" value="${train.name}"
                                onchange="updateTrailerGenField(${train.id}, 'name', this.value)">
                         <button type="button" class="tg-remove-train" title="Remove train"
@@ -5241,27 +5280,27 @@
                         </div>
                         <div class="tg-field">
                             <label>Line spacing (m)</label>
-                            <input type="number" step="any" value="${train.spacing}"
+                            <input type="number" step="any" value="${train.spacing}" title="Distance along X between adjacent lines in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'spacing', this.value)">
                         </div>
                         <div class="tg-field">
                             <label>Line load (t)</label>
-                            <input type="number" step="any" min="0" value="${train.load}"
+                            <input type="number" step="any" min="0" value="${train.load}" title="Load carried by each line in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'load', this.value)">
                         </div>
                         <div class="tg-field">
                             <label>X position axle (m)</label>
-                            <input type="number" step="any" value="${train.x}"
+                            <input type="number" step="any" value="${train.x}" title="Lines are centered on this X and spread out using the spacing above"
                                    onchange="updateTrailerGenField(${train.id}, 'x', this.value)">
                         </div>
                         <div class="tg-field">
                             <label>Y position axle (m)</label>
-                            <input type="number" step="any" value="${train.y}"
+                            <input type="number" step="any" value="${train.y}" title="Shared Y position for every line in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'y', this.value)">
                         </div>
                         <div class="tg-field">
                             <label>VCG from deck (m)</label>
-                            <input type="number" step="any" value="${train.vcg}"
+                            <input type="number" step="any" value="${train.vcg}" title="Shared VCG for every line in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'vcg', this.value)">
                         </div>
                     </div>
@@ -5269,6 +5308,69 @@
                 </div>
             `).join('');
             renderTrailerGeneratorTotals();
+            renderTrailerGenPreview();
+        }
+
+        // Live plan-view preview: draws every train's lines as a colored
+        // group spread along X at its own Y, so the operator can see the
+        // groups separate out visually before writing to Excel. Purely
+        // illustrative — independent of the main tank plan/3D views.
+        function renderTrailerGenPreview() {
+            const wrap = document.getElementById('tgPreview');
+            if (!wrap) return;
+            const rows = computeTrailerGenRows();
+            if (rows.length === 0) { wrap.innerHTML = ''; return; }
+
+            const svgW = 680, svgH = 200;
+            const padL = 50, padR = 50, padT = 26, padB = 26;
+            const plotW = svgW - padL - padR, plotH = svgH - padT - padB;
+
+            const xs = rows.map(r => r.x);
+            const ys = rows.map(r => r.y);
+            const minX = Math.min(...xs, 0) - 5, maxX = Math.max(...xs, 10) + 5;
+            const minY = Math.min(...ys, -4), maxY = Math.max(...ys, 4);
+            const spanX = Math.max(maxX - minX, 1);
+            const spanY = Math.max(maxY - minY, 1);
+            const sx = x => padL + ((x - minX) / spanX) * plotW;
+            const sy = y => padT + (1 - ((y - minY) / spanY)) * plotH;
+
+            const groups = {};
+            rows.forEach(r => {
+                if (!groups[r.trainName]) groups[r.trainName] = [];
+                groups[r.trainName].push(r);
+            });
+
+            let linesSvg = '';
+            let axlesSvg = '';
+            let labelsSvg = '';
+            let labelRow = 0;
+            Object.entries(groups).forEach(([name, group]) => {
+                const color = group[0].color;
+                const y = sy(group[0].y);
+                const pts = group.map(r => sx(r.x));
+                const x1 = Math.min(...pts), x2 = Math.max(...pts);
+                linesSvg += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity="0.55"/>`;
+                group.forEach(r => {
+                    const cx = sx(r.x);
+                    axlesSvg += `<rect x="${cx - 5}" y="${y - 12}" width="10" height="24" rx="3" fill="${color}" opacity="0.9"/>`;
+                });
+                const totalLoad = group.reduce((s, r) => s + r.load, 0);
+                const labelY = 16 + (labelRow * 14);
+                labelsSvg += `<circle cx="58" cy="${labelY - 4}" r="4" fill="${color}"/>` +
+                    `<text x="70" y="${labelY}" font-size="11" fill="var(--text-muted, #94a3b8)">` +
+                    `${escapeHtml(name)} · ${group.length} line(s) · ${totalLoad.toFixed(1)} t total</text>`;
+                labelRow++;
+            });
+
+            wrap.innerHTML = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH + (labelRow * 14)}" style="display:block;">
+                <rect x="${padL - 10}" y="${padT - 10 + (labelRow * 14)}" width="${plotW + 20}" height="${plotH + 20}" rx="10" fill="none" stroke="var(--panel-border, #242f41)" stroke-width="1"/>
+                <g transform="translate(0, ${labelRow * 14})">${linesSvg}${axlesSvg}</g>
+                ${labelsSvg}
+            </svg>`;
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
 
         function renderTrailerGeneratorTotals() {
@@ -5359,9 +5461,11 @@
             </div>
             <p class="tg-modal-sub">
                 Define one or more trailer trains. Each train's lines are spread
-                symmetrically across its Y position (transverse) at the given
-                line spacing, all sharing the same X position, VCG and per-line
-                load. Rows are written to <strong>Load_Editor!D:G</strong>
+                along X (length) at the given line spacing, centered on the X
+                position, all sharing the same Y position and VCG. Each train
+                is color-coded below and in the preview so the groups stay
+                easy to tell apart. Rows are written to
+                <strong>Load_Editor!D:G</strong>
                 starting at row <strong id="tgStartRowLabel">124</strong>
                 (D&nbsp;=&nbsp;Line load t, E&nbsp;=&nbsp;X, F&nbsp;=&nbsp;Y, G&nbsp;=&nbsp;VCG).
             </p>
@@ -5369,6 +5473,10 @@
             <div id="tgTrainList"><!-- train cards rendered by JS --></div>
 
             <button type="button" class="tg-add-train-btn" onclick="addTrailerGenTrain()">+ Add Train</button>
+
+            <div class="tg-preview-wrap">
+                <div id="tgPreview"><!-- live plan-view preview rendered by JS --></div>
+            </div>
 
             <div class="tg-totals" id="tgTotals"></div>
 
