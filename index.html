@@ -1254,7 +1254,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 20-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 21-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -5637,9 +5637,30 @@
         // window", the SAME renderTrailerGenPreview() call below just
         // targets that window's document instead — so the preview keeps
         // updating live, in real time, as trains/groups are edited,
-        // exactly like the inline version did.
+        // exactly like the inline version did. Group/axle colors are
+        // explicit hex values (TRAILER_GROUP_DEFS) either way, so they
+        // always match; syncExternalThemeVars() below additionally
+        // copies the current theme's border/text/background colors into
+        // the pop-out so its CHROME (not just the axle colors) looks
+        // identical to the inline preview too.
         let tgPreviewExternal = false;
         let tgPreviewWindow = null;
+
+        function syncExternalThemeVars() {
+            if (!tgPreviewWindow || tgPreviewWindow.closed) return;
+            const mainCs = getComputedStyle(document.body);
+            const varNames = ['--panel-border', '--tank-box-bg', '--text-main', '--text-muted'];
+            const decls = varNames.map(v => `${v}: ${mainCs.getPropertyValue(v).trim()};`).join(' ');
+            const doc = tgPreviewWindow.document;
+            let styleEl = doc.getElementById('tgThemeVars');
+            if (!styleEl) {
+                styleEl = doc.createElement('style');
+                styleEl.id = 'tgThemeVars';
+                doc.head.appendChild(styleEl);
+            }
+            styleEl.textContent = `:root { ${decls} }`;
+            doc.body.style.background = mainCs.getPropertyValue('--tank-box-bg').trim() || '#0b1220';
+        }
 
         function toggleTgPreviewWindow(checked) {
             const toggleEl = document.getElementById('tgPreviewExternalToggle');
@@ -5655,8 +5676,8 @@
                 const doc = tgPreviewWindow.document;
                 doc.title = 'Trailer Axle Preview';
                 doc.body.style.margin = '0';
-                doc.body.style.background = '#0b1220';
                 doc.body.innerHTML = '<div id="tgPreviewExternalRoot" style="padding:10px;font-family:Segoe UI,Arial,sans-serif;"></div>';
+                syncExternalThemeVars();
             } else {
                 tgPreviewExternal = false;
                 if (tgPreviewWindow && !tgPreviewWindow.closed) tgPreviewWindow.close();
@@ -5665,14 +5686,19 @@
             renderTrailerGenPreview();
         }
 
-        // Live plan-view preview: draws every axle GROUP's lines as a
-        // colored cluster along X at its train's Y, with a dashed
-        // outline around each group and a label giving its axle-line
-        // count, load per axle, and total (or "no line load"), so the
-        // operator can see the groups separate out visually before
-        // writing to Excel. Purely illustrative — independent of the
-        // main tank plan/3D views. Renders either inline in the modal
-        // or into the pop-out window, per tgPreviewExternal above.
+        // Live plan-view preview: draws every axle GROUP's axle lines as
+        // colored clusters along X at each train's Y. When one group
+        // (e.g. "Group 2") appears in more than one train, each train's
+        // cluster gets its own center point, but those centers are
+        // connected by thin lines converging on a SINGLE shared center
+        // for that group — so it reads as one group split across
+        // trailers, not several. Exactly one label sits at that shared
+        // center, with an opaque background box behind the text so
+        // lines/axles never overlap or obscure it. Purely illustrative —
+        // independent of the main tank plan/3D views, which keep using
+        // their own existing group colors unchanged. Renders either
+        // inline in the modal or into the pop-out window, per
+        // tgPreviewExternal above — same colors either way.
         function renderTrailerGenPreview() {
             let wrap;
             const inlineWrap = document.getElementById('tgPreview');
@@ -5686,6 +5712,7 @@
                     if (toggleEl) toggleEl.checked = false;
                     wrap = inlineWrap;
                 } else {
+                    syncExternalThemeVars();
                     wrap = tgPreviewWindow.document.getElementById('tgPreviewExternalRoot');
                     if (inlineWrap) inlineWrap.innerHTML = '<div class="tg-preview-external-note">Axle preview is open in a separate window.</div>';
                 }
@@ -5698,7 +5725,7 @@
             if (rows.length === 0) { wrap.innerHTML = ''; return; }
 
             const svgW = 680, svgH = 200;
-            const padL = 50, padR = 50, padT = 26, padB = 26;
+            const padL = 50, padR = 50, padT = 34, padB = 26;
             const plotW = svgW - padL - padR, plotH = svgH - padT - padB;
 
             const xs = rows.map(r => r.x);
@@ -5710,64 +5737,106 @@
             const sx = x => padL + ((x - minX) / spanX) * plotW;
             const sy = y => padT + (1 - ((y - minY) / spanY)) * plotH;
 
-            // Group rows by (train + group name) so each custom load
-            // group draws and labels as its own cluster. Two different
-            // ranges that share a group number still get their own
-            // dashed box/label when they belong to different trains
-            // (different Y), but always share that group's color.
-            const groups = {};
-            const groupOrder = [];
+            // Pass 1 — per (train, group) sub-clusters: this is what
+            // actually draws the axle rectangles and the short solid
+            // line joining a single train's own axles in that group.
+            const trainClusters = {};
+            const trainClusterOrder = [];
             rows.forEach(r => {
-                const key = r.trainName + ' :: ' + r.groupName;
-                if (!groups[key]) { groups[key] = []; groupOrder.push(key); }
-                groups[key].push(r);
+                const key = r.trainName + ' :: ' + r.groupNumber;
+                if (!trainClusters[key]) {
+                    trainClusters[key] = { trainName: r.trainName, groupNumber: r.groupNumber, groupName: r.groupName, color: r.color, rows: [] };
+                    trainClusterOrder.push(key);
+                }
+                trainClusters[key].rows.push(r);
             });
 
-            let boxesSvg = '';
             let linesSvg = '';
             let axlesSvg = '';
-            let labelsSvg = '';
-            let labelRow = 0;
-            groupOrder.forEach((key) => {
-                const group = groups[key];
-                const color = group[0].color;
-                const y = sy(group[0].y);
-                const pts = group.map(r => sx(r.x));
+            trainClusterOrder.forEach(key => {
+                const c = trainClusters[key];
+                const y = sy(c.rows[0].y);
+                const pts = c.rows.map(r => sx(r.x));
                 const x1 = Math.min(...pts), x2 = Math.max(...pts);
-
-                // Dashed rectangle around this group's axle cluster —
-                // cheap to draw (one more <rect> per group) since it
-                // reuses the same x1/x2/y already computed for the line.
-                const boxPad = 12;
-                const boxX = x1 - boxPad, boxW = Math.max(x2 - x1 + boxPad * 2, 26);
-                boxesSvg += `<rect x="${boxX}" y="${y - 17}" width="${boxW}" height="34" rx="7" fill="none" stroke="${color}" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.8"/>`;
-
-                linesSvg += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity="0.55"/>`;
-                group.forEach(r => {
+                linesSvg += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${c.color}" stroke-width="2" opacity="0.55"/>`;
+                c.rows.forEach(r => {
                     const cx = sx(r.x);
-                    axlesSvg += `<rect x="${cx - 5}" y="${y - 12}" width="10" height="24" rx="3" fill="${color}" opacity="${r.noLoad ? 0.35 : 0.9}"/>`;
+                    axlesSvg += `<rect x="${cx - 5}" y="${y - 12}" width="10" height="24" rx="3" fill="${c.color}" opacity="${r.noLoad ? 0.35 : 0.9}"/>`;
                 });
-
-                // Label: group name · total axle lines · load per axle ·
-                // group total (or "no line load" when that group carries
-                // no cargo weight — kept visually transparent above too).
-                const n = group.length;
-                const noLoad = group[0].noLoad;
-                const totalLoad = group.reduce((s, r) => s + r.load, 0);
-                const detailText = noLoad
-                    ? `${n} axle line(s) · no line load`
-                    : `${n} axle line(s) · ${group[0].load} t/axle · ${totalLoad.toFixed(1)} t total`;
-                const labelY = 16 + (labelRow * 14);
-                labelsSvg += `<circle cx="58" cy="${labelY - 4}" r="4" fill="${color}"/>` +
-                    `<text x="70" y="${labelY}" font-size="11" fill="var(--text-muted, #94a3b8)">` +
-                    `${escapeHtml(group[0].trainName)} – ${escapeHtml(group[0].groupName)} · ${detailText}</text>`;
-                labelRow++;
             });
 
-            wrap.innerHTML = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH + (labelRow * 14)}" style="display:block;">
-                <rect x="${padL - 10}" y="${padT - 10 + (labelRow * 14)}" width="${plotW + 20}" height="${plotH + 20}" rx="10" fill="none" stroke="var(--panel-border, #242f41)" stroke-width="1"/>
-                <g transform="translate(0, ${labelRow * 14})">${boxesSvg}${linesSvg}${axlesSvg}</g>
-                ${labelsSvg}
+            // Pass 2 — one entry per GROUP NUMBER (1-4), gathering every
+            // train-cluster that shares it, so a group split across
+            // several trailers still resolves to exactly one center and
+            // one label.
+            const groupAgg = {};
+            const groupOrder = [];
+            trainClusterOrder.forEach(key => {
+                const c = trainClusters[key];
+                if (!groupAgg[c.groupNumber]) {
+                    groupAgg[c.groupNumber] = { groupNumber: c.groupNumber, groupName: c.groupName, color: c.color, clusters: [] };
+                    groupOrder.push(c.groupNumber);
+                }
+                const pts = c.rows.map(r => sx(r.x));
+                const centerX = pts.reduce((a, b) => a + b, 0) / pts.length;
+                const centerY = sy(c.rows[0].y);
+                groupAgg[c.groupNumber].clusters.push({ centerX, centerY, rows: c.rows });
+            });
+
+            let connectSvg = '';
+            let labelsSvg = '';
+            groupOrder.forEach(gNum => {
+                const g = groupAgg[gNum];
+                const overallX = g.clusters.reduce((s, c) => s + c.centerX, 0) / g.clusters.length;
+                const overallY = g.clusters.reduce((s, c) => s + c.centerY, 0) / g.clusters.length;
+
+                // Same group split across >1 trailer/train — connect each
+                // train-cluster's own center to the single shared center
+                // so it visually reads as one group, not several.
+                if (g.clusters.length > 1) {
+                    g.clusters.forEach(c => {
+                        connectSvg += `<line x1="${c.centerX}" y1="${c.centerY}" x2="${overallX}" y2="${overallY}" stroke="${g.color}" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.65"/>`;
+                        connectSvg += `<circle cx="${c.centerX}" cy="${c.centerY}" r="2.5" fill="${g.color}"/>`;
+                    });
+                }
+                connectSvg += `<circle cx="${overallX}" cy="${overallY}" r="4.5" fill="${g.color}" stroke="var(--tank-box-bg, #0b1220)" stroke-width="1.5"/>`;
+
+                // Aggregate stats across every occurrence of this group
+                // (all trains combined): total axle lines, load per axle
+                // (when uniform), group total — or "no line load" when
+                // the whole group carries no cargo weight.
+                const allRows = g.clusters.flatMap(c => c.rows);
+                const n = allRows.length;
+                const allNoLoad = allRows.every(r => r.noLoad);
+                const loadedRows = allRows.filter(r => !r.noLoad);
+                const distinctLoads = [...new Set(loadedRows.map(r => r.load))];
+                const totalLoad = allRows.reduce((s, r) => s + r.load, 0);
+                let detailText;
+                if (allNoLoad) {
+                    detailText = `${n} axle line(s) · no line load`;
+                } else if (distinctLoads.length === 1 && loadedRows.length === allRows.length) {
+                    detailText = `${n} axle line(s) · ${distinctLoads[0]} t/axle · ${totalLoad.toFixed(1)} t total`;
+                } else {
+                    detailText = `${n} axle line(s) · ${totalLoad.toFixed(1)} t total`;
+                }
+                const labelText = `${g.groupName} · ${detailText}`;
+
+                // Opaque background box behind the label so the
+                // connecting lines/axle rectangles never cut through the
+                // text or make it hard to read.
+                const labelX = overallX;
+                const labelY = overallY - 16;
+                const boxW = labelText.length * 5.6 + 14;
+                const boxH = 17;
+                labelsSvg += `<g>` +
+                    `<rect x="${labelX - boxW / 2}" y="${labelY - boxH + 4}" width="${boxW}" height="${boxH}" rx="4" fill="var(--tank-box-bg, #0b1220)" stroke="${g.color}" stroke-width="1"/>` +
+                    `<text x="${labelX}" y="${labelY - 3}" font-size="10.5" text-anchor="middle" fill="var(--text-main, #e2e8f0)">${escapeHtml(labelText)}</text>` +
+                    `</g>`;
+            });
+
+            wrap.innerHTML = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="display:block;">
+                <rect x="${padL - 10}" y="${padT - 10}" width="${plotW + 20}" height="${plotH + 20}" rx="10" fill="none" stroke="var(--panel-border, #242f41)" stroke-width="1"/>
+                ${linesSvg}${axlesSvg}${connectSvg}${labelsSvg}
             </svg>`;
         }
 
