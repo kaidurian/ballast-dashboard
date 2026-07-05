@@ -1019,6 +1019,31 @@
             margin-bottom: 14px;
             background: var(--tank-box-bg);
         }
+        .tg-preview-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 6px;
+            padding: 0 6px 6px;
+        }
+        .tg-preview-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            user-select: none;
+        }
+        .tg-preview-toggle input { cursor: pointer; }
+        .tg-preview-external-note {
+            padding: 18px 10px;
+            text-align: center;
+            font-size: 11.5px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
         .tg-remove-train {
             background: none;
             border: 1px solid var(--panel-border);
@@ -1123,7 +1148,13 @@
             flex: 1 1 auto;
             font-weight: 700;
             font-size: 12px;
+            padding: 5px 6px;
+            border-radius: 5px;
+            border: 1px solid var(--panel-border);
+            background: var(--input-bg);
+            color: var(--text-main);
         }
+        .tg-group-name-input:focus { outline: none; border-color: var(--accent-blue); }
         .tg-remove-group {
             background: none;
             border: 1px solid var(--panel-border);
@@ -1223,7 +1254,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 19-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 20-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -1233,7 +1264,7 @@
                 <span>🚛 Trailer</span>
                 <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
             </div>
-            <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
+            <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
@@ -5314,39 +5345,35 @@
         let trailerGenTrains = [];
         let trailerGenNextId = 1;
         let trailerGenNextGroupId = 1;
-        let trailerGenColorCursor = 0;
 
-        const TRAILER_GEN_PALETTE = [
-            '#D85A30', // coral
-            '#1D9E75', // teal
-            '#7F77DD', // purple
-            '#D4537E', // pink
-            '#BA7517', // amber
-            '#378ADD', // blue
-            '#639922', // green
-            '#C2478A', // magenta
-            '#4FAF9E', // aqua
-            '#A8762C'  // bronze
+        // Fixed set of (at most) 4 axle groups. Group IDENTITY now lives
+        // here — every axle-range entry, in every train, simply picks
+        // which of these 4 groups it belongs to (via a dropdown, not a
+        // free-text name), so "Group 2" always means the same name AND
+        // the same color everywhere: this modal, the live preview, the
+        // 2D plan overlay, the 3D scene and the dashboard legend.
+        const TRAILER_GROUP_DEFS = [
+            { number: 1, label: 'Group 1', color: '#D85A30' }, // coral
+            { number: 2, label: 'Group 2', color: '#1D9E75' }, // teal
+            { number: 3, label: 'Group 3', color: '#7F77DD' }, // purple
+            { number: 4, label: 'Group 4', color: '#D4537E' }  // pink
         ];
 
-        // Every axle group anywhere (across every train) gets its own
-        // color, cycling through the palette in creation order, so no
-        // two groups look alike until the palette itself repeats.
-        function nextGroupColor() {
-            const c = TRAILER_GEN_PALETTE[trailerGenColorCursor % TRAILER_GEN_PALETTE.length];
-            trailerGenColorCursor++;
-            return c;
+        function getGroupDef(groupNumber) {
+            return TRAILER_GROUP_DEFS.find(g => g.number === groupNumber) || TRAILER_GROUP_DEFS[0];
         }
+        function getGroupColor(groupNumber) { return getGroupDef(groupNumber).color; }
+        function getGroupLabel(groupNumber) { return getGroupDef(groupNumber).label; }
 
-        function defaultAxleGroup(fromAxle, toAxle, load, name) {
+        function defaultAxleGroup(fromAxle, toAxle, load, groupNumber) {
             return {
                 id: trailerGenNextGroupId++,
-                name: name,
+                groupNumber: groupNumber,
                 from: fromAxle,
                 to: toAxle,
                 load: load,
                 noLoad: false,
-                color: nextGroupColor()
+                color: getGroupColor(groupNumber)
             };
         }
 
@@ -5358,7 +5385,7 @@
                 x: 30 + (index - 1) * 15,
                 y: (index % 2 === 1) ? 3.2 : -3.2,
                 vcg: 4.2,
-                groups: [defaultAxleGroup(1, 5, 25, 'Group1')]
+                groups: [defaultAxleGroup(1, 5, 25, 1)]
             };
         }
 
@@ -5414,7 +5441,11 @@
             const lastTo = train.groups.reduce((m, g) => Math.max(m, parseInt(g.to, 10) || 0), 0);
             const from = lastTo + 1;
             const to = from + 4;
-            train.groups.push(defaultAxleGroup(from, to, 25, `Group${train.groups.length + 1}`));
+            // Cycle 1→4→1... as a sensible default; the operator can
+            // always repick via the dropdown (multiple ranges, even in
+            // different trains, may legitimately share one group number).
+            const nextGroupNumber = (train.groups.length % TRAILER_GROUP_DEFS.length) + 1;
+            train.groups.push(defaultAxleGroup(from, to, 25, nextGroupNumber));
             renderTrailerGeneratorModal();
         }
 
@@ -5422,20 +5453,22 @@
             const train = trailerGenTrains.find(t => t.id === trainId);
             if (!train) return;
             train.groups = train.groups.filter(g => g.id !== groupId);
-            if (train.groups.length === 0) train.groups.push(defaultAxleGroup(1, 5, 25, 'Group1'));
+            if (train.groups.length === 0) train.groups.push(defaultAxleGroup(1, 5, 25, 1));
             renderTrailerGeneratorModal();
         }
 
-        // field: 'name' | 'from' | 'to' | 'load' | 'loadMode' ('load' or 'none')
+        // field: 'groupNumber' | 'from' | 'to' | 'load' | 'loadMode' ('load' or 'none')
         function updateAxleGroupField(trainId, groupId, field, rawValue) {
             const train = trailerGenTrains.find(t => t.id === trainId);
             if (!train) return;
             const group = train.groups.find(g => g.id === groupId);
             if (!group) return;
-            if (field === 'name') {
-                group.name = rawValue || group.name;
-                renderTrailerGeneratorTotals();
-                renderTrailerGenPreview();
+            if (field === 'groupNumber') {
+                group.groupNumber = parseInt(rawValue, 10) || 1;
+                group.color = getGroupColor(group.groupNumber);
+                // Full re-render so the swatch color updates everywhere
+                // (this group row, the summary line, the live preview).
+                renderTrailerGeneratorModal();
                 return;
             }
             if (field === 'loadMode') {
@@ -5460,8 +5493,15 @@
         // train's entered X position; every following axle's X is the
         // previous axle's X minus the line spacing. Axles not covered by
         // any group in that train are skipped (no row written).
+        // Line numbers restart at 1 for EACH of the 4 fixed groups and
+        // simply keep counting up every time that group number is hit
+        // again — across trains, in the same train→axle order the rows
+        // are built in. That produces exactly the naming the operator
+        // wants in Load_Editor!B, e.g. Group_1_line_1, Group_1_line_2,
+        // Group_2_line_1, Group_3_line_1, ...
         function computeTrailerGenRows() {
             const rows = [];
+            const groupLineCounters = {};
             trailerGenTrains.forEach(train => {
                 const spacing = parseFloat(train.spacing) || 0;
                 const baseX = parseFloat(train.x) || 0;
@@ -5471,11 +5511,16 @@
                 for (let axleNum = 1; axleNum <= maxAxle; axleNum++) {
                     const group = train.groups.find(g => axleNum >= (parseInt(g.from, 10) || 0) && axleNum <= (parseInt(g.to, 10) || 0));
                     if (!group) continue; // gap in the axle numbering — no row
+                    const gNum = group.groupNumber;
+                    groupLineCounters[gNum] = (groupLineCounters[gNum] || 0) + 1;
                     rows.push({
                         trainName: train.name,
-                        groupName: group.name,
+                        groupNumber: gNum,
+                        groupName: getGroupLabel(gNum),
                         color: group.color,
                         axleNumber: axleNum,
+                        lineInGroup: groupLineCounters[gNum],
+                        excelName: `Group_${gNum}_line_${groupLineCounters[gNum]}`,
                         load: group.noLoad ? 0 : (parseFloat(group.load) || 0),
                         noLoad: !!group.noLoad,
                         x: baseX - ((axleNum - 1) * spacing),
@@ -5533,8 +5578,10 @@
                         <div class="tg-group-row">
                             <div class="tg-group-row-header">
                                 <span class="tg-group-swatch" style="background:${group.color};" title="Color for this axle group"></span>
-                                <input type="text" class="tg-group-name-input" value="${group.name}"
-                                       onchange="updateAxleGroupField(${train.id}, ${group.id}, 'name', this.value)">
+                                <select class="tg-group-name-input" title="Which of the 4 fixed axle groups this axle range belongs to"
+                                        onchange="updateAxleGroupField(${train.id}, ${group.id}, 'groupNumber', this.value)">
+                                    ${TRAILER_GROUP_DEFS.map(gd => `<option value="${gd.number}" ${group.groupNumber === gd.number ? 'selected' : ''}>${gd.label}</option>`).join('')}
+                                </select>
                                 <button type="button" class="tg-remove-group" title="Remove axle group"
                                         onclick="removeAxleGroup(${train.id}, ${group.id})"
                                         ${train.groups.length <= 1 ? 'disabled' : ''}>✕</button>
@@ -5565,9 +5612,12 @@
                                 </div>
                             </div>
                             <div class="tg-group-summary">
-                                ${Math.max(0, (parseInt(group.to,10)||0) - (parseInt(group.from,10)||0) + 1)} axle(s)
-                                (#${group.from}–#${group.to}) ·
-                                ${group.noLoad ? 'no line load' : `${group.load} t each`}
+                                ${(() => {
+                                    const n = Math.max(0, (parseInt(group.to,10)||0) - (parseInt(group.from,10)||0) + 1);
+                                    return group.noLoad
+                                        ? `${n} axle line(s) (#${group.from}–#${group.to}) · no line load`
+                                        : `${n} axle line(s) (#${group.from}–#${group.to}) · ${group.load} t/axle · ${(n * (parseFloat(group.load)||0)).toFixed(1)} t total`;
+                                })()}
                             </div>
                         </div>
                     `).join('')}
@@ -5581,13 +5631,69 @@
             renderTrailerGenPreview();
         }
 
+        // ---- Optional pop-out window for the live axle preview ----
+        // Off by default (renders inline in the modal, same as before).
+        // When the operator ticks "Show axle preview in separate
+        // window", the SAME renderTrailerGenPreview() call below just
+        // targets that window's document instead — so the preview keeps
+        // updating live, in real time, as trains/groups are edited,
+        // exactly like the inline version did.
+        let tgPreviewExternal = false;
+        let tgPreviewWindow = null;
+
+        function toggleTgPreviewWindow(checked) {
+            const toggleEl = document.getElementById('tgPreviewExternalToggle');
+            if (checked) {
+                tgPreviewWindow = window.open('', 'trailerAxlePreview', 'width=760,height=480');
+                if (!tgPreviewWindow) {
+                    alert('Please allow pop-ups to open the axle preview in a separate window.');
+                    if (toggleEl) toggleEl.checked = false;
+                    tgPreviewExternal = false;
+                    return;
+                }
+                tgPreviewExternal = true;
+                const doc = tgPreviewWindow.document;
+                doc.title = 'Trailer Axle Preview';
+                doc.body.style.margin = '0';
+                doc.body.style.background = '#0b1220';
+                doc.body.innerHTML = '<div id="tgPreviewExternalRoot" style="padding:10px;font-family:Segoe UI,Arial,sans-serif;"></div>';
+            } else {
+                tgPreviewExternal = false;
+                if (tgPreviewWindow && !tgPreviewWindow.closed) tgPreviewWindow.close();
+                tgPreviewWindow = null;
+            }
+            renderTrailerGenPreview();
+        }
+
         // Live plan-view preview: draws every axle GROUP's lines as a
-        // colored cluster along X at its train's Y, so the operator can
-        // see the groups separate out visually before writing to Excel.
-        // Purely illustrative — independent of the main tank plan/3D views.
+        // colored cluster along X at its train's Y, with a dashed
+        // outline around each group and a label giving its axle-line
+        // count, load per axle, and total (or "no line load"), so the
+        // operator can see the groups separate out visually before
+        // writing to Excel. Purely illustrative — independent of the
+        // main tank plan/3D views. Renders either inline in the modal
+        // or into the pop-out window, per tgPreviewExternal above.
         function renderTrailerGenPreview() {
-            const wrap = document.getElementById('tgPreview');
+            let wrap;
+            const inlineWrap = document.getElementById('tgPreview');
+            if (tgPreviewExternal) {
+                if (!tgPreviewWindow || tgPreviewWindow.closed) {
+                    // Operator closed the pop-out — fall back to inline
+                    // automatically and un-tick the toggle.
+                    tgPreviewExternal = false;
+                    tgPreviewWindow = null;
+                    const toggleEl = document.getElementById('tgPreviewExternalToggle');
+                    if (toggleEl) toggleEl.checked = false;
+                    wrap = inlineWrap;
+                } else {
+                    wrap = tgPreviewWindow.document.getElementById('tgPreviewExternalRoot');
+                    if (inlineWrap) inlineWrap.innerHTML = '<div class="tg-preview-external-note">Axle preview is open in a separate window.</div>';
+                }
+            } else {
+                wrap = inlineWrap;
+            }
             if (!wrap) return;
+
             const rows = computeTrailerGenRows();
             if (rows.length === 0) { wrap.innerHTML = ''; return; }
 
@@ -5605,7 +5711,10 @@
             const sy = y => padT + (1 - ((y - minY) / spanY)) * plotH;
 
             // Group rows by (train + group name) so each custom load
-            // group draws and labels as its own cluster.
+            // group draws and labels as its own cluster. Two different
+            // ranges that share a group number still get their own
+            // dashed box/label when they belong to different trains
+            // (different Y), but always share that group's color.
             const groups = {};
             const groupOrder = [];
             rows.forEach(r => {
@@ -5614,6 +5723,7 @@
                 groups[key].push(r);
             });
 
+            let boxesSvg = '';
             let linesSvg = '';
             let axlesSvg = '';
             let labelsSvg = '';
@@ -5624,23 +5734,39 @@
                 const y = sy(group[0].y);
                 const pts = group.map(r => sx(r.x));
                 const x1 = Math.min(...pts), x2 = Math.max(...pts);
+
+                // Dashed rectangle around this group's axle cluster —
+                // cheap to draw (one more <rect> per group) since it
+                // reuses the same x1/x2/y already computed for the line.
+                const boxPad = 12;
+                const boxX = x1 - boxPad, boxW = Math.max(x2 - x1 + boxPad * 2, 26);
+                boxesSvg += `<rect x="${boxX}" y="${y - 17}" width="${boxW}" height="34" rx="7" fill="none" stroke="${color}" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.8"/>`;
+
                 linesSvg += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity="0.55"/>`;
                 group.forEach(r => {
                     const cx = sx(r.x);
                     axlesSvg += `<rect x="${cx - 5}" y="${y - 12}" width="10" height="24" rx="3" fill="${color}" opacity="${r.noLoad ? 0.35 : 0.9}"/>`;
                 });
+
+                // Label: group name · total axle lines · load per axle ·
+                // group total (or "no line load" when that group carries
+                // no cargo weight — kept visually transparent above too).
+                const n = group.length;
+                const noLoad = group[0].noLoad;
                 const totalLoad = group.reduce((s, r) => s + r.load, 0);
+                const detailText = noLoad
+                    ? `${n} axle line(s) · no line load`
+                    : `${n} axle line(s) · ${group[0].load} t/axle · ${totalLoad.toFixed(1)} t total`;
                 const labelY = 16 + (labelRow * 14);
-                const loadText = group[0].noLoad ? 'no line load' : `${totalLoad.toFixed(1)} t total`;
                 labelsSvg += `<circle cx="58" cy="${labelY - 4}" r="4" fill="${color}"/>` +
                     `<text x="70" y="${labelY}" font-size="11" fill="var(--text-muted, #94a3b8)">` +
-                    `${escapeHtml(group[0].trainName)} – ${escapeHtml(group[0].groupName)} · ${group.length} axle(s) · ${loadText}</text>`;
+                    `${escapeHtml(group[0].trainName)} – ${escapeHtml(group[0].groupName)} · ${detailText}</text>`;
                 labelRow++;
             });
 
             wrap.innerHTML = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH + (labelRow * 14)}" style="display:block;">
                 <rect x="${padL - 10}" y="${padT - 10 + (labelRow * 14)}" width="${plotW + 20}" height="${plotH + 20}" rx="10" fill="none" stroke="var(--panel-border, #242f41)" stroke-width="1"/>
-                <g transform="translate(0, ${labelRow * 14})">${linesSvg}${axlesSvg}</g>
+                <g transform="translate(0, ${labelRow * 14})">${boxesSvg}${linesSvg}${axlesSvg}</g>
                 ${labelsSvg}
             </svg>`;
         }
@@ -5664,7 +5790,7 @@
                 totalsEl.innerHTML = `<strong>${trailerGenTrains.length}</strong> train(s) · ` +
                     `<strong>${rows.length}</strong> total axle(s) · ` +
                     `<strong>${totalLoad.toFixed(2)} t</strong> total load &rarr; ` +
-                    `will write Load_Editor!D${AXLE_START_ROW}:G${lastRow}`;
+                    `will write Load_Editor!B${AXLE_START_ROW}:B${lastRow} and D${AXLE_START_ROW}:G${lastRow}`;
             }
         }
 
@@ -5703,12 +5829,14 @@
                 el.innerHTML = '';
                 return;
             }
+            // Keyed by group NUMBER (not train+group) so every train
+            // sharing "Group 2" shows up once, in that group's one color.
             const seen = new Map();
             trailerAxleMeta.forEach(m => {
-                const key = m.trainName + ' – ' + m.groupName;
-                if (!seen.has(key)) seen.set(key, m.color);
+                const key = (m.groupNumber != null) ? m.groupNumber : m.groupName;
+                if (!seen.has(key)) seen.set(key, { label: m.groupName, color: m.color });
             });
-            el.innerHTML = Array.from(seen.entries()).map(([label, color]) =>
+            el.innerHTML = Array.from(seen.values()).map(({ label, color }) =>
                 `<span class="tg-legend-item"><span class="tg-legend-swatch" style="background:${color};"></span>${escapeHtml(label)}</span>`
             ).join('');
         }
@@ -5728,7 +5856,7 @@
                 return;
             }
 
-            const meta = rows.map(r => ({ trainName: r.trainName, groupName: r.groupName, color: r.color, load: r.load, noLoad: r.noLoad }));
+            const meta = rows.map(r => ({ trainName: r.trainName, groupName: r.groupName, groupNumber: r.groupNumber, excelName: r.excelName, color: r.color, load: r.load, noLoad: r.noLoad }));
 
             if (!isOfficeInitialized) {
                 // Not running inside Excel (mock/demo mode) — update the
@@ -5750,19 +5878,24 @@
                     const sheet = context.workbook.worksheets.getItem("Load_Editor");
                     const blockEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
 
-                    // Clear the whole D:G block first.
-                    const clearRange = sheet.getRange(`D${AXLE_START_ROW}:G${blockEndRow}`);
-                    clearRange.clear(Excel.ClearApplyTo.contents);
+                    // Clear the whole B (name) and D:G (data) blocks first,
+                    // as two separate ranges since C is left untouched.
+                    sheet.getRange(`B${AXLE_START_ROW}:B${blockEndRow}`).clear(Excel.ClearApplyTo.contents);
+                    sheet.getRange(`D${AXLE_START_ROW}:G${blockEndRow}`).clear(Excel.ClearApplyTo.contents);
 
-                    // Then write the new rows.
-                    const values = rows.map(r => [r.load, r.x, r.y, r.vcg]);
+                    // Then write the new rows: B = Group_n_line_n name,
+                    // D:G = load/X/Y/VCG (unchanged layout).
                     const writeEndRow = AXLE_START_ROW + rows.length - 1;
+                    const nameValues = rows.map(r => [r.excelName]);
+                    sheet.getRange(`B${AXLE_START_ROW}:B${writeEndRow}`).values = nameValues;
+
+                    const values = rows.map(r => [r.load, r.x, r.y, r.vcg]);
                     const writeRange = sheet.getRange(`D${AXLE_START_ROW}:G${writeEndRow}`);
                     writeRange.values = values;
 
                     await context.sync();
                 });
-                logAutoBallast(`🚂 Wrote ${rows.length} trailer axle(s) across ${trailerGenTrains.length} train(s) to Load_Editor!D${AXLE_START_ROW}:G${AXLE_START_ROW + rows.length - 1}.`);
+                logAutoBallast(`🚂 Wrote ${rows.length} trailer axle(s) across ${trailerGenTrains.length} train(s) to Load_Editor!B/D${AXLE_START_ROW}:G${AXLE_START_ROW + rows.length - 1}.`);
                 closeTrailerGeneratorModal();
                 // pullExcelTankData() re-reads E:F fresh from Excel (which
                 // carries no color info) and clears trailerAxleMeta, so
@@ -5798,15 +5931,20 @@
                 Define one or more trailer trains. Axle #1 of each train sits at
                 the entered X position; every following axle = previous axle's
                 X &minus; line spacing, all sharing the same Y position and VCG.
-                Split each train's axle range into custom-named
-                <strong>axle groups</strong> (e.g. axles 1&ndash;5 @ 25&nbsp;t
-                "Group1", axles 6&ndash;10 @ 50&nbsp;t "Group2") &mdash; or mark a
-                group <strong>No line load</strong> for axles that carry no
-                cargo weight. Each group gets its own color, shown below, in
-                the preview, and on the 2D/3D dashboard. Rows are written to
-                <strong>Load_Editor!D:G</strong>
+                Split each train's axle range into <strong>axle groups</strong>
+                (e.g. axles 1&ndash;5 @ 25&nbsp;t, axles 6&ndash;10 @ 50&nbsp;t)
+                and pick one of the <strong>4 fixed groups</strong> for each
+                range from the dropdown &mdash; or mark a group
+                <strong>No line load</strong> for axles that carry no cargo
+                weight. Every range assigned to the same group (even across
+                different trains) shares that one color, shown below, in the
+                preview, and on the 2D/3D dashboard. Rows are written to
+                <strong>Load_Editor!B</strong> (name, e.g.
+                <em>Group_1_line_1</em>) and <strong>D:G</strong>
                 starting at row <strong id="tgStartRowLabel">124</strong>
                 (D&nbsp;=&nbsp;Line load t, E&nbsp;=&nbsp;X, F&nbsp;=&nbsp;Y, G&nbsp;=&nbsp;VCG).
+                Tick "Show axle preview in separate window" below to keep the
+                live graphic visible in its own pop-out while you edit.
             </p>
 
             <div id="tgTrainList"><!-- train cards rendered by JS --></div>
@@ -5814,6 +5952,12 @@
             <button type="button" class="tg-add-train-btn" onclick="addTrailerGenTrain()">+ Add Train</button>
 
             <div class="tg-preview-wrap">
+                <div class="tg-preview-toolbar">
+                    <label class="tg-preview-toggle">
+                        <input type="checkbox" id="tgPreviewExternalToggle" onchange="toggleTgPreviewWindow(this.checked)">
+                        ⧉ Show axle preview in separate window
+                    </label>
+                </div>
                 <div id="tgPreview"><!-- live plan-view preview rendered by JS --></div>
             </div>
 
