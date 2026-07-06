@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Barge Ballast</title>
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+    <!-- ============================================================
+         LOAD EDITOR TAB — spreadsheet-in-browser support.
+         HyperFormula is a real Excel-compatible formula engine (open
+         source, GPL-v3 license used here). load_editor_data.js contains
+         the actual cell formulas/values exported from Clude_change_to_HTML.xlsm
+         for the sheets Load_Editor, Barge_Strength, CREST_301, TIDE and
+         STEP00-STEP20 — these are the only sheets Load_Editor's formulas
+         ever touch. Both files must be hosted alongside this HTML (same
+         folder) for this tab to work. If your host serves gzip
+         compression (most static hosts/Firebase Hosting do this
+         automatically), load_editor_data.js will transfer much smaller
+         than its ~30MB on-disk size. -->
+    <script src="https://cdn.jsdelivr.net/npm/hyperformula@2/dist/hyperformula.full.min.js"></script>
+    <script src="load_editor_data.js"></script>
     <style>
         :root {
             --bg-dark: #0f141c;
@@ -1301,6 +1315,140 @@
             border-color: var(--accent-blue);
             color: #06202e;
         }
+        /* ============================================================
+           LOAD EDITOR TAB — spreadsheet grid styling
+           ============================================================ */
+        .le-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .le-toolbar select {
+            background: var(--input-bg);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            border-radius: 4px;
+            padding: 3px 6px;
+            font-size: 11px;
+        }
+
+        .le-legend {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+        }
+
+        .le-legend-swatch {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            border: 1px solid var(--panel-border);
+        }
+
+        .le-grid-wrap {
+            position: relative;
+            height: 480px;
+            overflow: auto;
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            background: var(--tank-box-bg);
+        }
+
+        .le-table {
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 11px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            table-layout: fixed;
+        }
+
+        .le-table th, .le-table td {
+            border-right: 1px solid var(--panel-border);
+            border-bottom: 1px solid var(--panel-border);
+            padding: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            height: 20px;
+            width: 76px;
+            max-width: 76px;
+        }
+
+        .le-table th {
+            position: sticky;
+            top: 0;
+            background: var(--panel-bg);
+            color: var(--text-muted);
+            text-align: center;
+            font-weight: 600;
+            z-index: 3;
+        }
+
+        .le-table td.le-rownum {
+            position: sticky;
+            left: 0;
+            background: var(--panel-bg);
+            color: var(--text-muted);
+            text-align: center;
+            font-weight: 600;
+            z-index: 2;
+            width: 40px;
+            max-width: 40px;
+        }
+
+        .le-table th.le-corner {
+            position: sticky;
+            left: 0;
+            top: 0;
+            z-index: 4;
+            width: 40px;
+            max-width: 40px;
+        }
+
+        .le-cell-inner {
+            width: 100%;
+            height: 100%;
+            display: block;
+            box-sizing: border-box;
+            padding: 1px 4px;
+        }
+
+        .le-cell-input {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            border: none;
+            background: rgba(56,189,248,0.08);
+            color: var(--text-main);
+            font: inherit;
+            padding: 1px 4px;
+        }
+
+        .le-cell-input:focus {
+            outline: 2px solid var(--accent-blue);
+            outline-offset: -2px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .le-cell-formula {
+            background: transparent;
+            color: var(--text-main);
+            opacity: 0.85;
+            cursor: default;
+        }
+
+        .le-cell-error {
+            color: #ef4444 !important;
+            font-weight: 700;
+        }
+
+        .le-cell-empty { background: transparent; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
@@ -1515,6 +1663,50 @@
             </div>
 
             <div class="ab-log" id="abLog">Select a mode above, then Start. Auto Fixed/Smart require a live Excel connection.</div>
+        </div>
+
+        <!-- ============================================================
+             LOAD EDITOR PANEL
+             A real, editable copy of the Excel "Load_Editor" sheet (plus
+             the sheets it calculates against: Barge_Strength, CREST_301,
+             TIDE, STEP00-20), running entirely in the browser via
+             HyperFormula — an Excel-compatible formula engine. Formulas,
+             cross-sheet references and calculated results all work the
+             same as in Excel, with no server-side calculation. Any other
+             sheet in the workbook (the VBA macros included) is untouched
+             — this panel only mirrors these five.
+             ============================================================ -->
+        <div class="tank-grid-container" id="loadEditorPanel">
+            <div class="section-title">
+                <span>📊 Load Editor</span>
+                <span id="leStatus" style="font-size:10px; color:var(--text-muted); text-transform:none;">Not loaded</span>
+            </div>
+
+            <div class="le-toolbar">
+                <label for="leSheetSelect">Sheet:</label>
+                <select id="leSheetSelect" onchange="leSwitchSheet(this.value)" disabled></select>
+
+                <div class="le-legend">
+                    <span class="le-legend-swatch" style="background:rgba(56,189,248,0.25);"></span> input (editable)
+                    <span class="le-legend-swatch" style="background:transparent;"></span> formula (calculated)
+                </div>
+
+                <div style="flex:1;"></div>
+
+                <button class="sync-btn" id="leLoadBtn" onclick="leInit()">▶ Load Sheet</button>
+                <button class="sync-btn" onclick="leRecalculateAll()" disabled id="leRecalcBtn">↻ Recalculate</button>
+                <button class="sync-btn" onclick="leSyncFromExcel()" disabled id="leSyncExcelBtn" title="Pull the latest input values from the live Excel workbook (only available inside the Excel add-in)">⇩ Import from Excel</button>
+                <button class="sync-btn" onclick="lePushToExcel()" disabled id="lePushExcelBtn" title="Write your edited input cells back to the live Excel workbook (only available inside the Excel add-in)">⇧ Push to Excel</button>
+                <button class="sync-btn" onclick="leSaveFirebase()" disabled id="leSaveFirebaseBtn" title="Save your edited inputs to Firebase so this sheet can be viewed/edited without Excel">☁ Save</button>
+                <button class="sync-btn" onclick="leLoadFirebase()" disabled id="leLoadFirebaseBtn" title="Load the last snapshot saved to Firebase">☁ Load</button>
+            </div>
+
+            <div class="le-grid-wrap" id="leGridWrap">
+                <table class="le-table" id="leTable">
+                    <thead id="leTHead"></thead>
+                    <tbody id="leTBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -6302,5 +6494,377 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // ============================================================
+        // LOAD EDITOR TAB — controller
+        //
+        // Runs the Excel "Load_Editor" sheet (plus Barge_Strength,
+        // CREST_301, TIDE and STEP00-20, which are the only sheets its
+        // formulas ever reach into) live in the browser using
+        // HyperFormula, an open-source Excel-compatible formula engine
+        // (GPL-v3 license used here — see hyperformula.io/license).
+        //
+        // - Cells that are formulas in the workbook stay read-only here
+        //   and just show the live computed result.
+        // - Cells that were plain values in the workbook are editable
+        //   inputs; editing one triggers HyperFormula to recalculate
+        //   every formula that depends on it, same as Excel.
+        // - "Import from Excel" / "Push to Excel" only cover Load_Editor
+        //   and CREST_301 (the two sheets people actually type into) and
+        //   only work inside the Excel add-in (Office.js). Barge_Strength,
+        //   TIDE and STEP00-20 are reference/lookup tables copied in once
+        //   and are not meant to be edited day-to-day.
+        // - "Save"/"Load" push the editable inputs to the same Firebase
+        //   project already used elsewhere in this dashboard, under
+        //   /load_editor.json, so this tab keeps working as a standalone
+        //   webpage with no Excel open at all.
+        // ============================================================
+
+        const LE_SHEET_NAMES = ['Load_Editor','Barge_Strength','CREST_301','TIDE']
+            .concat(Array.from({length:21}, (_,i) => 'STEP' + String(i).padStart(2,'0')));
+        const LE_EDITABLE_SHEETS = ['Load_Editor','CREST_301']; // Import/Push/Firebase scope
+        const LE_ROW_H = 20;
+        const LE_ROW_BUFFER = 8;
+
+        let leHF = null;
+        let leSheetIds = {};
+        let leCurrentSheet = 'Load_Editor';
+        let leLoaded = false;
+        let leRenderScheduled = false;
+
+        function leColLetter(n) { // 1-based column index -> "A", "B", ... "AA"
+            let s = '';
+            while (n > 0) {
+                const rem = (n - 1) % 26;
+                s = String.fromCharCode(65 + rem) + s;
+                n = Math.floor((n - 1) / 26);
+            }
+            return s;
+        }
+
+        function leEscapeAttr(v) {
+            return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        }
+
+        function leFormatValue(sheet, addr1, value) {
+            if (value == null) return '';
+            if (typeof value === 'object') {
+                // HyperFormula error objects: { type: 'CellError', value: '#REF!' ... }
+                if (value.value !== undefined) return String(value.value);
+                return '#ERR';
+            }
+            const hints = window.LOAD_EDITOR_DISPLAY_HINTS || {};
+            const kind = hints[sheet] && hints[sheet][addr1];
+            if (kind === 't' && typeof value === 'number') {
+                const totalMin = Math.round(value * 24 * 60);
+                const hh = Math.floor(totalMin / 60) % 24;
+                const mm = totalMin % 60;
+                return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+            }
+            if (kind === 'd' && typeof value === 'number') {
+                const ms = (value - 25569) * 86400000; // 25569 = days between 1899-12-30 and 1970-01-01
+                const d = new Date(ms);
+                if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+            }
+            if (typeof value === 'number') {
+                // trim long float noise but keep meaningful precision
+                if (Math.abs(value) > 0 && Math.abs(value) < 1e15) {
+                    const rounded = Math.round(value * 1e6) / 1e6;
+                    return String(rounded);
+                }
+            }
+            return String(value);
+        }
+
+        function leStatus(msg) {
+            const el = document.getElementById('leStatus');
+            if (el) el.textContent = msg;
+        }
+
+        async function leInit() {
+            if (leLoaded) return;
+            const btn = document.getElementById('leLoadBtn');
+            btn.disabled = true;
+            leStatus('Loading engine + ~330,000 formula cells — this can take several seconds…');
+
+            // Let the "loading" text paint before the heavy synchronous build.
+            await new Promise(r => setTimeout(r, 20));
+
+            try {
+                if (typeof HyperFormula === 'undefined') {
+                    throw new Error('HyperFormula failed to load (CDN blocked?)');
+                }
+                if (typeof window.LOAD_EDITOR_WORKBOOK_DATA === 'undefined') {
+                    throw new Error('load_editor_data.js not found — host it in the same folder as this HTML');
+                }
+
+                leHF = HyperFormula.buildFromSheets(window.LOAD_EDITOR_WORKBOOK_DATA, { licenseKey: 'gpl-v3' });
+                LE_SHEET_NAMES.forEach(name => { leSheetIds[name] = leHF.getSheetId(name); });
+
+                const sel = document.getElementById('leSheetSelect');
+                sel.innerHTML = '';
+                LE_SHEET_NAMES.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    sel.appendChild(opt);
+                });
+                sel.disabled = false;
+                sel.value = 'Load_Editor';
+
+                document.getElementById('leRecalcBtn').disabled = false;
+                document.getElementById('leSaveFirebaseBtn').disabled = false;
+                document.getElementById('leLoadFirebaseBtn').disabled = false;
+                document.getElementById('leSyncExcelBtn').disabled = !isOfficeInitialized;
+                document.getElementById('lePushExcelBtn').disabled = !isOfficeInitialized;
+
+                document.getElementById('leGridWrap').addEventListener('scroll', leScheduleRender);
+
+                leLoaded = true;
+                btn.textContent = '✓ Loaded';
+                leStatus('Loaded — ' + LE_SHEET_NAMES.length + ' sheets live. Blue cells are editable; grey cells are calculated.');
+                leSwitchSheet('Load_Editor');
+            } catch (e) {
+                console.error('Load Editor init failed', e);
+                leStatus('Failed to load: ' + e.message);
+                btn.disabled = false;
+            }
+        }
+
+        function leSwitchSheet(name) {
+            if (!leLoaded) return;
+            leCurrentSheet = name;
+            const sheetId = leSheetIds[name];
+            const dims = leHF.getSheetDimensions(sheetId);
+
+            const thead = document.getElementById('leTHead');
+            let headerHtml = '<tr><th class="le-corner"></th>';
+            for (let c = 1; c <= dims.width; c++) {
+                headerHtml += '<th>' + leColLetter(c) + '</th>';
+            }
+            headerHtml += '</tr>';
+            thead.innerHTML = headerHtml;
+
+            document.getElementById('leGridWrap').scrollTop = 0;
+            leRenderRows();
+        }
+
+        function leScheduleRender() {
+            if (leRenderScheduled) return;
+            leRenderScheduled = true;
+            requestAnimationFrame(() => { leRenderScheduled = false; leRenderRows(); });
+        }
+
+        function leRecalculateAll() {
+            if (!leLoaded) return;
+            leRenderRows();
+        }
+
+        function leRenderRows() {
+            if (!leLoaded) return;
+            const sheetId = leSheetIds[leCurrentSheet];
+            const dims = leHF.getSheetDimensions(sheetId);
+            const wrap = document.getElementById('leGridWrap');
+            const scrollTop = wrap.scrollTop;
+            const viewportH = wrap.clientHeight || 480;
+
+            const totalRows = dims.height;
+            const totalCols = dims.width;
+            let startRow = Math.max(0, Math.floor(scrollTop / LE_ROW_H) - LE_ROW_BUFFER);
+            let endRow = Math.min(totalRows - 1, Math.ceil((scrollTop + viewportH) / LE_ROW_H) + LE_ROW_BUFFER);
+            if (endRow < startRow) endRow = startRow;
+
+            const topSpacer = startRow * LE_ROW_H;
+            const bottomSpacer = Math.max(0, (totalRows - 1 - endRow)) * LE_ROW_H;
+
+            let html = '';
+            if (topSpacer > 0) html += '<tr style="height:' + topSpacer + 'px;"><td colspan="' + (totalCols+1) + '" style="border:none;padding:0;"></td></tr>';
+
+            for (let r = startRow; r <= endRow; r++) {
+                html += '<tr style="height:' + LE_ROW_H + 'px;">';
+                html += '<td class="le-rownum">' + (r + 1) + '</td>';
+                for (let c = 0; c < totalCols; c++) {
+                    const addr = { sheet: sheetId, row: r, col: c };
+                    const formula = leHF.getCellFormula(addr);
+                    const value = leHF.getCellValue(addr);
+                    const a1 = leColLetter(c + 1) + (r + 1);
+                    if (formula !== undefined) {
+                        const isErr = value && typeof value === 'object' && value.value !== undefined;
+                        html += '<td class="le-cell-formula' + (isErr ? ' le-cell-error' : '') + '" title="' + leEscapeAttr(formula) + '">'
+                              + '<span class="le-cell-inner">' + leEscapeAttr(leFormatValue(leCurrentSheet, a1, value)) + '</span></td>';
+                    } else {
+                        html += '<td style="padding:0;"><input class="le-cell-input" data-row="' + r + '" data-col="' + c + '" data-a1="' + a1 + '" '
+                              + 'value="' + leEscapeAttr(value == null ? '' : leFormatValue(leCurrentSheet, a1, value)) + '" onchange="leOnEdit(this)"></td>';
+                    }
+                }
+                html += '</tr>';
+            }
+
+            if (bottomSpacer > 0) html += '<tr style="height:' + bottomSpacer + 'px;"><td colspan="' + (totalCols+1) + '" style="border:none;padding:0;"></td></tr>';
+
+            document.getElementById('leTBody').innerHTML = html;
+        }
+
+        function leOnEdit(inputEl) {
+            const row = parseInt(inputEl.dataset.row, 10);
+            const col = parseInt(inputEl.dataset.col, 10);
+            const sheetId = leSheetIds[leCurrentSheet];
+            let raw = inputEl.value;
+            let newVal;
+            if (raw.trim() === '') {
+                newVal = null;
+            } else if (raw.startsWith('=')) {
+                newVal = raw; // let the user enter a new formula too
+            } else if (!isNaN(raw) && raw.trim() !== '') {
+                newVal = parseFloat(raw);
+            } else {
+                newVal = raw;
+            }
+            try {
+                leHF.setCellContents({ sheet: sheetId, row, col }, [[newVal]]);
+            } catch (e) {
+                console.warn('Edit rejected', e);
+            }
+            leRenderRows();
+        }
+
+        // ---- Import from / Push to the live Excel workbook (Office.js) ----
+        // Scoped to Load_Editor + CREST_301 — the two sheets people actually
+        // type into. Barge_Strength / TIDE / STEP00-20 are reference tables
+        // and are not re-synced (their formulas never change).
+
+        function leGetInputCells(sheetName) {
+            // Returns [{row, col, a1}] for every cell that is NOT a formula
+            // in the ORIGINAL workbook export (i.e. a genuine input cell).
+            const raw = window.LOAD_EDITOR_WORKBOOK_DATA[sheetName];
+            const cells = [];
+            for (let r = 0; r < raw.length; r++) {
+                const rowArr = raw[r];
+                for (let c = 0; c < rowArr.length; c++) {
+                    const v = rowArr[c];
+                    if (typeof v === 'string' && v.startsWith('=')) continue;
+                    cells.push({ row: r, col: c, a1: leColLetter(c + 1) + (r + 1) });
+                }
+            }
+            return cells;
+        }
+
+        async function leSyncFromExcel() {
+            if (!leLoaded || !isOfficeInitialized) return;
+            leStatus('Importing inputs from Excel…');
+            try {
+                await Excel.run(async (context) => {
+                    for (const sheetName of LE_EDITABLE_SHEETS) {
+                        const dims = leHF.getSheetDimensions(leSheetIds[sheetName]);
+                        const sheet = context.workbook.worksheets.getItem(sheetName);
+                        const range = sheet.getRangeByIndexes(0, 0, dims.height, dims.width);
+                        range.load('values');
+                        await context.sync();
+
+                        const inputCells = leGetInputCells(sheetName);
+                        const sheetId = leSheetIds[sheetName];
+                        inputCells.forEach(({ row, col }) => {
+                            const v = range.values[row][col];
+                            leHF.setCellContents({ sheet: sheetId, row, col }, [[v === '' ? null : v]]);
+                        });
+                    }
+                });
+                leRenderRows();
+                leStatus('Imported latest inputs from Excel (' + new Date().toLocaleTimeString() + ').');
+            } catch (e) {
+                console.error('Import from Excel failed', e);
+                leStatus('Import failed: ' + e.message);
+            }
+        }
+
+        async function lePushToExcel() {
+            if (!leLoaded || !isOfficeInitialized) return;
+            leStatus('Pushing edited inputs to Excel…');
+            try {
+                await Excel.run(async (context) => {
+                    for (const sheetName of LE_EDITABLE_SHEETS) {
+                        const sheet = context.workbook.worksheets.getItem(sheetName);
+                        const sheetId = leSheetIds[sheetName];
+                        const inputCells = leGetInputCells(sheetName);
+                        inputCells.forEach(({ row, col }) => {
+                            const val = leHF.getCellValue({ sheet: sheetId, row, col });
+                            const plain = (val && typeof val === 'object') ? (val.value !== undefined ? val.value : null) : val;
+                            sheet.getCell(row, col).values = [[plain === undefined ? null : plain]];
+                        });
+                    }
+                    await context.sync();
+                });
+                leStatus('Pushed edited inputs to Excel (' + new Date().toLocaleTimeString() + ').');
+            } catch (e) {
+                console.error('Push to Excel failed', e);
+                leStatus('Push failed: ' + e.message);
+            }
+        }
+
+        // ---- Firebase save/load (standalone webpage support) ----
+        // Reuses the same FIREBASE_URL already configured above for the
+        // rest of this dashboard, under a separate /load_editor.json path.
+
+        async function leSaveFirebase() {
+            if (!leLoaded) return;
+            leStatus('Saving inputs to Firebase…');
+            try {
+                const inputs = {};
+                LE_EDITABLE_SHEETS.forEach(sheetName => {
+                    const sheetId = leSheetIds[sheetName];
+                    const cells = leGetInputCells(sheetName);
+                    const sheetVals = {};
+                    cells.forEach(({ row, col, a1 }) => {
+                        const val = leHF.getCellValue({ sheet: sheetId, row, col });
+                        const plain = (val && typeof val === 'object') ? (val.value !== undefined ? val.value : null) : val;
+                        if (plain !== null && plain !== undefined && plain !== '') sheetVals[a1] = plain;
+                    });
+                    inputs[sheetName] = sheetVals;
+                });
+                const payload = { inputs, updatedAt: new Date().toISOString() };
+                const res = await fetch(`${FIREBASE_URL}/load_editor.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                leStatus('Saved to Firebase (' + new Date().toLocaleTimeString() + ').');
+            } catch (e) {
+                console.error('Firebase save failed', e);
+                leStatus('Save failed (check FIREBASE_URL / internet): ' + e.message);
+            }
+        }
+
+        async function leLoadFirebase() {
+            if (!leLoaded) return;
+            leStatus('Loading last snapshot from Firebase…');
+            try {
+                const res = await fetch(`${FIREBASE_URL}/load_editor.json`, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (!data || !data.inputs) { leStatus('No Load Editor snapshot saved yet.'); return; }
+
+                Object.keys(data.inputs).forEach(sheetName => {
+                    const sheetId = leSheetIds[sheetName];
+                    if (sheetId === undefined) return;
+                    const sheetVals = data.inputs[sheetName];
+                    Object.keys(sheetVals).forEach(a1 => {
+                        const m = a1.match(/^([A-Z]+)(\d+)$/);
+                        if (!m) return;
+                        let col = 0;
+                        for (const ch of m[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+                        const row = parseInt(m[2], 10) - 1;
+                        leHF.setCellContents({ sheet: sheetId, row, col: col - 1 }, [[sheetVals[a1]]]);
+                    });
+                });
+                leRenderRows();
+                leStatus('Loaded snapshot from ' + new Date(data.updatedAt).toLocaleString() + '.');
+            } catch (e) {
+                console.error('Firebase load failed', e);
+                leStatus('Load failed: ' + e.message);
+            }
+        }
+    </script>
 </body>
 </html>
