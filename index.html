@@ -1307,7 +1307,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 22-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 24-index_Autoballast_GenTrailer_Clude.html</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -5737,12 +5737,12 @@
                                    onchange="updateTrailerGenField(${train.id}, 'spacing', this.value)">
                         </div>
                         <div class="tg-field">
-                            <label>X position — axle 1 (m)</label>
+                            <label>X from (0,0) to axle line 1 (m)</label>
                             <input type="number" step="any" value="${train.x}" title="Axle #1's X position. Every following axle = previous axle X - line spacing"
                                    onchange="updateTrailerGenField(${train.id}, 'x', this.value)">
                         </div>
                         <div class="tg-field">
-                            <label>Y position axle (m)</label>
+                            <label>Y from barge's center to axle line's center</label>
                             <input type="number" step="any" value="${train.y}" title="Shared Y position for every axle in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'y', this.value)">
                         </div>
@@ -6020,6 +6020,12 @@
                 }
                 connectSvg += `<circle cx="${overallX}" cy="${overallY}" r="4.5" fill="${g.color}" stroke="var(--tank-box-bg, #0b1220)" stroke-width="1.5"/>`;
 
+                // Stash this group's overall (shared) center so the
+                // group-to-group chain below can link 1→2→3→4→1 once
+                // every group's center has been resolved.
+                g.overallX = overallX;
+                g.overallY = overallY;
+
                 // Aggregate stats across every occurrence of this group
                 // (all trains combined): total axle lines, load per axle
                 // (when uniform), group total — or "no line load" when
@@ -6053,9 +6059,30 @@
                     `</g>`;
             });
 
+            // Group-center chain: link every group's shared center to
+            // the next, in fixed group-number order (1→2→3→4), then
+            // close the loop back from the last group to Group 1 — so
+            // the four group centers read as one connected circuit
+            // rather than four isolated points. Only groups that are
+            // actually present (have at least one row) are included,
+            // still walked in ascending group-number order.
+            let groupChainSvg = '';
+            const chainGroups = Object.keys(groupAgg)
+                .map(Number)
+                .sort((a, b) => a - b)
+                .map(gNum => groupAgg[gNum]);
+            if (chainGroups.length > 1) {
+                for (let i = 0; i < chainGroups.length; i++) {
+                    const a = chainGroups[i];
+                    const b = chainGroups[(i + 1) % chainGroups.length]; // wraps last→first (…→Group 1)
+                    groupChainSvg += `<line x1="${a.overallX}" y1="${a.overallY}" x2="${b.overallX}" y2="${b.overallY}" ` +
+                        `stroke="var(--accent-blue, #3b82f6)" stroke-width="2" opacity="0.6"/>`;
+                }
+            }
+
             wrap.innerHTML = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="display:block;">
                 <rect x="${padL - 10}" y="${padT - 10}" width="${plotW + 20}" height="${plotH + 20}" rx="10" fill="none" stroke="var(--panel-border, #242f41)" stroke-width="1"/>
-                ${spineSvg}${linesSvg}${axlesSvg}${connectSvg}${labelsSvg}
+                ${spineSvg}${linesSvg}${axlesSvg}${groupChainSvg}${connectSvg}${labelsSvg}
             </svg>`;
         }
 
@@ -6235,7 +6262,7 @@
                 (D&nbsp;=&nbsp;Line load t, E&nbsp;=&nbsp;X, F&nbsp;=&nbsp;Y, G&nbsp;=&nbsp;VCG).
                 Use "Load from Excel" to pull an already-generated trailer
                 back in for editing. Tick "Show preview beside input data" or
-                "Show axle preview in separate window" below to keep the live
+                "Show preview in separate window" below to keep the live
                 graphic visible while you edit.
             </p>
 
@@ -6259,7 +6286,7 @@
                             </label>
                             <label class="tg-preview-toggle">
                                 <input type="checkbox" id="tgPreviewExternalToggle" onchange="toggleTgPreviewWindow(this.checked)">
-                                ⧉ Show axle preview in separate window
+                                ⧉ Show axle preview in separate window (Compatible with two monitor)
                             </label>
                         </div>
                         <div id="tgPreview"><!-- live plan-view preview rendered by JS --></div>
