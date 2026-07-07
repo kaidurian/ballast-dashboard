@@ -1443,6 +1443,17 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             background: var(--input-bg);
         }
         .le-grid td.le-cell-formula input.le-has-formula { color: var(--accent-blue); font-weight: 600; }
+        .le-writeback-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin: -6px 0 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .le-writeback-toggle input { cursor: pointer; }
 
         .tg-train-card {
             border: 1px solid var(--panel-border);
@@ -1725,7 +1736,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 26-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 27-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4141,6 +4152,20 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // .formulas, or a plain value via .values, matching what the
         // person typed), and refreshes the grid so every formula that
         // depends on this cell recalculates immediately.
+        // Controls whether formula-cell edits (updateLoadEditorCell) also
+        // write to the real Excel Load_Editor sheet. Toggled by the
+        // "Write formula-cell edits to Excel" checkbox in the Load
+        // Editor modal. Defaults to on. Does NOT affect the tank
+        // Filling / RO-RO axle cells — those always write to Excel via
+        // updateTankFill()/updateLoadEditorAxle(), same as before.
+        let leWriteToExcel = false;
+        function leSetWriteToExcel(on) {
+            leWriteToExcel = !!on;
+            logAutoBallast(leWriteToExcel
+                ? "📋 Load Editor: formula-cell edits will now write to Excel again."
+                : "📋 Load Editor: formula-cell edits will stay in the browser only (not written to Excel) until re-enabled.");
+        }
+
         async function updateLoadEditorCell(r, c, value) {
             const engine = leGetEngine();
             const addr = leAddr(r, c);
@@ -4153,7 +4178,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
             engine.setCellContents(addr, [[content === '' ? null : content]]);
 
-            if (isOfficeInitialized) {
+            if (isOfficeInitialized && leWriteToExcel) {
                 const col = leColLetters(c);
                 try {
                     await Excel.run(async (context) => {
@@ -7037,8 +7062,10 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 can only reference cells within this same grid, not other sheets). <strong>Column D from row 14</strong>
                 (Filling[mT]) and <strong>columns D:G from row 124</strong> (RO-RO Line load/Xpos/Ypos/VCG) stay
                 specially linked to the dashboard's live tank/axle data (blue cells) instead of the formula engine.
-                Edits write straight back to the real Excel <strong>Load_Editor</strong> sheet.
             </p>
+            <label class="le-writeback-toggle" title="When on, every amber-cell edit is also written to the real Excel Load_Editor sheet. Turn off to experiment with formulas in the browser only.">
+                <input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)"><input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)">                Write formula-cell edits to Excel
+            </label>
             <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeLoadEditorPage()">Close</button>
