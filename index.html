@@ -1742,7 +1742,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 29-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 30-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4158,6 +4158,87 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             );
             if (crest301TableWindow) crest301TableWindow.focus();
             else logAutoBallast('⚠️ CREST_301 Table page was blocked by the browser — allow pop-ups for this site and try again.');
+        }
+
+        // Reads the whole used range of the CREST_301 sheet straight
+        // from Excel (this dashboard runs as a real Excel task pane,
+        // so Excel.run works here — unlike the CREST_301 Table Viewer
+        // popup, which is opened via window.open() and therefore has
+        // no genuine Office/Excel host connection; see project notes).
+        // Pushes the result to the shared "crest301" Firebase node and
+        // immediately re-seeds the local HyperFormula CREST_301 sheet
+        // so =CREST_301!... formulas in this session pick it up right
+        // away. The popup viewer picks up the same data next time its
+        // own "Refresh" button (which just re-pulls from Firebase) is
+        // clicked.
+        async function crest301RefreshFromExcelAndPush() {
+            if (typeof Excel === 'undefined') {
+                logAutoBallast('⚠️ CREST_301 refresh: not running inside Excel.');
+                return;
+            }
+            logAutoBallast('🔄 CREST_301: reading sheet from Excel...');
+            try {
+                const { data, meta } = await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem(CREST301_SHEET_NAME);
+                    const used = sheet.getUsedRange();
+                    used.load(['values', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
+                    await context.sync();
+
+                    const dataOut = {};
+                    const rowsSet = new Set();
+                    const colsSet = new Set();
+                    const colWidth = {};
+                    const startRow = used.rowIndex;
+                    const startCol = used.columnIndex;
+
+                    function colLetters(nZeroBased) {
+                        let n = nZeroBased + 1, s = '';
+                        while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+                        return s;
+                    }
+
+                    for (let r = 0; r < used.rowCount; r++) {
+                        for (let c = 0; c < used.columnCount; c++) {
+                            const v = used.values[r][c];
+                            if (v !== '' && v !== null && v !== undefined) {
+                                const colLetter = colLetters(startCol + c);
+                                const rowNumber = startRow + r + 1;
+                                const key = colLetter + rowNumber;
+                                dataOut[key] = v;
+                                rowsSet.add(rowNumber);
+                                colsSet.add(colLetter);
+                                const len = String(v).length;
+                                colWidth[colLetter] = Math.max(colWidth[colLetter] || 6, Math.min(len + 2, 42));
+                            }
+                        }
+                    }
+                    const colIndexOf = (letters) => { let n = 0; for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+                    const rows = Array.from(rowsSet).sort((a, b) => a - b);
+                    const cols = Array.from(colsSet).sort((a, b) => colIndexOf(a) - colIndexOf(b));
+
+                    return { data: dataOut, meta: { rows, cols, colWidth } };
+                });
+
+                // Push to Firebase so the CREST_301 Table Viewer popup
+                // and any other connected device pick up the change.
+                await fetch(`${CREST301_FIREBASE_URL}/${CREST301_FIREBASE_NODE}.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data, meta, updatedAt: Date.now() })
+                });
+
+                // Re-seed the local formula engine immediately so
+                // =CREST_301!... formulas update without a page reload.
+                const engine = leGetEngine();
+                const crestId = engine.getSheetId(CREST301_SHEET_NAME);
+                engine.setSheetContent(crestId, crest301DataToGrid(data));
+                refreshLoadEditorPageIfOpen();
+
+                logAutoBallast(`✅ CREST_301: refreshed ${Object.keys(data).length} cells from Excel and pushed to Firebase.`);
+            } catch (e) {
+                console.warn('CREST_301 Excel refresh failed', e);
+                logAutoBallast('⚠️ CREST_301: could not read from Excel — ' + (e.message || e));
+            }
         }
 
         // Fetches the crest301 Firebase node once per session and seeds
@@ -7176,6 +7257,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     Write formula-cell edits to Excel
                 </label>
                 <button type="button" class="tg-btn" title="Open the CREST_301 Table Viewer in a separate window — useful for looking up cell coordinates (e.g. Q30) to reference in a =CREST_301!... formula" onclick="openCrest301TablePage()">🧭 Open CREST_301 Table</button>
+                <button type="button" class="tg-btn" title="Re-read the CREST_301 sheet from Excel and push it to Firebase. Run this after editing CREST_301 in Excel — the CREST_301 Table Viewer popup only reads from Firebase, it has no direct Excel connection, so this is the step that actually picks up your changes." onclick="crest301RefreshFromExcelAndPush()">🔄 Refresh CREST_301 from Excel</button>
             </div>
             <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
             <div class="tg-footer">
