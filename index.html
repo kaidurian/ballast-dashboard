@@ -1041,7 +1041,7 @@
            Reuses the .tg-overlay / .tg-btn shell from the trailer
            generator modal for a consistent look.
            ============================================================ */
-        .le-modal { max-width: 980px; }
+        .le-modal { max-width: 96vw; }
         .le-section-title {
             font-size: 12px;
             font-weight: 700;
@@ -1055,6 +1055,10 @@
             overflow-y: auto;
             border: 1px solid var(--panel-border);
             border-radius: 6px;
+        }
+        .le-grid-wrap {
+            max-height: 72vh;
+            overflow: auto;
         }
         .le-table {
             width: 100%;
@@ -1087,6 +1091,54 @@
         }
         .le-table input:focus { outline: none; border-color: var(--accent-blue); }
         .le-empty-row td { text-align: center; color: var(--text-muted); padding: 10px; }
+
+        /* ---- Full spreadsheet-grid replica ("copycat" view) ---- */
+        .le-grid {
+            border-collapse: collapse;
+            font-size: 10px;
+            table-layout: fixed;
+        }
+        .le-grid th, .le-grid td {
+            border: 1px solid var(--panel-border);
+            padding: 2px 4px;
+            min-width: 46px;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .le-grid thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: var(--panel-bg);
+            color: var(--text-muted);
+            font-weight: 700;
+            text-align: center;
+        }
+        .le-grid td.le-rownum, .le-grid th.le-corner {
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background: var(--panel-bg);
+            color: var(--text-muted);
+            font-weight: 700;
+            text-align: center;
+        }
+        .le-grid th.le-corner { z-index: 3; }
+        .le-grid td.le-cell-live { background: rgba(56,189,248,0.08); padding: 1px; }
+        .le-grid td.le-cell-live input {
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 10px;
+            padding: 2px 3px;
+            border-radius: 3px;
+            border: 1px solid var(--accent-blue);
+            background: var(--input-bg);
+            color: var(--text-main);
+        }
+        .le-grid td.le-cell-live input:focus { outline: none; }
+        .le-grid tr.le-row-header td, .le-grid tr.le-row-header th { background: rgba(148,163,184,0.12); font-weight: 700; }
 
         .tg-train-card {
             border: 1px solid var(--panel-border);
@@ -1369,7 +1421,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 25-index_Autoballast_LoadEditor_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 25-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -1380,7 +1432,7 @@
                 <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
             </div>
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
-            <button type="button" class="tg-btn" title="View Load_Editor layout — Filling[mT] links to the 2D barge tank boxes, RO-RO D:G links to Generate Trailer" onclick="openLoadEditorPage()">📋 Load Editor</button>
+            <button type="button" class="tg-btn" title="Exact cell-for-cell copy of Load_Editor (no formulas/macros) — Filling[mT] and RO-RO D:G stay live" onclick="openLoadEditorPage()">📋 Load Editor</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
@@ -3662,18 +3714,41 @@
         }
 
         // ============================================================
-        // LOAD EDITOR PAGE
-        // A view of the Load_Editor sheet layout. Carries NO formulas or
-        // hydrostatic values — the only two things it actually reads/
-        // writes are:
-        //   - Filling[mT] (D14:D..)      -> reuses updateTankFill(), the
-        //     exact same function the 2D barge tank input boxes call, so
-        //     editing here or there stays in sync both ways.
-        //   - Line load/Xpos/Ypos/VCG (D:G124:..) -> reuses/extends the
-        //     trailerAxles[] array that "Generate Trailer" and the 2D/3D
-        //     overlays already read from, and writes straight to
-        //     Load_Editor!D:G like generateTrailerAndWriteToExcel() does.
+        // LOAD EDITOR PAGE — full cell-for-cell copy of the Excel
+        // "Load_Editor" sheet (same row numbers, same column letters,
+        // same header text). Formulas and VBA macros are NOT copied —
+        // only the hardcoded literal values from the template are
+        // embedded below (LOAD_EDITOR_STATIC_CELLS), captured once from
+        // the .xlsm file. Two exceptions stay LIVE instead of showing
+        // the static template number:
+        //   - Column D from row 14 (Filling[mT])  -> reuses updateTankFill(),
+        //     the exact same function the 2D barge tank input boxes
+        //     call, so editing here or there stays in sync both ways.
+        //   - Columns D:G from row 124 (Line load/Xpos/Ypos/VCG) -> reuses/
+        //     extends the trailerAxles[] array that "Generate Trailer"
+        //     and the 2D/3D overlays already read from, and writes
+        //     straight to Load_Editor!D:G like
+        //     generateTrailerAndWriteToExcel() does.
         // ============================================================
+
+        // Snapshot of every non-formula cell in Load_Editor!A1: up to row 167,
+        // keyed "row_col" (1-indexed, col 1=A). Formula cells were
+        // excluded at extraction time, so anything not listed here was
+        // either empty or a formula in the source workbook.
+        const LOAD_EDITOR_STATIC_MAXROW = 167;
+        const LOAD_EDITOR_STATIC_MAXCOL = 56;
+        const LOAD_EDITOR_STATIC_CELLS = {"1_8":"Delta_1 [m]","1_11":"T_2","2_2":"Select Barge","2_3":"CREST_301","2_5":"Tmid_barge_ps @ ramps [m]","2_8":"Delta_2 [m]","2_11":"T_5","3_2":"Loa","3_5":"Tmid_barge_sb @ramps [m]","3_8":"Delta_3 [m]","3_11":"Notes:","4_2":"Boa","4_5":"Delta @ ramps [m]","4_8":"Delta_4 [m]","4_11":"Delta is the difference between top of the quay and top of the barge","5_2":"Depth","5_8":"Delta_5 [m]","5_11":"(+) means barge is above quayside","6_8":"Delta_6 [m]","6_11":"(-) means barge is below quayside","7_11":"(0.00) means barge is level with the quayside","8_2":"Tfwd [m]","8_4":"Trim","8_6":"deg           Aft =+","8_7":"Shear [%]","9_2":"Tmid [m]","9_4":"Heel","9_6":"deg           PS=+","10_2":"Taft [m]","10_4":"GMt inc fsm","10_6":"m","10_7":"Required draft:","13_2":"Tank","13_3":"Capacity[mT]","13_4":"Filling[mT]","13_5":"Load%","13_6":"LCG[m]","13_7":"TCG[m]","13_8":"VCG[m]","13_9":"FSM[mT*m]","13_10":"Ullage[m]","13_11":"Water Height","13_12":"Barge data","13_14":"Weight[mT]","13_16":"LCG[m]","13_17":"TCG[m]","13_18":"VCG[m]","13_20":"Displacement","13_22":"t","14_4":4.12,"14_12":"Lightweight","14_20":"LCG","15_4":4.122582,"15_20":"TCG","16_4":4.122582,"16_20":"VCG","16_27":" ","17_4":295,"17_12":"Fixed loads","17_14":"Weight[mT]","17_15":"Length[m]","17_16":"LCG[m]","17_17":"TCG[m]","17_18":"VCG[m]","18_4":16.011372,"18_12":"Grillage of YAWJ Jacket Bottom","18_14":7.8,"18_15":5,"18_16":18.032,"18_17":0,"18_18":6.896,"19_4":195,"19_12":"Grillage of YAWJ Jacket Upper","19_14":7.8,"19_15":5,"19_16":46.84,"19_17":0,"19_18":6.896,"19_20":"Draft average","19_22":"m","20_4":320,"20_12":"Grillage of YAWJ Topside","20_14":7.8,"20_15":5,"20_16":70.866,"20_17":0,"20_18":6.896,"20_20":"LCB","20_22":"m","21_4":16.167864,"21_12":"YAWJ Jacket Bottom + Loadin Beam","21_14":0,"21_15":24,"21_16":17.791,"21_17":0.675,"21_18":25.61,"21_20":"VCB","22_4":303,"22_12":"YAWJ Jacket Upper + Loadin Beam","22_13":"m","22_14":589.66,"22_15":17.646,"22_16":46.401,"22_17":0.362,"22_18":29.91,"22_20":"BMl","22_22":"m","22_29":" ","23_4":16.167864,"23_12":"YAWJ Topside + Loadin Beam","23_14":952.27,"23_15":39.5,"23_16":72.037,"23_17":-2.315,"23_18":20.597,"23_20":"BMt","23_22":"m","23_38":".","24_4":16.167864,"24_12":"Piles","24_14":205.04,"24_15":21.783,"24_16":18.032,"24_17":0,"24_18":6.553,"25_4":16.167864,"25_20":"GMl","25_22":"KB+BMl-KG","26_4":597,"26_20":"GMt","26_22":"KB+BMt-KG","27_4":16.167864,"27_20":"GMt inc fsm","28_4":597,"28_13":"Total","29_4":597,"30_4":16.167864,"30_12":"RO-RO loads","30_14":"Nr of lines[-]","30_15":"Load [mT]","30_16":"LCG[m]","30_17":"TCG[m]","30_18":"VCG[m]","30_20":"Trim Moment lightweight","30_22":"[ton*m]","30_23":"(trim aft +)","30_26":"Heel  Moment lightweight","30_30":"[ton*m]","30_31":"(heel SB +)","30_55":10,"30_56":"ScaleFactor Weight (Right side Axis)","31_4":597,"31_12":"Axles on barge","31_20":"Trim moment Ballast water","31_22":"[ton*m]","31_23":"(trim aft +)","31_26":"Heel moment  Ballast water ","31_30":"[ton*m]","31_31":"(heel SB +)","32_4":460,"32_12":"Axles on ramp","32_20":"Trim moment Fixed loads","32_22":"[ton*m]","32_23":"(trim aft +)","32_26":"Heel moment Fixed loads","32_30":"[ton*m]","32_31":"(heel SB +)","33_4":16.167864,"33_12":"Axles on quay","33_20":"Trim moment trailer load","33_22":"[ton*m]","33_23":"(trim aft +)","33_26":"Heel moment Trailer load","33_30":"[ton*m]","33_31":"(heel SB +)","33_55":10,"33_56":"ScaleFactor Buoyancy (Right side Axis)","34_4":400,"34_12":"Hinge load Barge","34_20":"Trim moment Hing load","34_22":"[ton*m]","34_23":"(trim aft +)","34_26":"Heel moment Hinge Load","34_30":"[ton*m]","34_31":"(heel SB +)","35_4":245,"35_12":"Hinge load Quay","35_20":"Total trim moment","35_22":"[ton*m]","35_23":"(trim aft +)","35_26":"Total Heel moment","35_30":"[ton*m]","35_31":"(heel SB +)","36_4":16.167864,"37_4":245,"37_20":"Trim angle","37_22":"rad","38_4":10.989483,"38_19":" ","38_20":"heel angle","38_22":"rad","39_4":10.989483,"40_4":10.989483,"40_17":"  ","119_2":"Total","123_2":"RO-RO loads","123_3":"Location","123_4":"Line load [mT]","123_5":"Xpos[m]","123_6":"Ypos[m]","123_7":"VCG[m]","123_8":"Axle on Barge","123_9":"Axle on Ramp","123_10":"Axle on Quay","123_34":"Interval between steps","123_37":"Duration","124_2":"Group_1_line_1","124_4":18.6,"124_5":32.731,"124_6":-8.15,"124_7":6.85,"124_34":"Between step:","124_36":"00 and 01","124_37":"00:01","124_38":"[hh:mm]","125_2":"Group_1_line_2","125_4":18.6,"125_5":31.331,"125_6":-8.15,"125_7":6.85,"125_34":"Between step:","125_36":"01 and 02","125_37":"00:01","125_38":"[hh:mm]","126_2":"Group_1_line_3","126_4":18.6,"126_5":29.931,"126_6":-8.15,"126_7":6.85,"126_16":1.4,"126_34":"Between step:","126_36":"02 and 03","126_37":"00:01","126_38":"[hh:mm]","127_2":"Group_1_line_4","127_4":18.6,"127_5":28.531,"127_6":-8.15,"127_7":6.85,"127_34":"Between step:","127_36":"03 and 04","127_37":"00:01","127_38":"[hh:mm]","128_2":"Group_1_line_5","128_4":18.6,"128_5":27.131,"128_6":-8.15,"128_7":6.85,"128_34":"Between step:","128_36":"04 and 05","128_37":"00:01","128_38":"[hh:mm]","129_2":"Group_1_line_6","129_4":18.6,"129_5":25.731,"129_6":-8.15,"129_7":6.85,"129_34":"Between step:","129_36":"05 and 06","129_37":"00:01","129_38":"[hh:mm]","130_2":"Group_1_line_7","130_4":18.6,"130_5":24.331,"130_6":-8.15,"130_7":6.85,"130_34":"Between step:","130_36":"06 and 07","130_37":"00:01","130_38":"[hh:mm]","131_2":"Group_1_line_8","131_4":18.6,"131_5":22.931,"131_6":-8.15,"131_7":6.85,"131_34":"Between step:","131_36":"07 and 08","131_37":"00:01","131_38":"[hh:mm]","132_2":"Group_1_line_9_ValveOff","132_4":0,"132_5":21.531,"132_6":-8.15,"132_7":6.85,"132_34":"Between step:","132_36":"08 and 09","132_37":"00:01","132_38":"[hh:mm]","133_2":"Group_1_line_10_ValveOff","133_4":0,"133_5":20.131,"133_6":-8.15,"133_7":6.85,"133_34":"Between step:","133_36":"09 and 10","133_37":"00:00","133_38":"[hh:mm]","134_2":"Group_1_line_11_ValveOff","134_4":0,"134_5":18.731,"134_6":-8.15,"134_7":6.85,"134_12":"SAVE AS STEP","134_14":0,"134_34":"Between step:","134_36":"10 and 11","134_37":"00:00","134_38":"[hh:mm]","135_2":"Group_1_line_12_ValveOff","135_4":0,"135_5":17.331,"135_6":-8.15,"135_7":6.85,"135_34":"Between step:","135_36":"11 and 12","135_37":"00:00","135_38":"[hh:mm]","136_2":"Group_1_line_13_ValveOff","136_4":0,"136_5":15.931,"136_6":-8.15,"136_7":6.85,"136_34":"Between step:","136_36":"12 and 13","136_37":0,"136_38":"[hh:mm]","137_2":"Group_1_line_14_ValveOff","137_4":0,"137_5":14.531,"137_6":-8.15,"137_7":6.85,"137_34":"Between step:","137_36":"13 and 14","137_37":0,"137_38":"[hh:mm]","138_2":"Group_1_line_15","138_4":18.6,"138_5":13.131,"138_6":-8.15,"138_7":6.85,"138_12":"CLEAR STEP","138_14":0,"138_34":"Between step:","138_36":"14 and 15","138_37":0,"138_38":"[hh:mm]","139_2":"Group_1_line_16","139_4":18.6,"139_5":11.731,"139_6":-8.15,"139_7":6.85,"139_34":"Between step:","139_36":"15 and 16","139_37":0,"139_38":"[hh:mm]","140_2":"Group_1_line_17","140_4":18.6,"140_5":10.331,"140_6":-8.15,"140_7":6.85,"140_34":"Between step:","140_36":"16 and 17","140_37":0,"140_38":"[hh:mm]","141_2":"Group_1_line_18","141_4":18.6,"141_5":8.931,"141_6":-8.15,"141_7":6.85,"141_34":"Between step:","141_36":"17 and 18","141_37":0,"141_38":"[hh:mm]","142_2":"Group_1_line_19","142_4":18.6,"142_5":7.531,"142_6":-8.15,"142_7":6.85,"142_12":"RETRIEVE STEP","142_14":0,"142_34":"Between step:","142_36":"18 and 19","142_37":0,"142_38":"[hh:mm]","143_2":"Group_1_line_20","143_4":18.6,"143_5":6.131,"143_6":-8.15,"143_7":6.85,"143_34":"Between step:","143_36":"19 and 20","143_37":0,"143_38":"[hh:mm]","144_2":"Group_1_line_21","144_4":18.6,"144_5":4.731,"144_6":-8.15,"144_7":6.85,"145_2":"Group_1_line_22","145_4":18.6,"145_5":3.331,"145_6":-8.15,"145_7":6.85,"146_2":"Group_2_line_1","146_4":18.5,"146_5":32.731,"146_6":8.416,"146_7":6.85,"146_12":"Ramp position","146_14":"Value","146_15":"Unit","146_17":"Required draft","147_2":"Group_2_line_2","147_4":18.5,"147_5":31.331,"147_6":8.416,"147_7":6.85,"147_12":"Ramp position (Aft/Fwd/SB/PS)","147_14":"AFT","147_15":"-","147_17":"Loading day","147_18":"24th Jan","147_20":"[hh:mm]","148_2":"Group_2_line_3","148_4":18.5,"148_5":29.931,"148_6":8.416,"148_7":6.85,"148_12":"d1","148_14":4.684,"148_15":"m","148_17":"Start time of step","148_18":"07:00","148_20":"[hh:mm]","149_2":"Group_2_line_4","149_4":18.5,"149_5":28.531,"149_6":8.416,"149_7":6.85,"149_12":"d2","149_14":0.208,"149_15":"m","149_17":"C.D. to top of quay","149_18":5.3,"149_20":"[m]","150_2":"Group_2_line_5","150_4":18.5,"150_5":27.131,"150_6":8.416,"150_7":6.85,"150_12":"Length ramp","150_15":"m","150_17":"Waterlevel above C.D.","150_20":"[m]","151_2":"Group_2_line_6","151_4":18.5,"151_5":25.731,"151_6":8.416,"151_7":6.85,"151_12":"y1 (ONLY FOR SIDE LOAD-IN/OUT)","151_14":0,"151_15":"m","151_17":"Required freeboard","151_20":"[m]","152_2":"Group_2_line_7","152_4":18.5,"152_5":24.331,"152_6":8.416,"152_7":6.85,"152_12":"y2 (ONLY FOR SIDE LOAD-IN/OUT)","152_14":0,"152_15":"m","152_17":"Required Draft","152_20":"[m]","153_2":"Group_2_line_8","153_4":18.5,"153_5":22.931,"153_6":8.416,"153_7":6.85,"153_12":"Ramp Weight","153_15":"mT","154_2":"Train 2_line_9_ValveOff","154_4":0,"154_5":21.531,"154_6":8.416,"154_7":6.85,"154_12":"VCG Ramp","154_14":5.636,"154_15":"m","155_2":"Train 2_line_10_ValveOff","155_4":0,"155_5":20.131,"155_6":8.416,"155_7":6.85,"155_12":"LCG Ramp","155_14":-2.238,"155_15":"m","156_2":"Train 2_line_11_ValveOff","156_4":0,"156_5":18.731,"156_6":8.416,"156_7":6.85,"156_12":"TCG Ramp","156_14":0,"156_15":"m","157_2":"Train 2_line_12_ValveOff","157_4":0,"157_5":17.331,"157_6":8.416,"157_7":6.85,"157_12":"y-axis ramp position (ONLY FOR FWD/AFT LOAD-IN/OUT)","157_14":0,"157_15":"m","158_2":"Train 2_line_13_ValveOff","158_4":0,"158_5":15.931,"158_6":8.416,"158_7":6.85,"159_2":"Train 2_line_14_ValveOff","159_4":0,"159_5":14.531,"159_6":8.416,"159_7":6.85,"160_2":"Group_3_line_15","160_4":23.1,"160_5":13.131,"160_6":8.416,"160_7":6.85,"161_2":"Group_3_line_16","161_4":23.1,"161_5":11.731,"161_6":8.416,"161_7":6.85,"162_2":"Group_3_line_17","162_4":23.1,"162_5":10.331,"162_6":8.416,"162_7":6.85,"163_2":"Group_3_line_18","163_4":23.1,"163_5":8.931,"163_6":8.416,"163_7":6.85,"164_2":"Group_3_line_19","164_4":23.1,"164_5":7.531,"164_6":8.416,"164_7":6.85,"165_2":"Group_3_line_20","165_4":23.1,"165_5":6.131,"165_6":8.416,"165_7":6.85,"166_2":"Group_3_line_21","166_4":23.1,"166_5":4.731,"166_6":8.416,"166_7":6.85,"167_2":"Group_3_line_22","167_4":23.1,"167_5":3.331,"167_6":8.416,"167_7":6.85};
+
+        function leColLetters(n) {
+            let s = '';
+            while (n > 0) {
+                const rem = (n - 1) % 26;
+                s = String.fromCharCode(65 + rem) + s;
+                n = Math.floor((n - 1) / 26);
+            }
+            return s;
+        }
+
         function openLoadEditorPage() {
             renderLoadEditorPage();
             document.getElementById('leOverlay').classList.add('tg-open');
@@ -3688,54 +3763,72 @@
             if (overlay && overlay.classList.contains('tg-open')) renderLoadEditorPage();
         }
 
+        // Renders the full grid. Static (non-live) cells come straight
+        // from LOAD_EDITOR_STATIC_CELLS (literal values only — no
+        // formulas, no macros). The tank Filling column (D, from row 14)
+        // and the RO-RO Line load/Xpos/Ypos/VCG columns (D:G, from row
+        // 124) are overridden with live editable inputs reflecting the
+        // dashboard's current data instead of the static template value,
+        // extending past row 167 if more tanks/axles are loaded than the
+        // template originally had.
         function renderLoadEditorPage() {
-            // ---- Tanks (Load_Editor!B14:K.., only D=Filling is live) ----
-            const tankBody = document.getElementById('leTankBody');
-            if (tankBody) {
-                if (!TANK_CONFIG.length) {
-                    tankBody.innerHTML = `<tr class="le-empty-row"><td colspan="10">No tank data loaded yet — click ↻ Sync.</td></tr>`;
-                } else {
-                    tankBody.innerHTML = TANK_CONFIG.map(cfg => {
-                        const rec = tankData.find(t => t.row === cfg.id);
-                        const fill = rec ? rec.weight : 0;
-                        return `<tr>
-                            <td>${escapeHtml(cfg.name)}</td>
-                            <td>${cfg.capacity || ''}</td>
-                            <td><input type="number" step="any" value="${fill}"
-                                       id="le_txt_Row${cfg.id}" onclick="this.select()"
-                                       onchange="updateTankFill(${cfg.id}, this.value)"></td>
-                            <td class="le-dash">–</td><td class="le-dash">–</td><td class="le-dash">–</td>
-                            <td class="le-dash">–</td><td class="le-dash">–</td><td class="le-dash">–</td>
-                        </tr>`;
-                    }).join('');
+            const wrap = document.getElementById('leGridWrap');
+            if (!wrap) return;
+
+            const tankRows = TANK_CONFIG.length
+                ? TANK_CONFIG.map(cfg => cfg.id)
+                : [];
+            const tankMaxRow = tankRows.length ? Math.max(...tankRows) : 0;
+
+            const axleMaxRow = trailerAxles.length ? (AXLE_START_ROW + trailerAxles.length - 1) : 0;
+
+            const maxRow = Math.max(LOAD_EDITOR_STATIC_MAXROW, tankMaxRow, axleMaxRow);
+            const maxCol = LOAD_EDITOR_STATIC_MAXCOL;
+
+            let html = '<table class="le-grid"><thead><tr><th class="le-corner"></th>';
+            for (let c = 1; c <= maxCol; c++) html += `<th>${leColLetters(c)}</th>`;
+            html += '</tr></thead><tbody>';
+
+            for (let r = 1; r <= maxRow; r++) {
+                html += `<tr><td class="le-rownum">${r}</td>`;
+                for (let c = 1; c <= maxCol; c++) {
+                    html += leGridCell(r, c);
                 }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            wrap.innerHTML = html;
+        }
+
+        // Builds one <td> for the full-grid replica at (row, col).
+        // col 4 = D (Filling / Line load), 5 = E (Xpos), 6 = F (Ypos), 7 = G (VCG).
+        function leGridCell(r, c) {
+            const cfg = (c === 4) ? TANK_CONFIG.find(t => t.id === r) : null;
+            if (cfg) {
+                const rec = tankData.find(t => t.row === r);
+                const fill = rec ? rec.weight : 0;
+                return `<td class="le-cell-live" title="${escapeHtml(cfg.name)} — Filling[mT], linked to the 2D barge">` +
+                    `<input type="number" step="any" value="${fill}" onclick="this.select()" ` +
+                    `onchange="updateTankFill(${r}, this.value)"></td>`;
             }
 
-            // ---- RO-RO loads (Load_Editor!B124:G.., D:G are live) ----
-            const axleBody = document.getElementById('leAxleBody');
-            if (axleBody) {
-                if (!trailerAxles.length) {
-                    axleBody.innerHTML = `<tr class="le-empty-row"><td colspan="5">No trailer axles yet — use 🚂 Generate Trailer.</td></tr>`;
-                } else {
-                    axleBody.innerHTML = trailerAxles.map((a, i) => {
-                        const meta = trailerAxleMeta[i];
-                        const name = (meta && meta.excelName) ? meta.excelName : `Axle_${i + 1}`;
-                        const load = (a.load !== undefined) ? a.load : ((meta && meta.load !== undefined) ? meta.load : 0);
-                        const vcg = (a.vcg !== undefined) ? a.vcg : 6.85;
-                        return `<tr>
-                            <td>${escapeHtml(name)}</td>
-                            <td><input type="number" step="any" value="${load}" onclick="this.select()"
-                                       onchange="updateLoadEditorAxle(${i}, 'load', this.value)"></td>
-                            <td><input type="number" step="any" value="${a.x}" onclick="this.select()"
-                                       onchange="updateLoadEditorAxle(${i}, 'x', this.value)"></td>
-                            <td><input type="number" step="any" value="${a.y}" onclick="this.select()"
-                                       onchange="updateLoadEditorAxle(${i}, 'y', this.value)"></td>
-                            <td><input type="number" step="any" value="${vcg}" onclick="this.select()"
-                                       onchange="updateLoadEditorAxle(${i}, 'vcg', this.value)"></td>
-                        </tr>`;
-                    }).join('');
-                }
+            const axleIdx = r - AXLE_START_ROW;
+            if (axleIdx >= 0 && axleIdx < trailerAxles.length && c >= 4 && c <= 7) {
+                const axle = trailerAxles[axleIdx];
+                const meta = trailerAxleMeta[axleIdx];
+                const fieldByCol = { 4: 'load', 5: 'x', 6: 'y', 7: 'vcg' };
+                const field = fieldByCol[c];
+                let val = axle[field];
+                if (val === undefined) val = (field === 'load' && meta && meta.load !== undefined) ? meta.load : (field === 'vcg' ? 6.85 : 0);
+                const label = (meta && meta.excelName) ? meta.excelName : `Axle_${axleIdx + 1}`;
+                return `<td class="le-cell-live" title="${escapeHtml(label)} — linked to Generate Trailer">` +
+                    `<input type="number" step="any" value="${val}" onclick="this.select()" ` +
+                    `onchange="updateLoadEditorAxle(${axleIdx}, '${field}', this.value)"></td>`;
             }
+
+            const staticVal = LOAD_EDITOR_STATIC_CELLS[`${r}_${c}`];
+            if (staticVal === undefined) return '<td></td>';
+            return `<td>${escapeHtml(String(staticVal))}</td>`;
         }
 
         // Edits a single RO-RO axle row's Line load / Xpos / Ypos / VCG.
@@ -3767,6 +3860,7 @@
             }
             refreshLoadEditorPageIfOpen();
         }
+
 
         // ============================================================
         // 7b. AUTO BALLAST ENGINE
@@ -6497,37 +6591,14 @@
                 <button type="button" class="tg-close-x" title="Close" onclick="closeLoadEditorPage()">✕</button>
             </div>
             <p class="tg-modal-sub">
-                Mirrors the Excel <strong>Load_Editor</strong> sheet layout. Only <strong>Filling[mT]</strong>
-                (linked to the 2D barge tank boxes) and the RO-RO <strong>Line load / Xpos / Ypos / VCG</strong>
-                (linked to Generate Trailer) are live — every other column is shown for reference only.
+                Exact cell-for-cell copy of the Excel <strong>Load_Editor</strong> sheet — same row numbers, same
+                column letters, same header text. Formulas and VBA macros are NOT copied (those cells render blank);
+                only hardcoded values are shown. The two exceptions are <strong>column D from row 14</strong>
+                (Filling[mT], linked live to the 2D barge tank boxes) and <strong>columns D:G from row 124</strong>
+                (RO-RO Line load/Xpos/Ypos/VCG, linked live to Generate Trailer) — those stay editable and reflect
+                the dashboard's live data instead of the static template numbers.
             </p>
-
-            <div class="le-section-title">Tanks — Load_Editor!B14:K.. (Filling[mT] is live)</div>
-            <div class="le-table-wrap">
-                <table class="le-table">
-                    <thead>
-                        <tr>
-                            <th>Tank</th><th>Capacity[mT]</th><th>Filling[mT]</th><th>Load%</th>
-                            <th>LCG[m]</th><th>TCG[m]</th><th>VCG[m]</th><th>FSM[mT*m]</th>
-                            <th>Ullage[m]</th><th>Water Height</th>
-                        </tr>
-                    </thead>
-                    <tbody id="leTankBody"><!-- rendered by renderLoadEditorPage() --></tbody>
-                </table>
-            </div>
-
-            <div class="le-section-title">RO-RO loads — Load_Editor!B124:G.. (Line load / Xpos / Ypos / VCG are live)</div>
-            <div class="le-table-wrap">
-                <table class="le-table">
-                    <thead>
-                        <tr>
-                            <th>Location</th><th>Line load [mT]</th><th>Xpos[m]</th><th>Ypos[m]</th><th>VCG[m]</th>
-                        </tr>
-                    </thead>
-                    <tbody id="leAxleBody"><!-- rendered by renderLoadEditorPage() --></tbody>
-                </table>
-            </div>
-
+            <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeLoadEditorPage()">Close</button>
             </div>
