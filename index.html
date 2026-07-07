@@ -4134,6 +4134,26 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             return grid;
         }
 
+        // Path/URL to the CREST_301 Table Viewer page. Defaults to a
+        // relative path assuming it's deployed alongside this file —
+        // change to an absolute URL if it's hosted elsewhere (e.g. a
+        // different Firebase Hosting path or SharePoint location).
+        const CREST301_TABLE_PAGE_URL = 'CREST_301_Table.html';
+        let crest301TableWindow = null;
+
+        // Opens (or refocuses) the CREST_301 Table Viewer in its own
+        // popup window. Reuses the same named window on repeat clicks
+        // instead of piling up duplicates.
+        function openCrest301TablePage() {
+            crest301TableWindow = window.open(
+                CREST301_TABLE_PAGE_URL,
+                'crest301TableViewer',
+                'width=1100,height=800'
+            );
+            if (crest301TableWindow) crest301TableWindow.focus();
+            else logAutoBallast('⚠️ CREST_301 Table page was blocked by the browser — allow pop-ups for this site and try again.');
+        }
+
         // Fetches the crest301 Firebase node once per session and seeds
         // the CREST_301 HyperFormula sheet from it. Safe to call more
         // than once (subsequent calls reuse the same in-flight/settled
@@ -7140,13 +7160,16 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 calculates live in the browser (amber cells, powered by an embedded HyperFormula engine — formulas
                 can only reference cells within this same grid, not other sheets). <strong>Column D from row 14</strong>
                 (Filling[mT]) and <strong>columns D:G from row 124</strong> (RO-RO Line load/Xpos/Ypos/VCG) stay
-                specially linked to the dashboard's live tank/axle data (blue cells) instead of the formula engine. specially linked to the dashboard's live tank/axle data (blue cells) instead of the formula engine. <strong/>Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry, 
-                =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight<strong/>
+                specially linked to the dashboard's live tank/axle data (blue cells) instead of the formula engine.<strong>
+                    Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry
+                    =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight
+                </strong>
             </p>
             <label class="le-writeback-toggle" title="When on, every amber-cell edit is also written to the real Excel Load_Editor sheet. Turn off to experiment with formulas in the browser only.">
                 <input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)">
                 Write formula-cell edits to Excel
             </label>
+            <button type="button" class="tg-btn" title="Open the CREST_301 Table Viewer in a separate window — useful for looking up cell coordinates (e.g. Q30) to reference in a =CREST_301!... formula" onclick="openCrest301TablePage()">🧭 Open CREST_301 Table</button>
             <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeLoadEditorPage()">Close</button>
