@@ -49,10 +49,10 @@
 <body>
 <header>
   <h1>CREST_301</h1>
-  <div class="sub">Live replica of the CREST_301 worksheet &mdash; exact cell locations &amp; values</div>
+  <div class="sub">Live replica of the CREST_301 worksheet &mdash; exact cell locations &amp; values &mdash; 30-CREST_301_Table.html</div>
   <div class="spacer"></div>
   <input type="text" id="searchBox" placeholder="Find cell (e.g. Q45) or text...">
-  <button id="refreshBtn" onclick="refreshFromExcel()">&#8635; Refresh from Excel</button>
+  <button id="refreshBtn" title="Pulls the latest CREST_301 snapshot from Firebase. This popup window has no direct Excel connection — after editing CREST_301 in Excel, click '🔄 Refresh CREST_301 from Excel' in the main dashboard first, then click this." onclick="refreshFromExcel()">&#8635; Refresh</button>
   <button id="resyncBtn" onclick="forceResync()">&#9729; Save snapshot to Firebase</button>
   <div id="status"><span class="dot baked"></span>Loading&hellip;</div>
 </header>
@@ -239,59 +239,86 @@ async function forceResync(){
 // ------------------------------------------------------------
 // Read the whole used range of CREST_301 straight from Excel
 // ------------------------------------------------------------
+// This page is opened by the main dashboard via window.open(), which
+// means it's a plain browser popup with no real Office/Excel host
+// connection — Office.js can't detect a host it was never registered
+// with through the Add-in manifest, so Excel.run is not usable here
+// even though office.js is loaded. (If this page is ever registered
+// as its own genuine task pane in the manifest, isOfficeInitialized
+// will be true and the direct Excel.run path below still works.)
+//
+// The real Excel read happens in the main dashboard, which IS a
+// genuine task pane — its "🔄 Refresh CREST_301 from Excel" button
+// reads the sheet and pushes it to the shared Firebase "crest301"
+// node. This button just pulls that latest snapshot.
 async function refreshFromExcel(){
-  if (typeof Excel === 'undefined') { alert('Not running inside Excel.'); return; }
   const btn = document.getElementById('refreshBtn');
-  btn.disabled = true; btn.textContent = 'Reading...';
+  btn.disabled = true; btn.textContent = 'Refreshing...';
   try {
-    await Excel.run(async (context) => {
-      const sheet = context.workbook.worksheets.getItem(SHEET_NAME);
-      const used = sheet.getUsedRange();
-      used.load(['values', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
-      await context.sync();
+    if (typeof Excel !== 'undefined' && isOfficeInitialized){
+      await Excel.run(async (context) => {
+        const sheet = context.workbook.worksheets.getItem(SHEET_NAME);
+        const used = sheet.getUsedRange();
+        used.load(['values', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
+        await context.sync();
 
-      const data = {};
-      const rowsSet = new Set();
-      const colsSet = new Set();
-      const colWidth = {};
-      const startRow = used.rowIndex;      // 0-based
-      const startCol = used.columnIndex;   // 0-based
+        const data = {};
+        const rowsSet = new Set();
+        const colsSet = new Set();
+        const colWidth = {};
+        const startRow = used.rowIndex;      // 0-based
+        const startCol = used.columnIndex;   // 0-based
 
-      function colLetters(nZeroBased){
-        let n = nZeroBased + 1, s = '';
-        while (n > 0){ const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
-        return s;
-      }
+        function colLetters(nZeroBased){
+          let n = nZeroBased + 1, s = '';
+          while (n > 0){ const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+          return s;
+        }
 
-      for (let r = 0; r < used.rowCount; r++){
-        let rowHasData = false;
-        for (let c = 0; c < used.columnCount; c++){
-          const v = used.values[r][c];
-          if (v !== '' && v !== null && v !== undefined){
-            const colLetter = colLetters(startCol + c);
-            const rowNumber = startRow + r + 1;
-            const key = colLetter + rowNumber;
-            data[key] = v;
-            rowsSet.add(rowNumber);
-            colsSet.add(colLetter);
-            const len = String(v).length;
-            colWidth[colLetter] = Math.max(colWidth[colLetter] || 6, Math.min(len + 2, 42));
+        for (let r = 0; r < used.rowCount; r++){
+          for (let c = 0; c < used.columnCount; c++){
+            const v = used.values[r][c];
+            if (v !== '' && v !== null && v !== undefined){
+              const colLetter = colLetters(startCol + c);
+              const rowNumber = startRow + r + 1;
+              const key = colLetter + rowNumber;
+              data[key] = v;
+              rowsSet.add(rowNumber);
+              colsSet.add(colLetter);
+              const len = String(v).length;
+              colWidth[colLetter] = Math.max(colWidth[colLetter] || 6, Math.min(len + 2, 42));
+            }
           }
         }
-      }
-      const colIndexOf = (letters) => { let n=0; for (const ch of letters) n = n*26 + (ch.charCodeAt(0)-64); return n; };
-      const rows = Array.from(rowsSet).sort((a,b)=>a-b);
-      const cols = Array.from(colsSet).sort((a,b)=>colIndexOf(a)-colIndexOf(b));
+        const colIndexOf = (letters) => { let n=0; for (const ch of letters) n = n*26 + (ch.charCodeAt(0)-64); return n; };
+        const rows = Array.from(rowsSet).sort((a,b)=>a-b);
+        const cols = Array.from(colsSet).sort((a,b)=>colIndexOf(a)-colIndexOf(b));
 
-      currentData = data;
-      currentMeta = { rows, cols, colWidth };
-    });
-    renderTable();
-    lastUpdatedAt = Date.now();
-    setStatus('excel', lastUpdatedAt);
-    await pushToFirebase(currentData, currentMeta);
+        currentData = data;
+        currentMeta = { rows, cols, colWidth };
+      });
+      renderTable();
+      lastUpdatedAt = Date.now();
+      setStatus('excel', lastUpdatedAt);
+      await pushToFirebase(currentData, currentMeta);
+    } else {
+      const res = await fetch(`${FIREBASE_URL}/${FIREBASE_NODE}.json`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json && json.data && json.meta){
+        currentData = json.data;
+        currentMeta = json.meta;
+        lastUpdatedAt = json.updatedAt || Date.now();
+        renderTable();
+        setStatus('cache', lastUpdatedAt);
+      } else {
+        alert('No CREST_301 data in Firebase yet. In the main dashboard, click "🔄 Refresh CREST_301 from Excel" first, then try again here.');
+      }
+    }
+  } catch(e){
+    console.warn('CREST_301 refresh failed', e);
+    alert('Refresh failed: ' + (e.message || e));
   } finally {
-    btn.disabled = false; btn.textContent = '\u21bb Refresh from Excel';
+    btn.disabled = false; btn.textContent = '\u21bb Refresh';
   }
 }
 
