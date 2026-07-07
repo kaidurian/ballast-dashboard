@@ -1736,7 +1736,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 27-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 28-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4070,20 +4070,99 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // Scope note: this engine only knows about cells inside the
         // Load_Editor grid itself. It does NOT reproduce the original
         // hidden Excel formulas (those weren't extracted — only their
-        // resulting literal values were), and it can't resolve
-        // references to other sheets (Barge_Strength, CREST_301, etc).
-        // Formulas typed here should reference other Load_Editor cells.
+        // resulting literal values were).
+        //
+        // CROSS-SHEET SUPPORT (CREST_301): a second HyperFormula sheet
+        // named 'CREST_301' is registered in this same engine instance
+        // and seeded LIVE from the Firebase node the CREST_301 Table
+        // Viewer page (27-1-CREST_301_Table.html) reads/writes —
+        // https://ballast-dashboard-default-rtdb.firebaseio.com/crest301.json
+        // — so no giant dataset needs to be duplicated/embedded here.
+        // Once loaded, Load Editor formulas can reference it directly,
+        // e.g. =CREST_301!C4  or  ='CREST_301'!Q30
+        // The fetch is async and fires once on first engine build; the
+        // 'CREST_301' sheet starts empty (so typing formulas doesn't
+        // block) and is re-seeded + the grid re-rendered the moment the
+        // Firebase data arrives. If Firebase has no data yet at that
+        // node (nobody has opened the CREST_301 Table page to seed it),
+        // cross-sheet formulas will show #REF! until it does.
+        // Barge_Strength is still out of scope (static interpolation
+        // grid, never recalculated client-side per project convention).
         // ============================================================
         let leEngine = null;
         const LE_SHEET_NAME = 'LoadEditor';
+        const CREST301_SHEET_NAME = 'CREST_301';
+        const CREST301_FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
+        const CREST301_FIREBASE_NODE = "crest301";
+        let crest301LoadPromise = null;
 
         function leGetEngine() {
             if (leEngine) return leEngine;
             leEngine = HyperFormula.buildEmpty({ licenseKey: 'gpl-v3' });
             leEngine.addSheet(LE_SHEET_NAME);
+            leEngine.addSheet(CREST301_SHEET_NAME);
             const sheetId = leEngine.getSheetId(LE_SHEET_NAME);
             leSeedEngine(sheetId);
+            crest301FetchAndSeed();
             return leEngine;
+        }
+
+        // Converts the sparse {"C4":91.44,"Q30":85.344,...} cell map
+        // (same format CREST_301 Table Viewer stores in Firebase) into
+        // a dense 2D array HyperFormula's setSheetContent expects.
+        function crest301ColLettersToIndex(letters) {
+            let n = 0;
+            for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
+            return n; // 1-based
+        }
+
+        function crest301DataToGrid(data) {
+            let maxRow = 0, maxCol = 0;
+            const cells = [];
+            for (const key in data) {
+                const m = /^([A-Z]+)(\d+)$/.exec(key);
+                if (!m) continue;
+                const col = crest301ColLettersToIndex(m[1]);
+                const row = parseInt(m[2], 10);
+                cells.push([row, col, data[key]]);
+                if (row > maxRow) maxRow = row;
+                if (col > maxCol) maxCol = col;
+            }
+            const grid = [];
+            for (let r = 0; r < maxRow; r++) grid.push(new Array(maxCol).fill(null));
+            cells.forEach(([r, c, v]) => { grid[r - 1][c - 1] = v; });
+            return grid;
+        }
+
+        // Fetches the crest301 Firebase node once per session and seeds
+        // the CREST_301 HyperFormula sheet from it. Safe to call more
+        // than once (subsequent calls reuse the same in-flight/settled
+        // promise) — call again with force=true (e.g. a future "refresh
+        // CREST data" button) to pick up a newer Firebase snapshot
+        // without reloading the page.
+        function crest301FetchAndSeed(force) {
+            if (crest301LoadPromise && !force) return crest301LoadPromise;
+            crest301LoadPromise = fetch(`${CREST301_FIREBASE_URL}/${CREST301_FIREBASE_NODE}.json`, { cache: 'no-store' })
+                .then(res => res.json())
+                .then(json => {
+                    if (!json || !json.data) {
+                        logAutoBallast('⚠️ CREST_301: no data at Firebase node "crest301" yet — open the CREST_301 Table page once to seed it.');
+                        return null;
+                    }
+                    const engine = leGetEngine();
+                    const crestId = engine.getSheetId(CREST301_SHEET_NAME);
+                    engine.setSheetContent(crestId, crest301DataToGrid(json.data));
+                    const when = json.updatedAt ? new Date(json.updatedAt).toLocaleString() : 'unknown time';
+                    logAutoBallast(`📥 CREST_301: loaded ${Object.keys(json.data).length} cells from Firebase (snapshot from ${when}). Load Editor formulas can now reference =CREST_301!<cell>.`);
+                    refreshLoadEditorPageIfOpen();
+                    return json.data;
+                })
+                .catch(e => {
+                    console.warn('CREST_301 Firebase fetch failed', e);
+                    logAutoBallast('⚠️ CREST_301: could not reach Firebase — cross-sheet formulas will show #REF! until it is reachable.');
+                    return null;
+                });
+            return crest301LoadPromise;
         }
 
         // One-time load of every LOAD_EDITOR_STATIC_CELLS entry as the
