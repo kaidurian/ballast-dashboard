@@ -1443,13 +1443,19 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             background: var(--input-bg);
         }
         .le-grid td.le-cell-formula input.le-has-formula { color: var(--accent-blue); font-weight: 600; }
+        .le-toolbar-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: -6px 0 10px;
+        }
         .le-writeback-toggle {
             display: flex;
             align-items: center;
             gap: 6px;
             font-size: 11px;
             color: var(--text-muted);
-            margin: -6px 0 10px;
             cursor: pointer;
             user-select: none;
         }
@@ -7156,20 +7162,21 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             <p class="tg-modal-sub">
                 Cell-for-cell replica of the Excel <strong>Load_Editor</strong> sheet — same row numbers, same
                 column letters, same header text. Every cell is editable: type a plain value, or an Excel-style
-                <strong>=formula</strong> referencing other Load_Editor cells (e.g. <code>=D14*C13/100</code>) and it
-                calculates live in the browser (amber cells, powered by an embedded HyperFormula engine — formulas
-                can only reference cells within this same grid, not other sheets). <strong>Column D from row 14</strong>
-                (Filling[mT]) and <strong>columns D:G from row 124</strong> (RO-RO Line load/Xpos/Ypos/VCG) stay
-                specially linked to the dashboard's live tank/axle data (blue cells) instead of the formula engine.<strong>
-                    Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry
-                    =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight
-                </strong>
-            </p>
-            <label class="le-writeback-toggle" title="When on, every amber-cell edit is also written to the real Excel Load_Editor sheet. Turn off to experiment with formulas in the browser only.">
-                <input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)">
-                Write formula-cell edits to Excel
-            </label>
-            <button type="button" class="tg-btn" title="Open the CREST_301 Table Viewer in a separate window — useful for looking up cell coordinates (e.g. Q30) to reference in a =CREST_301!... formula" onclick="openCrest301TablePage()">🧭 Open CREST_301 Table</button>
+                <strong>=formula</strong> referencing other Load_Editor cells (e.g. <code>=D14*C13/100</code>) or the
+                <strong>CREST_301</strong> sheet (e.g. <code>=CREST_301!C4</code>), calculated live in the browser by
+                an embedded HyperFormula engine. <strong>Column D from row 14</strong> (Filling[mT]) and
+                <strong>columns D:G from row 124</strong> (RO-RO Line load/Xpos/Ypos/VCG) stay specially linked to the
+                dashboard's live tank/axle data (blue cells) instead of the formula engine.<strong>
+    Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry
+    =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight</strong>
+</p>
+            <div class="le-toolbar-row">
+                <label class="le-writeback-toggle" title="When on, every amber-cell edit is also written to the real Excel Load_Editor sheet. Turn off to experiment with formulas in the browser only.">
+                    <input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)">
+                    Write formula-cell edits to Excel
+                </label>
+                <button type="button" class="tg-btn" title="Open the CREST_301 Table Viewer in a separate window — useful for looking up cell coordinates (e.g. Q30) to reference in a =CREST_301!... formula" onclick="openCrest301TablePage()">🧭 Open CREST_301 Table</button>
+            </div>
             <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeLoadEditorPage()">Close</button>
