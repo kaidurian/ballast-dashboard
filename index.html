@@ -1379,17 +1379,28 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         /* ---- Full spreadsheet-grid replica ("copycat" view) ---- */
         .le-grid {
             border-collapse: collapse;
-            font-size: 10px;
+            font-size: 13px;
             table-layout: fixed;
         }
         .le-grid th, .le-grid td {
             border: 1px solid var(--panel-border);
-            padding: 2px 4px;
-            min-width: 46px;
-            max-width: 160px;
+            padding: 5px 7px;
+            min-width: 84px;
+            max-width: 280px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        /* Columns that typically hold longer label/description text in the
+           source workbook get extra room so the text isn't clipped.
+           Column letters -> td:nth-child index = column number + 1 (the
+           +1 accounts for the sticky row-number cell in front). */
+        .le-grid td:nth-child(3),  /* B — item / tank / group names */
+        .le-grid td:nth-child(4),  /* C — Capacity[mT] / labels */
+        .le-grid td:nth-child(12), /* K — Notes column, long sentences */
+        .le-grid td:nth-child(13) /* L — Barge data / Fixed loads / RO-RO labels */ {
+            min-width: 190px;
+            max-width: 380px;
         }
         .le-grid thead th {
             position: sticky;
@@ -1399,6 +1410,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             color: var(--text-muted);
             font-weight: 700;
             text-align: center;
+            font-size: 12px;
         }
         .le-grid td.le-rownum, .le-grid th.le-corner {
             position: sticky;
@@ -1414,14 +1426,17 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         .le-grid td.le-cell-live input {
             width: 100%;
             box-sizing: border-box;
-            font-size: 10px;
-            padding: 2px 3px;
+            font-size: 13px;
+            padding: 5px 6px;
             border-radius: 3px;
             border: 1px solid var(--accent-blue);
             background: var(--input-bg);
             color: var(--text-main);
         }
-        .le-grid td.le-cell-live input:focus { outline: none; }
+        .le-grid td.le-cell-live input:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(56,189,248,0.35);
+        }
         .le-grid tr.le-row-header td, .le-grid tr.le-row-header th { background: rgba(148,163,184,0.12); font-weight: 700; }
         /* General editable cells, calculated by the embedded HyperFormula
            engine (leEngine). Distinct amber tint vs. the blue "live" cells
@@ -1430,8 +1445,8 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         .le-grid td.le-cell-formula input {
             width: 100%;
             box-sizing: border-box;
-            font-size: 10px;
-            padding: 2px 3px;
+            font-size: 13px;
+            padding: 5px 6px;
             border-radius: 3px;
             border: 1px solid transparent;
             background: transparent;
@@ -1441,7 +1456,11 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             outline: none;
             border: 1px solid rgba(251,191,36,0.6);
             background: var(--input-bg);
+            box-shadow: 0 0 0 2px rgba(251,191,36,0.25);
         }
+        /* Currently-selected cell (mirrors the formula bar above the
+           grid) gets a stronger highlight, like Excel's active-cell box. */
+        .le-grid td.le-cell-selected { outline: 2px solid var(--accent-blue); outline-offset: -2px; z-index: 1; position: relative; }
         .le-grid td.le-cell-formula input.le-has-formula { color: var(--accent-blue); font-weight: 600; }
         .le-toolbar-row {
             display: flex;
@@ -1460,6 +1479,62 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             user-select: none;
         }
         .le-writeback-toggle input { cursor: pointer; }
+
+        /* ---- Excel-style formula bar ----
+           Sits above the grid: a "Name box" showing the selected cell
+           address (e.g. D14), an fx icon, and an input mirroring that
+           cell's raw content — the literal formula text (e.g.
+           "=D14*C13/100") if the cell holds a formula, or the plain
+           value/text otherwise. Editing here and pressing Enter (or
+           clicking away) commits the change through the same code path
+           as editing the cell in-grid. */
+        .le-formula-bar {
+            display: flex;
+            align-items: stretch;
+            gap: 0;
+            margin: 0 0 8px;
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            overflow: hidden;
+            background: var(--panel-bg);
+        }
+        .le-formula-bar-addr {
+            flex: 0 0 auto;
+            min-width: 64px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            color: var(--accent-blue);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-right: 1px solid var(--panel-border);
+            background: rgba(56,189,248,0.06);
+        }
+        .le-formula-bar-icon {
+            flex: 0 0 auto;
+            width: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-style: italic;
+            font-size: 12px;
+            color: var(--text-muted);
+            border-right: 1px solid var(--panel-border);
+        }
+        .le-formula-bar-input {
+            flex: 1 1 auto;
+            border: none;
+            background: transparent;
+            color: var(--text-main);
+            font-size: 13px;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            padding: 6px 10px;
+            min-width: 0;
+        }
+        .le-formula-bar-input:disabled { color: var(--text-muted); font-style: italic; font-family: inherit; }
+        .le-formula-bar-input:focus { outline: none; background: var(--input-bg); }
 
         .tg-train-card {
             border: 1px solid var(--panel-border);
@@ -1742,7 +1817,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 31-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 32-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4102,6 +4177,69 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         const CREST301_FIREBASE_NODE = "crest301";
         let crest301LoadPromise = null;
 
+        // ---- Load Editor edits persistence (Firebase) ----
+        // Every amber (formula/value) cell edit is saved to Firebase, keyed
+        // by cell address (e.g. "D14" -> "=B14*C13/100" or a plain number),
+        // under the same FIREBASE_URL used for the rest of the dashboard's
+        // live state. This is what makes edits survive closing/reopening
+        // the page in standalone mode (no Excel): the tank Filling / RO-RO
+        // axle "live" cells already round-trip through publishToFirebase()/
+        // pullFirebaseData(), but the general HyperFormula-backed cells
+        // only lived inside the in-memory leEngine — so without this they
+        // were lost on reload. Uses PATCH (not PUT) so saving one cell
+        // never clobbers any other saved cell; a null value deletes the
+        // saved entry (cell cleared back to empty).
+        const LE_EDITS_FIREBASE_NODE = "loadEditorEdits";
+        let leEditsLoadPromise = null;
+
+        function leEditsFetchAndApply(force) {
+            if (leEditsLoadPromise && !force) return leEditsLoadPromise;
+            leEditsLoadPromise = fetch(`${FIREBASE_URL}/${LE_EDITS_FIREBASE_NODE}.json`, { cache: 'no-store' })
+                .then(res => res.json())
+                .then(data => {
+                    if (!data) return null;
+                    const engine = leGetEngine();
+                    const sheetId = engine.getSheetId(LE_SHEET_NAME);
+                    let count = 0;
+                    for (const addr in data) {
+                        const m = /^([A-Za-z]+)(\d+)$/.exec(addr);
+                        if (!m) continue;
+                        const c = crest301ColLettersToIndex(m[1].toUpperCase());
+                        const r = parseInt(m[2], 10);
+                        const val = data[addr];
+                        if (val === null || val === undefined) continue;
+                        engine.setCellContents({ sheet: sheetId, row: r - 1, col: c - 1 }, [[val]]);
+                        count++;
+                    }
+                    if (count) logAutoBallast(`📥 Load Editor: restored ${count} saved cell edit(s) from Firebase.`);
+                    refreshLoadEditorPageIfOpen();
+                    return data;
+                })
+                .catch(e => {
+                    console.warn('Load Editor edits Firebase fetch failed', e);
+                    return null;
+                });
+            return leEditsLoadPromise;
+        }
+
+        // Saves (or, if content is null, deletes) one cell's raw content
+        // to the Firebase-backed edit log. Fire-and-forget — a failure
+        // here just means that one edit won't survive a reload, it never
+        // blocks the in-browser calculation which already happened.
+        async function leSaveEditToFirebase(addr, content) {
+            try {
+                const patch = {};
+                patch[addr] = (content === '' || content === undefined) ? null : content;
+                await fetch(`${FIREBASE_URL}/${LE_EDITS_FIREBASE_NODE}.json`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(patch)
+                });
+            } catch (e) {
+                console.warn('Load Editor: could not save cell edit to Firebase', e);
+            }
+        }
+
         function leGetEngine() {
             if (leEngine) return leEngine;
             leEngine = HyperFormula.buildEmpty({ licenseKey: 'gpl-v3' });
@@ -4110,6 +4248,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             const sheetId = leEngine.getSheetId(LE_SHEET_NAME);
             leSeedEngine(sheetId);
             crest301FetchAndSeed();
+            leEditsFetchAndApply();
             return leEngine;
         }
 
@@ -4363,6 +4502,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 if (!isNaN(num)) content = num;
             }
             engine.setCellContents(addr, [[content === '' ? null : content]]);
+            leSaveEditToFirebase(leColLetters(c) + r, content === '' ? null : content);
 
             if (isOfficeInitialized && leWriteToExcel) {
                 const col = leColLetters(c);
@@ -4377,6 +4517,74 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 } catch (e) { console.warn("Excel write error (Load Editor cell)", e); }
             }
             refreshLoadEditorPageIfOpen();
+        }
+
+        // ---- Excel-style formula bar --------------------------------
+        // Tracks which grid cell is currently focused/selected, and
+        // mirrors its address + raw content (formula text or plain
+        // value) into the formula-bar input above the grid — same as
+        // Excel's Name Box + fx bar. Works for all three cell kinds:
+        // plain HyperFormula-backed cells, the tank Filling column, and
+        // the RO-RO axle columns (those two are "live"-wired instead of
+        // formula cells, so they never hold a formula, only a value).
+        let leSelectedCell = null; // { r, c, kind: 'formula'|'tank'|'axle', axleIdx?, field? }
+
+        function leSelectCell(r, c, cellInputEl) {
+            // Highlight the active cell like Excel's selection box.
+            document.querySelectorAll('.le-grid td.le-cell-selected').forEach(td => td.classList.remove('le-cell-selected'));
+            if (cellInputEl && cellInputEl.closest) {
+                const td = cellInputEl.closest('td');
+                if (td) td.classList.add('le-cell-selected');
+            }
+
+            const addrEl = document.getElementById('leFormulaBarAddr');
+            const inputEl = document.getElementById('leFormulaBarInput');
+            if (!addrEl || !inputEl) return;
+            addrEl.textContent = leColLetters(c) + r;
+            inputEl.disabled = false;
+
+            const cfg = (c === 4) ? TANK_CONFIG.find(t => t.id === r) : null;
+            const axleIdx = r - AXLE_START_ROW;
+            if (cfg) {
+                const rec = tankData.find(t => t.row === r);
+                inputEl.value = rec ? rec.weight : 0;
+                leSelectedCell = { r, c, kind: 'tank' };
+            } else if (axleIdx >= 0 && axleIdx < trailerAxles.length && c >= 4 && c <= 7) {
+                const axle = trailerAxles[axleIdx];
+                const fieldByCol = { 4: 'load', 5: 'x', 6: 'y', 7: 'vcg' };
+                const field = fieldByCol[c];
+                const val = axle[field];
+                inputEl.value = (val === undefined || val === null) ? '' : val;
+                leSelectedCell = { r, c, kind: 'axle', axleIdx, field };
+            } else {
+                inputEl.value = leRawContentForInput(r, c);
+                leSelectedCell = { r, c, kind: 'formula' };
+            }
+        }
+
+        // Commits whatever is typed in the formula bar into the
+        // currently-selected cell, through the exact same functions the
+        // in-grid inputs use (so Excel write-back / recalculation /
+        // trailer-overlay refresh all behave identically either way).
+        function leCommitFormulaBar() {
+            const inputEl = document.getElementById('leFormulaBarInput');
+            if (!inputEl || !leSelectedCell) return;
+            const { r, c, kind, axleIdx, field } = leSelectedCell;
+            const value = inputEl.value;
+            if (kind === 'tank') updateTankFill(r, value);
+            else if (kind === 'axle') updateLoadEditorAxle(axleIdx, field, value);
+            else updateLoadEditorCell(r, c, value);
+        }
+
+        function leFormulaBarKeydown(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                leCommitFormulaBar();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                if (leSelectedCell) leSelectCell(leSelectedCell.r, leSelectedCell.c, null);
+                e.target.blur();
+            }
         }
 
         function leColLetters(n) {
@@ -4451,8 +4659,9 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             if (cfg) {
                 const rec = tankData.find(t => t.row === r);
                 const fill = rec ? rec.weight : 0;
-                return `<td class="le-cell-live" title="${escapeHtml(cfg.name)} — Filling[mT], linked to the 2D barge">` +
+                return `<td class="le-cell-live" data-addr="${leColLetters(c)}${r}" title="${escapeHtml(cfg.name)} — Filling[mT], linked to the 2D barge">` +
                     `<input type="number" step="any" value="${fill}" onclick="this.select()" ` +
+                    `onfocus="leSelectCell(${r}, ${c}, this)" ` +
                     `onchange="updateTankFill(${r}, this.value)"></td>`;
             }
 
@@ -4465,8 +4674,9 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 let val = axle[field];
                 if (val === undefined) val = (field === 'load' && meta && meta.load !== undefined) ? meta.load : (field === 'vcg' ? 6.85 : 0);
                 const label = (meta && meta.excelName) ? meta.excelName : `Axle_${axleIdx + 1}`;
-                return `<td class="le-cell-live" title="${escapeHtml(label)} — linked to Generate Trailer">` +
+                return `<td class="le-cell-live" data-addr="${leColLetters(c)}${r}" title="${escapeHtml(label)} — linked to Generate Trailer">` +
                     `<input type="number" step="any" value="${val}" onclick="this.select()" ` +
+                    `onfocus="leSelectCell(${r}, ${c}, this)" ` +
                     `onchange="updateLoadEditorAxle(${axleIdx}, '${field}', this.value)"></td>`;
             }
 
@@ -4474,10 +4684,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             const engine = leGetEngine();
             const hasFormula = engine.getCellFormula(leAddr(r, c)) !== undefined;
             const displayStr = (displayVal === '' || displayVal === null || displayVal === undefined) ? '' : String(displayVal);
-            return `<td class="le-cell-formula">` +
+            const addr = leColLetters(c) + r;
+            const cellTitle = `${addr}: ${displayStr || '(empty)'} — type a value, or an Excel-style formula (e.g. =D14*C13/100) referencing other Load_Editor cells`;
+            return `<td class="le-cell-formula" data-addr="${addr}">` +
                 `<input type="text" class="${hasFormula ? 'le-has-formula' : ''}" value="${escapeHtml(displayStr)}" ` +
-                `title="Type a value, or an Excel-style formula (e.g. =D14*C13/100) referencing other Load_Editor cells" ` +
-                `onfocus="this.value = leRawContentForInput(${r}, ${c}); this.select();" ` +
+                `title="${escapeHtml(cellTitle)}" ` +
+                `onfocus="this.value = leRawContentForInput(${r}, ${c}); this.select(); leSelectCell(${r}, ${c}, this);" ` +
                 `onblur="updateLoadEditorCell(${r}, ${c}, this.value)"></td>`;
         }
 
@@ -7250,6 +7462,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 dashboard's live tank/axle data (blue cells) instead of the formula engine.<strong>
     Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry
     =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight</strong>
+    Every amber cell edit is also saved to Firebase automatically, so it's still here next time you reopen this page — even outside Excel.
 </p>
             <div class="le-toolbar-row">
                 <label class="le-writeback-toggle" title="When on, every amber-cell edit is also written to the real Excel Load_Editor sheet. Turn off to experiment with formulas in the browser only.">
@@ -7258,6 +7471,15 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 </label>
                 <button type="button" class="tg-btn" title="Open the CREST_301 Table Viewer in a separate window — useful for looking up cell coordinates (e.g. Q30) to reference in a =CREST_301!... formula" onclick="openCrest301TablePage()">🧭 Open CREST_301 Table</button>
                 <button type="button" class="tg-btn" title="Re-read the CREST_301 sheet from Excel and push it to Firebase. Run this after editing CREST_301 in Excel — the CREST_301 Table Viewer popup only reads from Firebase, it has no direct Excel connection, so this is the step that actually picks up your changes." onclick="crest301RefreshFromExcelAndPush()">🔄 Refresh CREST_301 from Excel</button>
+            </div>
+            <div class="le-formula-bar" title="Formula bar — click any cell in the grid to see its address and raw content here (formula text or plain value), same as Excel. Edit here and press Enter to commit.">
+                <div class="le-formula-bar-addr" id="leFormulaBarAddr">—</div>
+                <div class="le-formula-bar-icon">fx</div>
+                <input type="text" id="leFormulaBarInput" class="le-formula-bar-input"
+                       placeholder="Select a cell to view or edit its value/formula"
+                       disabled
+                       onkeydown="leFormulaBarKeydown(event)"
+                       onblur="leCommitFormulaBar()">
             </div>
             <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
             <div class="tg-footer">
