@@ -1817,7 +1817,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 32-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 33-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4170,6 +4170,71 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // Barge_Strength is still out of scope (static interpolation
         // grid, never recalculated client-side per project convention).
         // ============================================================
+        // ============================================================
+        // CUSTOM INDIRECT() FUNCTION — HyperFormula does NOT implement
+        // INDIRECT out of the box (confirmed against the exact embedded
+        // build above: it's simply not in the registered function
+        // list, which is why formulas using it show #NAME?). This is
+        // a known HyperFormula limitation — INDIRECT needs to resolve
+        // its target at *evaluation* time from a plain string, which
+        // doesn't fit HyperFormula's static dependency-graph model.
+        //
+        // This registers a minimal but working INDIRECT using
+        // HyperFormula's public custom-function API (the same
+        // FunctionPlugin/implementedFunctions/registerFunctionPlugin
+        // mechanism every built-in function, e.g. IF or VLOOKUP, is
+        // itself registered with). It supports:
+        //   =INDIRECT("P30")                 (same-sheet)
+        //   =INDIRECT("CREST_301!P30")        (cross-sheet)
+        //   =INDIRECT("'Sheet Name'!P30")     (cross-sheet, quoted name)
+        // Marked isVolatile so it re-evaluates on every recalculation
+        // (necessary since HyperFormula can't statically know which
+        // cell a dynamically-built reference points to). It resolves
+        // single-cell A1-style references only (no ranges) — that
+        // covers every INDIRECT use in this workbook's formulas.
+        // ============================================================
+        (function registerIndirectFunction() {
+            const { FunctionPlugin, FunctionArgumentType, ErrorType, CellError } = HyperFormula;
+
+            function leColLettersToIndex(letters) {
+                let n = 0;
+                for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+                return n;
+            }
+
+            class IndirectPlugin extends FunctionPlugin {
+                indirect(ast, state) {
+                    return this.runFunction(ast.args, state, this.metadata('INDIRECT'), (refText) => {
+                        const m = /^(?:(?:'([^']+)'|([^!'\s]+))!)?\$?([A-Za-z]+)\$?(\d+)$/.exec(String(refText).trim());
+                        if (!m) return new CellError(ErrorType.REF, 'Invalid reference text');
+                        const sheetName = m[1] || m[2];
+                        const colLetters = m[3];
+                        const rowNum = parseInt(m[4], 10);
+                        let sheetId = state.formulaAddress.sheet;
+                        if (sheetName) {
+                            if (!this.dependencyGraph.sheetMapping.hasSheetWithName(sheetName)) {
+                                return new CellError(ErrorType.REF, 'Sheet not found');
+                            }
+                            sheetId = this.dependencyGraph.getSheetId(sheetName);
+                        }
+                        const address = { sheet: sheetId, col: leColLettersToIndex(colLetters) - 1, row: rowNum - 1 };
+                        return this.dependencyGraph.getCellValue(address);
+                    });
+                }
+            }
+            IndirectPlugin.implementedFunctions = {
+                'INDIRECT': {
+                    method: 'indirect',
+                    parameters: [{ argumentType: FunctionArgumentType.STRING }],
+                    isVolatile: true,
+                }
+            };
+            HyperFormula.registerFunctionPlugin(IndirectPlugin, {
+                enGB: { INDIRECT: 'INDIRECT' },
+                enUS: { INDIRECT: 'INDIRECT' },
+            });
+        })();
+
         let leEngine = null;
         const LE_SHEET_NAME = 'LoadEditor';
         const CREST301_SHEET_NAME = 'CREST_301';
@@ -4212,6 +4277,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         count++;
                     }
                     if (count) logAutoBallast(`📥 Load Editor: restored ${count} saved cell edit(s) from Firebase.`);
+                    leEnsureActiveBargeSheet(); // in case a restored edit changed C2
                     refreshLoadEditorPageIfOpen();
                     return data;
                 })
@@ -4249,6 +4315,11 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             leSeedEngine(sheetId);
             crest301FetchAndSeed();
             leEditsFetchAndApply();
+            // Whatever barge C2 starts out as (from the static
+            // snapshot or a restored Firebase edit), make sure its
+            // sheet is registered/loading too — covers barges other
+            // than CREST_301 without any extra wiring.
+            leEnsureActiveBargeSheet();
             return leEngine;
         }
 
@@ -4411,6 +4482,107 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             return crest301LoadPromise;
         }
 
+        // ============================================================
+        // BARGE SHEET REGISTRY — generalizes the CREST_301-only wiring
+        // above so ANY barge name typed into Load_Editor!C2 ("Select
+        // Barge") gets its own live HyperFormula sheet, added lazily
+        // and seeded from its own Firebase node. This is what keeps
+        // formulas like
+        //   =IF(INDIRECT($C$2&"!P30")="","",INDIRECT($C$2&"!P30"))
+        // working no matter which barge is selected: INDIRECT needs a
+        // sheet with that exact name to exist in the engine RIGHT NOW
+        // or it throws #REF!, so we register+add the sheet the moment
+        // a barge name shows up in C2, then fill it in asynchronously
+        // once Firebase responds.
+        //
+        // Firebase convention for NEW barges (anything other than the
+        // legacy CREST_301):
+        //   {BARGE_FIREBASE_URL}/bargeTables/<SanitizedBargeName>.json
+        // holding the same { data, meta, updatedAt } shape the
+        // CREST_301 Table Viewer already writes. CREST_301 itself is
+        // pre-registered pointing at the original "crest301" node so
+        // existing data/links aren't broken.
+        // ============================================================
+        const BARGE_FIREBASE_URL = CREST301_FIREBASE_URL;
+        const BARGE_TABLES_NODE = "bargeTables";
+        const BARGE_REGISTRY = {
+            // sanitized sheet name -> { node, loadPromise, loaded }
+            'CREST_301': { node: CREST301_FIREBASE_NODE } // legacy node, kept as-is
+        };
+
+        // Sheet names in HyperFormula/Excel can't contain : \ / ? * [ ]
+        // and Firebase keys can't contain . # $ [ ] /  — strip anything
+        // outside A-Z a-z 0-9 _ - so one sanitized name is safe as both
+        // a sheet name and a Firebase path segment.
+        function bargeSanitizeName(name) {
+            return String(name == null ? '' : name).trim().replace(/[^A-Za-z0-9_\-]/g, '_');
+        }
+
+        // Looks up (or lazily creates) the registry entry for a barge
+        // name. Brand-new barges default to bargeTables/<name>; known
+        // ones (currently just CREST_301) keep their existing node.
+        function bargeGetRegistryEntry(name) {
+            const key = bargeSanitizeName(name);
+            if (!key) return null;
+            if (!BARGE_REGISTRY[key]) {
+                BARGE_REGISTRY[key] = { node: `${BARGE_TABLES_NODE}/${key}` };
+            }
+            return { key, entry: BARGE_REGISTRY[key] };
+        }
+
+        // Ensures a HyperFormula sheet named `bargeName` exists (added
+        // as empty immediately if it's new — INDIRECT resolves against
+        // the sheet NAME existing, not its data), then kicks off (or
+        // reuses) the Firebase fetch that fills it with real cell
+        // data. Safe to call repeatedly; pass force=true to re-pull a
+        // fresher snapshot (e.g. after someone re-publishes that
+        // barge's table).
+        function leEnsureBargeSheet(bargeName, force) {
+            const looked = bargeGetRegistryEntry(bargeName);
+            if (!looked) return null;
+            const { key, entry } = looked;
+            const engine = leGetEngine();
+            if (!engine.doesSheetExist(key)) {
+                engine.addSheet(key);
+            }
+            if (!entry.loadPromise || force) {
+                entry.loadPromise = fetch(`${BARGE_FIREBASE_URL}/${entry.node}.json`, { cache: 'no-store' })
+                    .then(res => res.json())
+                    .then(json => {
+                        if (!json || !json.data) {
+                            logAutoBallast(`⚠️ Barge "${key}": no data at Firebase node "${entry.node}" yet — its cross-sheet formulas will show blank until it's published once.`);
+                            return null;
+                        }
+                        const sheetId = engine.getSheetId(key);
+                        engine.setSheetContent(sheetId, crest301DataToGrid(json.data));
+                        entry.loaded = true;
+                        const when = json.updatedAt ? new Date(json.updatedAt).toLocaleString() : 'unknown time';
+                        logAutoBallast(`📥 Barge "${key}": loaded ${Object.keys(json.data).length} cells from Firebase (snapshot from ${when}). Formulas can reference =${key}!<cell>.`);
+                        refreshLoadEditorPageIfOpen();
+                        return json.data;
+                    })
+                    .catch(e => {
+                        console.warn(`Barge "${key}" Firebase fetch failed`, e);
+                        logAutoBallast(`⚠️ Barge "${key}": could not reach Firebase — its cross-sheet formulas will show blank until it is reachable.`);
+                        return null;
+                    });
+            }
+            return entry.loadPromise;
+        }
+
+        // Reads whatever's currently sitting in Load_Editor!C2 ("Select
+        // Barge") and makes sure THAT barge's sheet is registered and
+        // loading. Call once when the engine is built, and again any
+        // time C2 itself is edited so switching barges live-swaps
+        // which sheet INDIRECT($C$2&"!...") resolves to.
+        function leEnsureActiveBargeSheet(force) {
+            const engine = leGetEngine();
+            const sheetId = engine.getSheetId(LE_SHEET_NAME);
+            const c2 = engine.getCellValue({ sheet: sheetId, row: 1, col: 2 }); // row2,col3 = C2
+            if (c2 === null || c2 === undefined || c2 === '') return null;
+            return leEnsureBargeSheet(c2, force);
+        }
+
         // One-time load of every LOAD_EDITOR_STATIC_CELLS entry as the
         // engine's starting content (plain values — none of them were
         // formulas in the source workbook, per the extraction).
@@ -4503,6 +4675,13 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
             engine.setCellContents(addr, [[content === '' ? null : content]]);
             leSaveEditToFirebase(leColLetters(c) + r, content === '' ? null : content);
+
+            // C2 is "Select Barge" — if it just changed, live-switch
+            // which barge sheet INDIRECT($C$2&"!...") formulas resolve
+            // to (registers+loads the new barge's sheet if needed).
+            if (r === 2 && c === 3) {
+                leEnsureActiveBargeSheet(true);
+            }
 
             if (isOfficeInitialized && leWriteToExcel) {
                 const col = leColLetters(c);
