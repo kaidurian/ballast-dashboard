@@ -41,21 +41,62 @@
   td.hascell{color:var(--text);}
   td.empty{color:transparent;}
   .resize-handle{position:absolute;top:0;right:0;width:5px;height:100%;cursor:col-resize;z-index:25;}
+  .row-resize-handle{position:absolute;left:0;bottom:-3px;top:auto;width:100%;height:6px;cursor:row-resize;}
   .cellhit{background:#3b82f655 !important;}
+  td.cell-selected{outline:2px solid var(--accent);outline-offset:-2px;background:#3b82f633 !important;}
+  .fill-handle{position:absolute;width:7px;height:7px;right:-4px;bottom:-4px;background:var(--accent);
+               border:1px solid #fff;border-radius:1px;cursor:crosshair;z-index:30;}
+  td.fill-preview{outline:1px dashed var(--accent);outline-offset:-1px;}
+  td.formula-cell{color:#7dd3fc;}
+  td.cell-editing{outline:2px solid var(--accent-2) !important;outline-offset:-2px;background:#10b98122 !important;
+                  color:var(--text) !important;white-space:pre-wrap;cursor:text;}
   footer{position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--border);
          padding:4px 12px;font-size:10px;color:var(--text-muted);}
+
+  /* ---- Formula bar (Excel-style Name Box + fx input), same pattern
+     as the Load Editor page: shows the selected cell's address and its
+     raw value, editable here (Enter commits) or by double-clicking the
+     cell itself. ---- */
+  .fb-row{display:flex;align-items:stretch;gap:0;margin:8px 14px 0;border:1px solid var(--border);
+          border-radius:6px;overflow:hidden;background:var(--header-bg);}
+  .fb-addr{flex:0 0 auto;min-width:64px;padding:6px 10px;font-size:12px;font-weight:700;
+           font-family:Consolas,monospace;color:var(--accent);display:flex;align-items:center;
+           justify-content:center;border-right:1px solid var(--border);background:#3b82f611;}
+  .fb-icon{flex:0 0 auto;width:30px;display:flex;align-items:center;justify-content:center;
+           font-style:italic;font-size:12px;color:var(--text-muted);border-right:1px solid var(--border);}
+  .fb-input{flex:1 1 auto;border:none;background:transparent;color:var(--text);font-size:13px;
+            font-family:Consolas,monospace;padding:6px 10px;min-width:0;}
+  .fb-input:disabled{color:var(--text-muted);font-style:italic;font-family:Segoe UI,Arial,sans-serif;}
+  .fb-input:focus{outline:none;background:var(--hover);}
+  .fb-toolbar{display:flex;align-items:center;gap:14px;margin:8px 14px 0;font-size:11px;color:var(--text-muted);}
+  .fb-toolbar label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+  td.editable-cell{cursor:cell;}
+  td.editable-cell:hover{background:var(--hover);}
 </style>
 </head>
 <body>
 <header>
   <h1>CREST_301</h1>
-  <div class="sub">Live replica of the CREST_301 worksheet &mdash; exact cell locations &amp; values &mdash; CREST_301.html</div>
+  <div class="sub">Live replica of the CREST_301 worksheet &mdash; exact cell locations &amp; values &mdash; 35-CREST_301.html</div>
   <div class="spacer"></div>
   <input type="text" id="searchBox" placeholder="Find cell (e.g. Q45) or text...">
   <button id="refreshBtn" title="Pulls the latest CREST_301 snapshot from Firebase. This popup window has no direct Excel connection — after editing CREST_301 in Excel, click '🔄 Refresh CREST_301 from Excel' in the main dashboard first, then click this." onclick="refreshFromExcel()">&#8635; Refresh</button>
   <button id="resyncBtn" onclick="forceResync()">&#9729; Save snapshot to Firebase</button>
   <div id="status"><span class="dot baked"></span>Loading&hellip;</div>
 </header>
+<div class="fb-row" title="Formula bar — click any cell in the grid to see its address and value here, same as Excel. Edit here (or double-click the cell) and press Enter to commit.">
+  <div class="fb-addr" id="fbAddr">&mdash;</div>
+  <div class="fb-icon">fx</div>
+  <input type="text" id="fbInput" class="fb-input" placeholder="Select a cell to view or edit its value" disabled
+         onkeydown="fbKeydown(event)" onblur="fbCommit()">
+</div>
+<div class="fb-toolbar">
+  <label title="When on, committing an edit (via the formula bar or in-cell) also writes the value to the real Excel CREST_301 sheet. Only works when this page is a genuine Office task pane.">
+    <input type="checkbox" id="writeToExcelToggle" onchange="crestSetWriteToExcel(this.checked)">
+    Write cell edits to Excel
+  </label>
+  <span id="editHint">Click a cell to select it. Double-click, press F2, or just start typing to edit in place — or edit via the formula bar. Formulas like =B3+C3 or =SUM(C30:C50) calculate live, same as Excel.</span>
+</div>
 <div id="gridWrap"><div id="gridHost">Loading table&hellip;</div></div>
 <footer id="footerNote"></footer>
 <script>
@@ -100,38 +141,61 @@ function setStatus(source, timestamp){
 // ------------------------------------------------------------
 // Build / rebuild the visible table from currentData + currentMeta
 // ------------------------------------------------------------
+// Persistent column widths (ch units) / row heights (px), keyed by
+// column letter / row number, so a manual resize survives full
+// re-renders (refresh from Excel, force-resync, etc.) — same pattern
+// as leColWidths/leRowHeights in the Load Editor page.
+const crestColWidths = {};
+const crestRowHeights = {};
+const CREST_DEFAULT_ROW_H = null; // null = let the row auto-size to its content, until dragged
+
 function renderTable(){
+  crestResetComputeCache();
   const rows = currentMeta.rows;
   const cols = currentMeta.cols;
   const widths = currentMeta.colWidth;
   let html = '<table id="crestTable"><thead><tr><th class="corner rowhead">&nbsp;</th>';
   for (const c of cols){
-    const w = (widths[c] || 8) + 2;
-    html += `<th class="colhead" data-col="${c}" style="width:${w}ch;min-width:${w}ch;position:relative;">${c}<div class="resize-handle" data-col="${c}"></div></th>`;
+    if (crestColWidths[c] === undefined) crestColWidths[c] = (widths[c] || 8) + 2;
+    const w = crestColWidths[c];
+    html += `<th class="colhead" data-col="${c}" style="width:${w}ch;min-width:${w}ch;position:relative;">${c}<div class="resize-handle col-resize-handle" data-col="${c}" title="Drag to resize column ${c}"></div></th>`;
   }
   html += '</tr></thead><tbody>';
   for (const r of rows){
-    html += `<tr><th class="rowhead">${r}</th>`;
+    const rh = crestRowHeights[r];
+    const rowStyle = rh ? ` style="height:${rh}px"` : '';
+    html += `<tr data-row="${r}"${rowStyle}><th class="rowhead" data-row="${r}" style="position:relative;${rh ? `height:${rh}px;` : ''}">${r}<div class="resize-handle row-resize-handle" data-row="${r}" title="Drag to resize row ${r}"></div></th>`;
     for (const c of cols){
       const key = c + r;
       const has = Object.prototype.hasOwnProperty.call(currentData, key);
-      const val = has ? currentData[key] : '';
-      const shown = (val === null || val === undefined) ? '' : String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;');
-      html += `<td class="${has ? 'hascell' : 'empty'}" data-cell="${key}" title="${key}">${shown}</td>`;
+      const raw = has ? currentData[key] : '';
+      const isFormula = typeof raw === 'string' && raw.charAt(0) === '=';
+      const dispVal = isFormula ? crestGetCellValue(key) : raw;
+      const shownStr = isFormula ? crestToDisplayString(dispVal) : ((raw === null || raw === undefined) ? '' : String(raw));
+      const shown = shownStr === '' ? '' : shownStr.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+      const cls = (has ? 'hascell' : 'empty') + ' editable-cell' + (isFormula ? ' formula-cell' : '');
+      const titleSuffix = isFormula ? ` — formula: ${String(raw).replace(/"/g,'&quot;').replace(/</g,'&lt;')}` : ' — click to select, double-click to edit';
+      html += `<td class="${cls}" data-cell="${key}" data-col="${c}" data-row="${r}" title="${key}${titleSuffix}"
+                   onclick="crestSelectCell('${key}')" ondblclick="crestEditCell('${key}')">${shown}</td>`;
     }
     html += '</tr>';
   }
   html += '</tbody></table>';
   document.getElementById('gridHost').innerHTML = html;
   attachColumnResize();
+  attachRowResize();
+  // Re-attach the fill handle + selection highlight to whatever cell
+  // was selected before this re-render (if it still exists).
+  if (crestSelectedCell) crestSelectCell(crestSelectedCell);
 }
 
 // ------------------------------------------------------------
-// Draggable column widths - "dynamic wider column" requirement
+// Draggable column widths - "dynamic wider column" requirement.
+// Widths persist in crestColWidths so they survive re-renders.
 // ------------------------------------------------------------
 function attachColumnResize(){
   let active = null, startX = 0, startWidth = 0;
-  document.querySelectorAll('.resize-handle').forEach(handle => {
+  document.querySelectorAll('.col-resize-handle').forEach(handle => {
     handle.addEventListener('mousedown', e => {
       const col = handle.dataset.col;
       const th = handle.parentElement;
@@ -139,6 +203,7 @@ function attachColumnResize(){
       startX = e.clientX;
       startWidth = th.offsetWidth;
       e.preventDefault();
+      e.stopPropagation();
     });
   });
   document.addEventListener('mousemove', e => {
@@ -148,13 +213,734 @@ function attachColumnResize(){
     const chWidth = Math.max(4, Math.round(newWidth / 7));
     active.th.style.width = chWidth + 'ch';
     active.th.style.minWidth = chWidth + 'ch';
+    crestColWidths[active.col] = chWidth;
   });
   document.addEventListener('mouseup', () => { active = null; });
 }
 
+// ------------------------------------------------------------
+// Draggable row heights - same interaction as Excel/Load Editor:
+// drag the bottom edge of the row-number cell. Heights persist in
+// crestRowHeights so they survive re-renders.
+// ------------------------------------------------------------
+function attachRowResize(){
+  let active = null, startY = 0, startHeight = 0;
+  document.querySelectorAll('.row-resize-handle').forEach(handle => {
+    handle.addEventListener('mousedown', e => {
+      const row = handle.dataset.row;
+      const tr = handle.closest('tr');
+      active = { row, tr };
+      startY = e.clientY;
+      startHeight = tr.offsetHeight;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+  document.addEventListener('mousemove', e => {
+    if (!active) return;
+    const delta = e.clientY - startY;
+    const newHeight = Math.max(16, startHeight + delta);
+    active.tr.style.height = newHeight + 'px';
+    const th = active.tr.querySelector('th.rowhead');
+    if (th) th.style.height = newHeight + 'px';
+    crestRowHeights[active.row] = newHeight;
+  });
+  document.addEventListener('mouseup', () => { active = null; });
+}
+
+// ============================================================
+// EXCEL-STYLE FILL HANDLE (drag-to-copy)
+//    Small square anchored to the bottom-right corner of the
+//    currently-selected cell (crestSelectedCell). Dragging it copies
+//    that cell's value across the cells passed over — a plain value
+//    is copied as-is; if the cell holds "=..." text (typed via the
+//    formula bar), simple relative cell references inside it are
+//    shifted the same way Excel shifts them, and $-locked references
+//    stay put. Matches the Load Editor page's fill handle behavior.
+// ============================================================
+const CREST_REF_RE = /((?:'[^']*'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Za-z]{1,3})(\$?)(\d{1,7})\b/g;
+
+function crestAdjustFormulaRefs(raw, rowOffset, colOffset){
+  if (typeof raw !== 'string' || raw.charAt(0) !== '=') return raw;
+  return raw.replace(CREST_REF_RE, function(token, sheetPart, colDollar, colLetters, rowDollar, rowDigits){
+    let col = colLetterToIndex(colLetters);
+    let row = parseInt(rowDigits, 10);
+    if (colDollar !== '$') col += colOffset;
+    if (rowDollar !== '$') row += rowOffset;
+    if (col < 1) col = 1;
+    if (row < 1) row = 1;
+    return (sheetPart || '') + colDollar + colIndexToLetters(col) + rowDollar + row;
+  });
+}
+function colLetterToIndex(letters){
+  let n = 0;
+  letters = (letters || '').toUpperCase();
+  for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+  return n;
+}
+function colIndexToLetters(n){
+  let s = '';
+  while (n > 0){ const rem = (n - 1) % 26; s = String.fromCharCode(65 + rem) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+let crestFillAnchor = null;  // { col, row } — cell the handle is attached to
+let crestFillTarget = null;  // { col, row } — cell currently under the pointer while dragging
+let crestIsFilling = false;
+
+function crestAttachFillHandle(){
+  document.querySelectorAll('#crestTable .fill-handle').forEach(h => h.remove());
+  if (!crestSelectedCell) return;
+  const selTd = document.querySelector(`#crestTable td[data-cell="${crestSelectedCell}"]`);
+  if (!selTd) return;
+  const handle = document.createElement('div');
+  handle.className = 'fill-handle';
+  handle.title = 'Drag to fill/copy this cell across other cells — same as Excel (use $ to lock a reference in typed formulas)';
+  handle.addEventListener('mousedown', crestFillHandleMouseDown);
+  selTd.style.position = 'relative';
+  selTd.appendChild(handle);
+}
+
+function crestFillHandleMouseDown(e){
+  e.preventDefault();
+  e.stopPropagation();
+  if (!crestSelectedCell) return;
+  const m = /^([A-Za-z]+)(\d+)$/.exec(crestSelectedCell);
+  if (!m) return;
+  crestIsFilling = true;
+  crestFillAnchor = { col: m[1], row: parseInt(m[2], 10) };
+  crestFillTarget = { col: m[1], row: parseInt(m[2], 10) };
+  document.body.style.userSelect = 'none';
+}
+
+function crestGetFillRange(){
+  const anchorColIdx = colLetterToIndex(crestFillAnchor.col);
+  const targetColIdx = colLetterToIndex(crestFillTarget.col);
+  const dRow = crestFillTarget.row - crestFillAnchor.row;
+  const dCol = targetColIdx - anchorColIdx;
+  if (Math.abs(dRow) >= Math.abs(dCol)){
+    return {
+      r1: Math.min(crestFillAnchor.row, crestFillTarget.row), r2: Math.max(crestFillAnchor.row, crestFillTarget.row),
+      c1: anchorColIdx, c2: anchorColIdx
+    };
+  }
+  return {
+    r1: crestFillAnchor.row, r2: crestFillAnchor.row,
+    c1: Math.min(anchorColIdx, targetColIdx), c2: Math.max(anchorColIdx, targetColIdx)
+  };
+}
+
+function crestPaintFillPreview(){
+  document.querySelectorAll('#crestTable td.fill-preview').forEach(td => td.classList.remove('fill-preview'));
+  if (!crestFillAnchor || !crestFillTarget) return;
+  const range = crestGetFillRange();
+  const anchorColIdx = colLetterToIndex(crestFillAnchor.col);
+  for (let r = range.r1; r <= range.r2; r++){
+    for (let ci = range.c1; ci <= range.c2; ci++){
+      if (r === crestFillAnchor.row && ci === anchorColIdx) continue;
+      const key = colIndexToLetters(ci) + r;
+      const td = document.querySelector(`#crestTable td[data-cell="${key}"]`);
+      if (td) td.classList.add('fill-preview');
+    }
+  }
+}
+
+async function crestApplyFill(){
+  if (!crestFillAnchor || !crestFillTarget) { crestFillAnchor = null; crestFillTarget = null; return; }
+  const range = crestGetFillRange();
+  const anchorColIdx = colLetterToIndex(crestFillAnchor.col);
+  const anchorRow = crestFillAnchor.row;
+  const anchorKey = crestFillAnchor.col + anchorRow;
+  const sourceRaw = Object.prototype.hasOwnProperty.call(currentData, anchorKey) ? currentData[anchorKey] : '';
+  const isFormulaSource = typeof sourceRaw === 'string' && sourceRaw.charAt(0) === '=';
+  let touchedAny = false;
+
+  for (let r = range.r1; r <= range.r2; r++){
+    for (let ci = range.c1; ci <= range.c2; ci++){
+      if (r === anchorRow && ci === anchorColIdx) continue;
+      const colLetters = colIndexToLetters(ci);
+      const key = colLetters + r;
+      const rowOffset = r - anchorRow;
+      const colOffset = ci - anchorColIdx;
+      const valueToWrite = isFormulaSource
+        ? crestAdjustFormulaRefs(sourceRaw, rowOffset, colOffset)
+        : (sourceRaw === '' || sourceRaw === null || sourceRaw === undefined ? '' : sourceRaw);
+
+      if (valueToWrite === '') delete currentData[key];
+      else currentData[key] = valueToWrite;
+      touchedAny = true;
+
+      if (crestWriteToExcel && isOfficeInitialized && typeof Excel !== 'undefined'){
+        try {
+          await Excel.run(async (context) => {
+            const sheet = context.workbook.worksheets.getItem(SHEET_NAME);
+            const wr = sheet.getRange(`${colLetters}${r}`);
+            wr.values = [[valueToWrite === '' ? null : valueToWrite]];
+            await context.sync();
+          });
+        } catch(e){ console.warn('Excel write error (CREST_301 fill)', e); }
+      }
+    }
+  }
+
+  document.querySelectorAll('#crestTable td.fill-preview').forEach(td => td.classList.remove('fill-preview'));
+  crestFillAnchor = null;
+  crestFillTarget = null;
+  if (touchedAny){
+    renderTable(); // redraw + recompute any formulas affected by the fill
+    try { await pushToFirebase(currentData, currentMeta); } catch(e){ console.warn('Auto-save to Firebase failed', e); }
+  }
+}
+
+document.addEventListener('mousemove', function(e){
+  if (!crestIsFilling) return;
+  const td = e.target.closest('#crestTable td[data-cell]');
+  if (!td) return;
+  const m = /^([A-Za-z]+)(\d+)$/.exec(td.dataset.cell);
+  if (!m) return;
+  crestFillTarget = { col: m[1], row: parseInt(m[2], 10) };
+  crestPaintFillPreview();
+});
+document.addEventListener('mouseup', function(){
+  if (crestIsFilling){
+    crestIsFilling = false;
+    document.body.style.userSelect = '';
+    crestApplyFill();
+  }
+});
+
 // Row height auto-grows because of white-space:pre-wrap + table-layout:fixed,
 // so long text in any cell wraps and the whole row becomes taller automatically
 // - satisfies "dynamic taller row" requirement without extra JS.
+
+// ============================================================
+// EXCEL-STYLE FORMULA ENGINE
+//    Any cell whose stored value starts with "=" is treated as a live
+//    formula, evaluated the same way Excel would: cell refs (B3,
+//    $B$3), ranges (C30:C50), arithmetic (+ - * / ^), string concat
+//    (&), comparisons (= <> < > <= >=), and a set of common functions
+//    (SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, IF, IFERROR, AND, OR,
+//    NOT, ABS, ROUND, ROUNDUP, ROUNDDOWN, SQRT, POWER, MOD, INT,
+//    CONCATENATE, LEN, TRIM, UPPER, LOWER, TODAY, NOW, PI). Formulas
+//    can reference other formula cells (recursive, with circular-
+//    reference detection) exactly like a real spreadsheet.
+// ============================================================
+let crestComputeCache = new Map();
+let crestComputeStack = new Set();
+
+function crestResetComputeCache(){
+  crestComputeCache = new Map();
+  crestComputeStack = new Set();
+}
+
+function crestStripRefDollars(ref){ return ref.replace(/\$/g, ''); }
+
+function crestToNumber(v){
+  if (v === '' || v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+}
+
+function crestTruthy(v){
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'string') return v.toUpperCase() === 'TRUE';
+  return !!v;
+}
+
+function crestFormatNumber(n){
+  if (!isFinite(n)) return '#NUM!';
+  const rounded = Math.round(n * 1e10) / 1e10;
+  return String(rounded);
+}
+
+function crestToDisplayString(v){
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (typeof v === 'number') return crestFormatNumber(v);
+  return String(v);
+}
+
+// ---- Lexer ----
+function crestLex(s){
+  const tokens = [];
+  let i = 0;
+  const n = s.length;
+  while (i < n){
+    const c = s[i];
+    if (c === ' ' || c === '\t'){ i++; continue; }
+    if (c === '"'){
+      let j = i + 1, str = '';
+      while (j < n){
+        if (s[j] === '"'){
+          if (s[j+1] === '"'){ str += '"'; j += 2; continue; }
+          j++; break;
+        }
+        str += s[j]; j++;
+      }
+      tokens.push({t:'str', v:str});
+      i = j; continue;
+    }
+    if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(s[i+1] || ''))){
+      let j = i;
+      while (j < n && /[0-9.]/.test(s[j])) j++;
+      if (s[j] === 'e' || s[j] === 'E'){
+        let k = j + 1;
+        if (s[k] === '+' || s[k] === '-') k++;
+        if (/[0-9]/.test(s[k] || '')){ while (k < n && /[0-9]/.test(s[k])) k++; j = k; }
+      }
+      let numStr = s.slice(i, j);
+      i = j;
+      let isPct = false;
+      if (s[i] === '%'){ isPct = true; i++; }
+      tokens.push({t:'num', v: parseFloat(numStr) * (isPct ? 0.01 : 1)});
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(c)){
+      let j = i;
+      while (j < n && /[A-Za-z0-9_.$]/.test(s[j])) j++;
+      let word = s.slice(i, j);
+      i = j;
+      const isCellRef = w => /^\$?[A-Za-z]{1,3}\$?[0-9]{1,7}$/.test(w);
+      if (s[i] === ':' && isCellRef(word)){
+        let k = i + 1;
+        while (k < n && /[A-Za-z0-9_.$]/.test(s[k])) k++;
+        const word2 = s.slice(i+1, k);
+        if (isCellRef(word2)){
+          tokens.push({t:'range', v: word + ':' + word2});
+          i = k; continue;
+        }
+      }
+      if (isCellRef(word)){
+        tokens.push({t:'ref', v: word});
+      } else if (word.toUpperCase() === 'TRUE'){
+        tokens.push({t:'bool', v:true});
+      } else if (word.toUpperCase() === 'FALSE'){
+        tokens.push({t:'bool', v:false});
+      } else {
+        tokens.push({t:'name', v: word.toUpperCase()});
+      }
+      continue;
+    }
+    if (c === '<' && s[i+1] === '>'){ tokens.push({t:'op', v:'<>'}); i += 2; continue; }
+    if (c === '<' && s[i+1] === '='){ tokens.push({t:'op', v:'<='}); i += 2; continue; }
+    if (c === '>' && s[i+1] === '='){ tokens.push({t:'op', v:'>='}); i += 2; continue; }
+    if ('+-*/^&=<>(),'.includes(c)){ tokens.push({t:'op', v:c}); i++; continue; }
+    i++; // skip unrecognized character
+  }
+  tokens.push({t:'eof', v:null});
+  return tokens;
+}
+
+// ---- Recursive-descent parser (precedence low->high: comparison, concat, add/sub, mul/div, power, unary) ----
+function crestParseFormula(tokens){
+  let pos = 0;
+  const peek = () => tokens[pos];
+  const next = () => tokens[pos++];
+  const expect = v => { const t = next(); if (t.v !== v) throw new Error('#ERROR!'); return t; };
+
+  function parseExpr(){ return parseComparison(); }
+  function parseComparison(){
+    let left = parseConcat();
+    while (peek().t === 'op' && ['=','<>','<','>','<=','>='].includes(peek().v)){
+      const op = next().v;
+      left = {type:'cmp', op, left, right: parseConcat()};
+    }
+    return left;
+  }
+  function parseConcat(){
+    let left = parseAdd();
+    while (peek().t === 'op' && peek().v === '&'){ next(); left = {type:'concat', left, right: parseAdd()}; }
+    return left;
+  }
+  function parseAdd(){
+    let left = parseMul();
+    while (peek().t === 'op' && (peek().v === '+' || peek().v === '-')){
+      const op = next().v;
+      left = {type:'bin', op, left, right: parseMul()};
+    }
+    return left;
+  }
+  function parseMul(){
+    let left = parsePow();
+    while (peek().t === 'op' && (peek().v === '*' || peek().v === '/')){
+      const op = next().v;
+      left = {type:'bin', op, left, right: parsePow()};
+    }
+    return left;
+  }
+  function parsePow(){
+    let left = parseUnary();
+    while (peek().t === 'op' && peek().v === '^'){ next(); left = {type:'bin', op:'^', left, right: parseUnary()}; }
+    return left;
+  }
+  function parseUnary(){
+    if (peek().t === 'op' && (peek().v === '-' || peek().v === '+')){
+      const op = next().v;
+      return {type:'unary', op, operand: parseUnary()};
+    }
+    return parsePrimary();
+  }
+  function parsePrimary(){
+    const t = peek();
+    if (t.t === 'num'){ next(); return {type:'num', value:t.v}; }
+    if (t.t === 'str'){ next(); return {type:'str', value:t.v}; }
+    if (t.t === 'bool'){ next(); return {type:'bool', value:t.v}; }
+    if (t.t === 'ref'){ next(); return {type:'ref', value:t.v}; }
+    if (t.t === 'range'){ next(); return {type:'range', value:t.v}; }
+    if (t.t === 'op' && t.v === '('){ next(); const e = parseExpr(); expect(')'); return e; }
+    if (t.t === 'name'){
+      next();
+      if (peek().t === 'op' && peek().v === '('){
+        next();
+        const args = [];
+        if (!(peek().t === 'op' && peek().v === ')')){
+          args.push(parseExpr());
+          while (peek().t === 'op' && peek().v === ','){ next(); args.push(parseExpr()); }
+        }
+        expect(')');
+        return {type:'call', name:t.v, args};
+      }
+      throw new Error('#NAME?');
+    }
+    throw new Error('#ERROR!');
+  }
+  const ast = parseExpr();
+  if (peek().t !== 'eof') throw new Error('#ERROR!');
+  return ast;
+}
+
+function crestRangeCells(rangeStr){
+  const [a, b] = rangeStr.split(':').map(crestStripRefDollars);
+  const ma = /^([A-Za-z]+)([0-9]+)$/.exec(a);
+  const mb = /^([A-Za-z]+)([0-9]+)$/.exec(b);
+  const c1 = colLetterToIndex(ma[1].toUpperCase()), r1 = parseInt(ma[2], 10);
+  const c2 = colLetterToIndex(mb[1].toUpperCase()), r2 = parseInt(mb[2], 10);
+  const cells = [];
+  for (let r = Math.min(r1,r2); r <= Math.max(r1,r2); r++){
+    for (let c = Math.min(c1,c2); c <= Math.max(c1,c2); c++){
+      cells.push(colIndexToLetters(c) + r);
+    }
+  }
+  return cells;
+}
+
+function crestFlattenArgs(args){
+  const out = [];
+  for (const a of args){
+    const v = crestEvalNode(a);
+    if (Array.isArray(v)) out.push(...v); else out.push(v);
+  }
+  return out;
+}
+
+function crestEvalFunc(name, args){
+  switch(name){
+    case 'SUM': return crestFlattenArgs(args).reduce((s,v)=> s + crestToNumber(v), 0);
+    case 'AVERAGE': {
+      const nums = crestFlattenArgs(args).filter(v => v!=='' && v!==null && v!==undefined).map(crestToNumber);
+      return nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : 0;
+    }
+    case 'MIN': { const nums = crestFlattenArgs(args).map(crestToNumber); return nums.length ? Math.min(...nums) : 0; }
+    case 'MAX': { const nums = crestFlattenArgs(args).map(crestToNumber); return nums.length ? Math.max(...nums) : 0; }
+    case 'COUNT': return crestFlattenArgs(args).filter(v => v!=='' && v!==null && v!==undefined && !isNaN(Number(v))).length;
+    case 'COUNTA': return crestFlattenArgs(args).filter(v => v !== '' && v !== null && v !== undefined).length;
+    case 'IF': {
+      const cond = crestEvalNode(args[0]);
+      if (crestTruthy(cond)) return args[1] !== undefined ? crestEvalNode(args[1]) : true;
+      return args[2] !== undefined ? crestEvalNode(args[2]) : false;
+    }
+    case 'IFERROR': {
+      try { const v = crestEvalNode(args[0]); if (typeof v === 'string' && v.charAt(0) === '#') return crestEvalNode(args[1]); return v; }
+      catch(e){ return crestEvalNode(args[1]); }
+    }
+    case 'AND': return crestFlattenArgs(args).every(crestTruthy);
+    case 'OR': return crestFlattenArgs(args).some(crestTruthy);
+    case 'NOT': return !crestTruthy(crestEvalNode(args[0]));
+    case 'ABS': return Math.abs(crestToNumber(crestEvalNode(args[0])));
+    case 'ROUND': { const v=crestToNumber(crestEvalNode(args[0])); const d=args[1]!==undefined?crestToNumber(crestEvalNode(args[1])):0; const f=Math.pow(10,d); return Math.round(v*f)/f; }
+    case 'ROUNDUP': { const v=crestToNumber(crestEvalNode(args[0])); const d=args[1]!==undefined?crestToNumber(crestEvalNode(args[1])):0; const f=Math.pow(10,d); return (v>=0?Math.ceil(v*f):Math.floor(v*f))/f; }
+    case 'ROUNDDOWN': { const v=crestToNumber(crestEvalNode(args[0])); const d=args[1]!==undefined?crestToNumber(crestEvalNode(args[1])):0; const f=Math.pow(10,d); return (v>=0?Math.floor(v*f):Math.ceil(v*f))/f; }
+    case 'SQRT': return Math.sqrt(crestToNumber(crestEvalNode(args[0])));
+    case 'POWER': return Math.pow(crestToNumber(crestEvalNode(args[0])), crestToNumber(crestEvalNode(args[1])));
+    case 'MOD': { const a=crestToNumber(crestEvalNode(args[0])), b=crestToNumber(crestEvalNode(args[1])); return b===0?0:a-b*Math.floor(a/b); }
+    case 'INT': return Math.floor(crestToNumber(crestEvalNode(args[0])));
+    case 'CONCATENATE': return crestFlattenArgs(args).map(crestToDisplayString).join('');
+    case 'LEN': return crestToDisplayString(crestEvalNode(args[0])).length;
+    case 'TRIM': return crestToDisplayString(crestEvalNode(args[0])).trim();
+    case 'UPPER': return crestToDisplayString(crestEvalNode(args[0])).toUpperCase();
+    case 'LOWER': return crestToDisplayString(crestEvalNode(args[0])).toLowerCase();
+    case 'TODAY': return new Date().toLocaleDateString();
+    case 'NOW': return new Date().toLocaleString();
+    case 'PI': return Math.PI;
+    default: throw new Error('#NAME?');
+  }
+}
+
+function crestEvalNode(node){
+  switch(node.type){
+    case 'num': return node.value;
+    case 'str': return node.value;
+    case 'bool': return node.value;
+    case 'ref': return crestGetCellValue(crestStripRefDollars(node.value).toUpperCase());
+    case 'range': return crestRangeCells(node.value).map(k => crestGetCellValue(k));
+    case 'unary': { const v = crestToNumber(crestEvalNode(node.operand)); return node.op === '-' ? -v : v; }
+    case 'bin': {
+      const l = crestToNumber(crestEvalNode(node.left));
+      const r = crestToNumber(crestEvalNode(node.right));
+      switch(node.op){
+        case '+': return l + r;
+        case '-': return l - r;
+        case '*': return l * r;
+        case '/': if (r === 0) throw new Error('#DIV/0!'); return l / r;
+        case '^': return Math.pow(l, r);
+      }
+      break;
+    }
+    case 'concat': return crestToDisplayString(crestEvalNode(node.left)) + crestToDisplayString(crestEvalNode(node.right));
+    case 'cmp': {
+      const l = crestEvalNode(node.left), r = crestEvalNode(node.right);
+      const useNum = typeof l === 'number' && typeof r === 'number';
+      const lv = useNum ? l : String(l), rv = useNum ? r : String(r);
+      switch(node.op){
+        case '=': return lv === rv;
+        case '<>': return lv !== rv;
+        case '<': return lv < rv;
+        case '>': return lv > rv;
+        case '<=': return lv <= rv;
+        case '>=': return lv >= rv;
+      }
+      break;
+    }
+    case 'call': return crestEvalFunc(node.name, node.args);
+  }
+}
+
+// Lazy, memoized, cycle-safe cell evaluator. Plain (non-formula) values
+// pass through untouched; "=..." values are parsed and evaluated,
+// recursively resolving any cell references they contain.
+function crestGetCellValue(key){
+  key = key.toUpperCase();
+  if (crestComputeCache.has(key)) return crestComputeCache.get(key);
+  const raw = Object.prototype.hasOwnProperty.call(currentData, key) ? currentData[key] : '';
+  if (typeof raw === 'string' && raw.charAt(0) === '='){
+    if (crestComputeStack.has(key)) return '#CIRCULAR!';
+    crestComputeStack.add(key);
+    let result;
+    try {
+      const ast = crestParseFormula(crestLex(raw.slice(1)));
+      const val = crestEvalNode(ast);
+      result = Array.isArray(val) ? (val.length ? val[0] : '') : val;
+    } catch(e){
+      result = (e && e.message) || '#ERROR!';
+    }
+    crestComputeStack.delete(key);
+    crestComputeCache.set(key, result);
+    return result;
+  }
+  crestComputeCache.set(key, raw);
+  return raw;
+}
+
+// ============================================================
+// FORMULA BAR + IN-GRID EDITING
+//    Same UX pattern as the Load Editor page's formula bar: click a
+//    cell to select it (its address + raw value show in the bar
+//    above the grid); type there (or double-click the cell itself)
+//    and press Enter to commit. Commits update currentData in memory,
+//    re-render that cell, auto-save the whole snapshot to Firebase
+//    (like Load Editor's amber-cell auto-save), and optionally write
+//    the value back to the live Excel CREST_301 sheet if this page is
+//    running as a genuine Office task pane and the toggle is on.
+// ============================================================
+let crestSelectedCell = null; // cell address string, e.g. "Q45"
+let crestWriteToExcel = false;
+
+function crestSetWriteToExcel(on){
+  crestWriteToExcel = !!on;
+}
+
+function crestSelectCell(key){
+  document.querySelectorAll('#crestTable td.cell-selected').forEach(td => td.classList.remove('cell-selected'));
+  const td = document.querySelector(`[data-cell="${key}"]`);
+  if (td) td.classList.add('cell-selected');
+  crestSelectedCell = key;
+  crestAttachFillHandle();
+  const addrEl = document.getElementById('fbAddr');
+  const inputEl = document.getElementById('fbInput');
+  if (!addrEl || !inputEl) return;
+  addrEl.textContent = key;
+  inputEl.disabled = false;
+  const val = Object.prototype.hasOwnProperty.call(currentData, key) ? currentData[key] : '';
+  inputEl.value = (val === null || val === undefined) ? '' : val;
+}
+
+// ------------------------------------------------------------
+// Shared commit path: both the formula bar (Enter) and in-cell
+// editing (Enter / click away) funnel through here, so a plain
+// value OR a "=..." formula behaves identically no matter which UI
+// the person used to type it — exactly like Excel, where the cell
+// grid and the formula bar are just two views onto the same edit.
+// ------------------------------------------------------------
+async function crestCommitCellText(key, rawText){
+  const raw = rawText;
+  let value = raw;
+  if (raw.trim() !== '' && raw.charAt(0) !== '='){
+    const num = Number(raw);
+    if (!isNaN(num)) value = num;
+  }
+  if (raw === ''){
+    delete currentData[key];
+  } else {
+    currentData[key] = value;
+  }
+
+  // Keep the formula bar in sync if this is still the selected cell.
+  if (crestSelectedCell === key){
+    const inputEl = document.getElementById('fbInput');
+    if (inputEl) inputEl.value = (value === '' || value === null || value === undefined) ? '' : value;
+  }
+
+  // Full re-render: recomputes every formula cell (including any
+  // that depend on the cell just edited) and redraws the grid, same
+  // as Excel recalculating the whole sheet after an edit.
+  renderTable();
+
+  // Auto-save the updated snapshot to Firebase so it's still here
+  // next time this page (or another viewer) is opened.
+  try { await pushToFirebase(currentData, currentMeta); } catch(e){ console.warn('Auto-save to Firebase failed', e); }
+
+  // Optionally write the raw value straight back to the live Excel
+  // CREST_301 sheet (only meaningful if this page is a genuine Office
+  // task pane — see the note on refreshFromExcel() below).
+  if (crestWriteToExcel && isOfficeInitialized && typeof Excel !== 'undefined'){
+    try {
+      await Excel.run(async (context) => {
+        const sheet = context.workbook.worksheets.getItem(SHEET_NAME);
+        const m = key.match(/^([A-Z]+)(\d+)$/);
+        if (m) {
+          const range = sheet.getRange(`${m[1]}${m[2]}`);
+          range.values = [[value === '' ? null : value]];
+          await context.sync();
+        }
+      });
+    } catch(e){ console.warn('Excel write error (CREST_301 cell)', e); }
+  }
+}
+
+// ------------------------------------------------------------
+// True in-cell editing: double-click (or F2, or just typing while a
+// cell is selected — see the keydown listener below) turns the <td>
+// itself into an editable field, showing the raw formula/value
+// (not the computed result) while you type, exactly like Excel.
+// Enter or clicking away commits; Escape cancels.
+// ------------------------------------------------------------
+function crestEditCell(key){
+  crestSelectCell(key);
+  const td = document.querySelector(`#crestTable td[data-cell="${key}"]`);
+  if (!td || td.isContentEditable) return;
+
+  const raw = Object.prototype.hasOwnProperty.call(currentData, key) ? currentData[key] : '';
+  td.contentEditable = 'true';
+  td.classList.add('cell-editing');
+  td.textContent = (raw === null || raw === undefined) ? '' : String(raw);
+  td.focus();
+  const range = document.createRange();
+  range.selectNodeContents(td);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  let done = false;
+  function cleanup(){
+    td.removeEventListener('keydown', keyHandler);
+    td.removeEventListener('blur', blurHandler);
+  }
+  function commit(){
+    if (done) return; done = true;
+    td.contentEditable = 'false';
+    td.classList.remove('cell-editing');
+    cleanup();
+    crestCommitCellText(key, td.textContent);
+  }
+  function cancel(){
+    if (done) return; done = true;
+    td.contentEditable = 'false';
+    td.classList.remove('cell-editing');
+    cleanup();
+    renderTable(); // discard in-progress edit, redraw from currentData
+  }
+  function keyHandler(e){
+    if (e.key === 'Enter'){ e.preventDefault(); commit(); }
+    else if (e.key === 'Escape'){ e.preventDefault(); cancel(); }
+    else if (e.key === 'Tab'){ e.preventDefault(); commit(); }
+  }
+  function blurHandler(){ commit(); }
+  td.addEventListener('keydown', keyHandler);
+  td.addEventListener('blur', blurHandler);
+}
+
+async function fbCommit(){
+  const inputEl = document.getElementById('fbInput');
+  if (!inputEl || !crestSelectedCell) return;
+  await crestCommitCellText(crestSelectedCell, inputEl.value);
+}
+
+// ------------------------------------------------------------
+// Keyboard: arrow keys move the selection, F2/Enter opens in-cell
+// edit on the selected cell, and simply typing a character while a
+// cell is selected starts editing and overwrites it — same as Excel.
+// ------------------------------------------------------------
+document.addEventListener('keydown', function(e){
+  if (!crestSelectedCell) return;
+  const active = document.activeElement;
+  if (active && active.id === 'fbInput') return; // formula bar handles its own keys
+  if (active && active.classList && active.classList.contains('cell-editing')) return; // already editing
+
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){
+    e.preventDefault();
+    const m = /^([A-Za-z]+)([0-9]+)$/.exec(crestSelectedCell);
+    if (!m) return;
+    let col = colLetterToIndex(m[1]), row = parseInt(m[2], 10);
+    if (e.key === 'ArrowUp') row = Math.max(1, row - 1);
+    if (e.key === 'ArrowDown') row += 1;
+    if (e.key === 'ArrowLeft') col = Math.max(1, col - 1);
+    if (e.key === 'ArrowRight') col += 1;
+    const newKey = colIndexToLetters(col) + row;
+    const td = document.querySelector(`#crestTable td[data-cell="${newKey}"]`);
+    if (td){ crestSelectCell(newKey); td.scrollIntoView({block:'nearest', inline:'nearest'}); }
+    return;
+  }
+  if (e.key === 'F2' || e.key === 'Enter'){
+    e.preventDefault();
+    crestEditCell(crestSelectedCell);
+    return;
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace'){
+    e.preventDefault();
+    crestCommitCellText(crestSelectedCell, '');
+    return;
+  }
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey){
+    crestEditCell(crestSelectedCell);
+    const td = document.querySelector(`#crestTable td[data-cell="${crestSelectedCell}"]`);
+    if (td) td.textContent = ''; // typing replaces the old content, like Excel
+  }
+});
+
+function fbKeydown(e){
+  if (e.key === 'Enter'){
+    e.preventDefault();
+    fbCommit();
+    e.target.blur();
+  } else if (e.key === 'Escape'){
+    e.preventDefault();
+    if (crestSelectedCell) crestSelectCell(crestSelectedCell);
+    e.target.blur();
+  }
+}
 
 // ------------------------------------------------------------
 // Simple find-as-you-type: cell address (Q45) or text search
