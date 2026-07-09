@@ -11,8 +11,10 @@
     --accent:#3b82f6; --accent-2:#10b981; --header-bg:#1c212b; --stripe:#141821; --hover:#1f2937;
   }
   *{box-sizing:border-box;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI, Arial, sans-serif;font-size:12px;}
-  header{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1px solid var(--border);
+  html,body{height:100%;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI, Arial, sans-serif;font-size:12px;
+       display:flex;flex-direction:column;overflow:hidden;}
+  header{flex:0 0 auto;z-index:50;background:var(--panel);border-bottom:1px solid var(--border);
          padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
   header h1{font-size:15px;margin:0;font-weight:600;}
   header .sub{color:var(--text-muted);font-size:11px;}
@@ -29,7 +31,13 @@
   .dot.excel{background:var(--accent-2);}
   .dot.cache{background:var(--accent);}
   .dot.baked{background:#f59e0b;}
-  #gridWrap{overflow:auto;height:calc(100vh - 54px);position:relative;}
+  #gridWrap{flex:1 1 auto;min-height:0;overflow:auto;position:relative;
+            scrollbar-width:auto;scrollbar-color:#4b5563 var(--panel);}
+  #gridWrap::-webkit-scrollbar{width:14px;height:14px;}
+  #gridWrap::-webkit-scrollbar-track{background:var(--panel);}
+  #gridWrap::-webkit-scrollbar-thumb{background:#4b5563;border-radius:7px;border:3px solid var(--panel);}
+  #gridWrap::-webkit-scrollbar-thumb:hover{background:#6b7280;}
+  #gridWrap::-webkit-scrollbar-corner{background:var(--panel);}
   table{border-collapse:collapse;table-layout:fixed;}
   td,th{border:1px solid var(--border);padding:3px 6px;white-space:pre-wrap;word-break:break-word;
         overflow:hidden;vertical-align:top;text-align:left;}
@@ -50,14 +58,14 @@
   td.formula-cell{color:#7dd3fc;}
   td.cell-editing{outline:2px solid var(--accent-2) !important;outline-offset:-2px;background:#10b98122 !important;
                   color:var(--text) !important;white-space:pre-wrap;cursor:text;}
-  footer{position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--border);
+  footer{flex:0 0 auto;background:var(--panel);border-top:1px solid var(--border);
          padding:4px 12px;font-size:10px;color:var(--text-muted);}
 
   /* ---- Formula bar (Excel-style Name Box + fx input), same pattern
      as the Load Editor page: shows the selected cell's address and its
      raw value, editable here (Enter commits) or by double-clicking the
      cell itself. ---- */
-  .fb-row{display:flex;align-items:stretch;gap:0;margin:8px 14px 0;border:1px solid var(--border);
+  .fb-row{flex:0 0 auto;display:flex;align-items:stretch;gap:0;margin:8px 14px 0;border:1px solid var(--border);
           border-radius:6px;overflow:hidden;background:var(--header-bg);}
   .fb-addr{flex:0 0 auto;min-width:64px;padding:6px 10px;font-size:12px;font-weight:700;
            font-family:Consolas,monospace;color:var(--accent);display:flex;align-items:center;
@@ -68,7 +76,7 @@
             font-family:Consolas,monospace;padding:6px 10px;min-width:0;}
   .fb-input:disabled{color:var(--text-muted);font-style:italic;font-family:Segoe UI,Arial,sans-serif;}
   .fb-input:focus{outline:none;background:var(--hover);}
-  .fb-toolbar{display:flex;align-items:center;gap:14px;margin:8px 14px 0;font-size:11px;color:var(--text-muted);}
+  .fb-toolbar{flex:0 0 auto;display:flex;align-items:center;gap:14px;margin:8px 14px 0;font-size:11px;color:var(--text-muted);}
   .fb-toolbar label{display:flex;align-items:center;gap:6px;cursor:pointer;}
   td.editable-cell{cursor:cell;}
   td.editable-cell:hover{background:var(--hover);}
