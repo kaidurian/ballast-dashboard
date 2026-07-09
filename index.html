@@ -1385,23 +1385,21 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         .le-grid th, .le-grid td {
             border: 1px solid var(--panel-border);
             padding: 5px 7px;
-            min-width: 84px;
-            max-width: 280px;
+            /* No min-width/max-width here on purpose: with table-layout:fixed
+               the <colgroup><col style="width:Npx"> (driven by leColWidths /
+               the drag handler) is the single source of truth for column
+               width. A CSS min-width/max-width on the cells themselves would
+               fight that — the browser enforces its own floor/ceiling on top
+               of whatever width the drag handler sets, which is what made
+               dragging look like it "snapped back" or did nothing. Width
+               defaults now come purely from leColWidth()/LE_DEFAULT_COL_W /
+               LE_WIDE_COL_W in JS.
+               overflow/ellipsis stay so text still clips nicely at whatever
+               width the column currently has. */
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             position: relative; /* containing block for the resizer/fill-handle children below */
-        }
-        /* Columns that typically hold longer label/description text in the
-           source workbook get extra room so the text isn't clipped.
-           Column letters -> td:nth-child index = column number + 1 (the
-           +1 accounts for the sticky row-number cell in front). */
-        .le-grid td:nth-child(3),  /* B — item / tank / group names */
-        .le-grid td:nth-child(4),  /* C — Capacity[mT] / labels */
-        .le-grid td:nth-child(12), /* K — Notes column, long sentences */
-        .le-grid td:nth-child(13) /* L — Barge data / Fixed loads / RO-RO labels */ {
-            min-width: 190px;
-            max-width: 380px;
         }
         .le-grid thead th {
             position: sticky;
@@ -4878,10 +4876,18 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 const grid = document.querySelector('.le-grid');
                 if (grid) {
                     const newW = Math.max(30, leResizeStartColW + (e.clientX - leResizeStartX));
+                    const deltaW = newW - leColWidth(leResizingCol);
                     leColWidths[leResizingCol] = newW;
                     // colgroup: col[0] = row-number column, col[N] = data column N.
                     const colEl = grid.querySelectorAll(':scope > colgroup > col')[leResizingCol];
                     if (colEl) colEl.style.width = newW + 'px';
+                    // Keep the <table>'s own inline width in sync with the
+                    // sum of its columns as we drag. table-layout:fixed only
+                    // honors <col> widths verbatim when the table's width
+                    // matches their sum — otherwise it re-shrinks/scales the
+                    // columns to fit whatever width the table currently has.
+                    const curW = parseFloat(grid.style.width) || 0;
+                    grid.style.width = (curW + deltaW) + 'px';
                 }
             }
             if (leResizingRow !== null) {
@@ -5080,11 +5086,23 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             // colgroup drives the actual rendered widths so the col-resizer
             // drag handles (added to each header cell below) can resize a
             // single column live, Excel-style. col[0] = row-number column.
+            // table-layout:fixed only truly honors <col> widths when the
+            // <table> itself has an explicit pixel width. Leave it as
+            // width:auto and, with no CSS min-width to fall back on, the
+            // browser shrink-to-fits the table down to each column's
+            // minimum unbreakable content (one header letter, since these
+            // cells are white-space:nowrap) — every column collapses to
+            // the same tiny width. So we compute the real total width
+            // (row-number col + every data col) and set it inline here,
+            // and keep it in sync in the drag handler below.
+            let totalGridW = 44;
+            for (let c = 1; c <= maxCol; c++) totalGridW += leColWidth(c);
+
             let colgroupHtml = '<colgroup><col style="width:44px">';
             for (let c = 1; c <= maxCol; c++) colgroupHtml += `<col style="width:${leColWidth(c)}px">`;
             colgroupHtml += '</colgroup>';
 
-            let html = '<table class="le-grid">' + colgroupHtml + '<thead><tr><th class="le-corner"></th>';
+            let html = `<table class="le-grid" style="width:${totalGridW}px">` + colgroupHtml + '<thead><tr><th class="le-corner"></th>';
             for (let c = 1; c <= maxCol; c++) {
                 html += `<th>${leColLetters(c)}<div class="le-col-resizer" data-col="${c}" title="Drag to resize column ${leColLetters(c)}"></div></th>`;
             }
