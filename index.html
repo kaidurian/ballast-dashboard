@@ -1390,6 +1390,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            position: relative; /* containing block for the resizer/fill-handle children below */
         }
         /* Columns that typically hold longer label/description text in the
            source workbook get extra room so the text isn't clipped.
@@ -1462,6 +1463,53 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
            grid) gets a stronger highlight, like Excel's active-cell box. */
         .le-grid td.le-cell-selected { outline: 2px solid var(--accent-blue); outline-offset: -2px; z-index: 1; position: relative; }
         .le-grid td.le-cell-formula input.le-has-formula { color: var(--accent-blue); font-weight: 600; }
+
+        /* ---- Excel-style column/row resize handles ----
+           A thin invisible drag strip on the right edge of each column
+           header (col-resize cursor) and the bottom edge of each row
+           number cell (row-resize cursor). Dragging updates leColWidths /
+           leRowHeights (see script below) and live-resizes just that
+           column/row, exactly like Excel's header-border drag. */
+        .le-col-resizer {
+            position: absolute;
+            top: 0;
+            right: -3px;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 5;
+        }
+        .le-row-resizer {
+            position: absolute;
+            left: 0;
+            bottom: -3px;
+            width: 100%;
+            height: 6px;
+            cursor: row-resize;
+            z-index: 5;
+        }
+        /* ---- Excel-style fill handle ----
+           Small square anchored to the bottom-right corner of the
+           currently-selected cell. Dragging it copies/extends the
+           cell's value or formula into the cells passed over, adjusting
+           relative cell references the same way Excel does (and
+           honoring $ locks) — see leApplyFill() in the script below. */
+        .le-fill-handle {
+            position: absolute;
+            width: 7px;
+            height: 7px;
+            right: -4px;
+            bottom: -4px;
+            background: var(--accent-blue);
+            border: 1px solid #fff;
+            border-radius: 1px;
+            cursor: crosshair;
+            z-index: 6;
+        }
+        .le-grid td.le-cell-fill-preview {
+            outline: 1px dashed var(--accent-blue);
+            outline-offset: -1px;
+        }
         .le-toolbar-row {
             display: flex;
             align-items: center;
@@ -1817,7 +1865,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 33-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 34-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4739,6 +4787,8 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 inputEl.value = leRawContentForInput(r, c);
                 leSelectedCell = { r, c, kind: 'formula' };
             }
+
+            leAttachFillHandle();
         }
 
         // Commits whatever is typed in the formula bar into the
@@ -4775,6 +4825,217 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
             return s;
         }
+
+        // Inverse of leColLetters: "C" -> 3, "AA" -> 27, etc.
+        function leColLetterToIndex(letters) {
+            let n = 0;
+            letters = (letters || '').toUpperCase();
+            for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+            return n;
+        }
+
+        // ---- Excel-style column width / row height resize ----
+        // Per-column/row overrides, keyed by column number / row number.
+        // Anything not in these maps falls back to the sheet's normal
+        // default (or the wider default for the label-heavy columns
+        // B/C/K/L, matching the CSS this replaces).
+        const leColWidths = {};
+        const leRowHeights = {};
+        const LE_DEFAULT_COL_W = 84;
+        const LE_WIDE_COL_W = 190;
+        const LE_WIDE_COLS = new Set([2, 3, 11, 12]); // B, C, K, L
+        const LE_DEFAULT_ROW_H = 28;
+        function leColWidth(c) {
+            if (leColWidths[c] !== undefined) return leColWidths[c];
+            return LE_WIDE_COLS.has(c) ? LE_WIDE_COL_W : LE_DEFAULT_COL_W;
+        }
+        function leRowHeight(r) {
+            return leRowHeights[r] !== undefined ? leRowHeights[r] : LE_DEFAULT_ROW_H;
+        }
+
+        let leResizingCol = null, leResizeStartX = 0, leResizeStartColW = 0;
+        let leResizingRow = null, leResizeStartY = 0, leResizeStartRowH = 0;
+
+        document.addEventListener('mousedown', function (e) {
+            const colRz = e.target.closest('.le-col-resizer');
+            if (colRz) {
+                leResizingCol = parseInt(colRz.dataset.col, 10);
+                leResizeStartX = e.clientX;
+                leResizeStartColW = leColWidth(leResizingCol);
+                e.preventDefault();
+                return;
+            }
+            const rowRz = e.target.closest('.le-row-resizer');
+            if (rowRz) {
+                leResizingRow = parseInt(rowRz.dataset.row, 10);
+                leResizeStartY = e.clientY;
+                leResizeStartRowH = leRowHeight(leResizingRow);
+                e.preventDefault();
+            }
+        });
+        document.addEventListener('mousemove', function (e) {
+            if (leResizingCol !== null) {
+                const grid = document.querySelector('.le-grid');
+                if (grid) {
+                    const newW = Math.max(30, leResizeStartColW + (e.clientX - leResizeStartX));
+                    leColWidths[leResizingCol] = newW;
+                    // colgroup: col[0] = row-number column, col[N] = data column N.
+                    const colEl = grid.querySelectorAll(':scope > colgroup > col')[leResizingCol];
+                    if (colEl) colEl.style.width = newW + 'px';
+                }
+            }
+            if (leResizingRow !== null) {
+                const newH = Math.max(16, leResizeStartRowH + (e.clientY - leResizeStartY));
+                leRowHeights[leResizingRow] = newH;
+                const tr = document.querySelector(`.le-grid tr[data-row="${leResizingRow}"]`);
+                if (tr) {
+                    tr.style.height = newH + 'px';
+                    const rownumTd = tr.querySelector('td.le-rownum');
+                    if (rownumTd) rownumTd.style.height = newH + 'px';
+                }
+            }
+        });
+        document.addEventListener('mouseup', function () {
+            leResizingCol = null;
+            leResizingRow = null;
+        });
+
+        // ---- Excel-style fill handle (drag to copy/extend a formula) ----
+        // Adjusts relative cell references the same way Excel does when
+        // you drag-fill: =B1+10 in A1 dragged down to A2 becomes
+        // =B2+10; =B1+C1 becomes =B2+C2; and $ locks a row and/or column
+        // so it stays put (e.g. =$A$1*2 never changes). Also understands
+        // sheet-qualified references like =CREST_301!C4 or ='CREST_301'!Q30
+        // — the sheet name is left alone, only the column/row shift.
+        const LE_REF_RE = /((?:'[^']*'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Za-z]{1,3})(\$?)(\d{1,7})\b/g;
+        function leAdjustFormulaRefs(raw, rowOffset, colOffset) {
+            if (typeof raw !== 'string' || raw.charAt(0) !== '=') return raw;
+            return raw.replace(LE_REF_RE, function (token, sheetPart, colDollar, colLetters, rowDollar, rowDigits) {
+                let col = leColLetterToIndex(colLetters);
+                let row = parseInt(rowDigits, 10);
+                if (colDollar !== '$') col += colOffset;
+                if (rowDollar !== '$') row += rowOffset;
+                if (col < 1) col = 1;
+                if (row < 1) row = 1;
+                return (sheetPart || '') + colDollar + leColLetters(col) + rowDollar + row;
+            });
+        }
+
+        let leFillAnchor = null;  // { r, c } — the cell the fill handle is attached to
+        let leFillTarget = null;  // { r, c } — cell currently under the pointer while dragging
+        let leIsFilling = false;
+
+        function leAttachFillHandle() {
+            document.querySelectorAll('.le-grid .le-fill-handle').forEach(h => h.remove());
+            const selTd = document.querySelector('.le-grid td.le-cell-selected');
+            if (!selTd || !leSelectedCell) return;
+            leFillAnchor = { r: leSelectedCell.r, c: leSelectedCell.c };
+            const handle = document.createElement('div');
+            handle.className = 'le-fill-handle';
+            handle.title = 'Drag to fill/copy this cell — formulas adjust like Excel (use $ to lock a reference)';
+            handle.addEventListener('mousedown', leFillHandleMouseDown);
+            selTd.appendChild(handle);
+        }
+
+        function leFillHandleMouseDown(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!leSelectedCell) return;
+            leIsFilling = true;
+            leFillAnchor = { r: leSelectedCell.r, c: leSelectedCell.c };
+            leFillTarget = { r: leSelectedCell.r, c: leSelectedCell.c };
+            document.body.style.userSelect = 'none';
+        }
+
+        function leGetFillRange() {
+            const dRow = leFillTarget.r - leFillAnchor.r;
+            const dCol = leFillTarget.c - leFillAnchor.c;
+            if (Math.abs(dRow) >= Math.abs(dCol)) {
+                return {
+                    r1: Math.min(leFillAnchor.r, leFillTarget.r), r2: Math.max(leFillAnchor.r, leFillTarget.r),
+                    c1: leFillAnchor.c, c2: leFillAnchor.c
+                };
+            }
+            return {
+                r1: leFillAnchor.r, r2: leFillAnchor.r,
+                c1: Math.min(leFillAnchor.c, leFillTarget.c), c2: Math.max(leFillAnchor.c, leFillTarget.c)
+            };
+        }
+
+        function lePaintFillPreview() {
+            document.querySelectorAll('.le-grid td.le-cell-fill-preview').forEach(td => td.classList.remove('le-cell-fill-preview'));
+            if (!leFillAnchor || !leFillTarget) return;
+            const range = leGetFillRange();
+            for (let r = range.r1; r <= range.r2; r++) {
+                for (let c = range.c1; c <= range.c2; c++) {
+                    if (r === leFillAnchor.r && c === leFillAnchor.c) continue;
+                    const td = document.querySelector(`.le-grid td[data-addr="${leColLetters(c)}${r}"]`);
+                    if (td) td.classList.add('le-cell-fill-preview');
+                }
+            }
+        }
+
+        // Applies the fill: reads the anchor cell's raw content (formula
+        // or plain value) once, then writes an adjusted copy into every
+        // other cell in the drag range, routed through the same
+        // update*() functions each cell type already uses so Excel
+        // write-back and the live tank/RO-RO wiring stay correct.
+        function leApplyFill() {
+            if (!leFillAnchor || !leFillTarget) return;
+            const range = leGetFillRange();
+            const anchorR = leFillAnchor.r, anchorC = leFillAnchor.c;
+            const engine = leGetEngine();
+            const sourceRaw = engine.getCellSerialized(leAddr(anchorR, anchorC));
+            const isFormulaSource = typeof sourceRaw === 'string' && sourceRaw.charAt(0) === '=';
+            for (let r = range.r1; r <= range.r2; r++) {
+                for (let c = range.c1; c <= range.c2; c++) {
+                    if (r === anchorR && c === anchorC) continue;
+                    const rowOffset = r - anchorR;
+                    const colOffset = c - anchorC;
+                    const valueToWrite = isFormulaSource
+                        ? leAdjustFormulaRefs(sourceRaw, rowOffset, colOffset)
+                        : (sourceRaw === null || sourceRaw === undefined ? '' : sourceRaw);
+
+                    const cfg = (c === 4) ? TANK_CONFIG.find(t => t.id === r) : null;
+                    const axleIdx = r - AXLE_START_ROW;
+                    if (cfg) {
+                        updateTankFill(r, valueToWrite);
+                    } else if (axleIdx >= 0 && axleIdx < trailerAxles.length && c >= 4 && c <= 7) {
+                        const fieldByCol = { 4: 'load', 5: 'x', 6: 'y', 7: 'vcg' };
+                        updateLoadEditorAxle(axleIdx, fieldByCol[c], valueToWrite);
+                    } else {
+                        updateLoadEditorCell(r, c, valueToWrite);
+                    }
+                }
+            }
+            document.querySelectorAll('.le-grid td.le-cell-fill-preview').forEach(td => td.classList.remove('le-cell-fill-preview'));
+            leFillTarget = null;
+            renderLoadEditorPageIfOpen_internal();
+        }
+        // renderLoadEditorPage() is defined further below in this file;
+        // this thin wrapper just avoids a "used before defined" concern
+        // since function declarations are hoisted anyway, but keeps the
+        // call site readable at this point in the file.
+        function renderLoadEditorPageIfOpen_internal() {
+            renderLoadEditorPage();
+        }
+
+        document.addEventListener('mousemove', function (e) {
+            if (!leIsFilling) return;
+            const td = e.target.closest('.le-grid td[data-addr]');
+            if (!td) return;
+            const m = /^([A-Za-z]+)(\d+)$/.exec(td.dataset.addr);
+            if (!m) return;
+            leFillTarget = { r: parseInt(m[2], 10), c: leColLetterToIndex(m[1]) };
+            lePaintFillPreview();
+        });
+        document.addEventListener('mouseup', function () {
+            if (leIsFilling) {
+                leIsFilling = false;
+                document.body.style.userSelect = '';
+                leApplyFill();
+            }
+        });
 
         function openLoadEditorPage() {
             renderLoadEditorPage();
@@ -4816,12 +5077,21 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             const maxRow = Math.max(LOAD_EDITOR_STATIC_MAXROW, tankMaxRow, axleMaxRow);
             const maxCol = LOAD_EDITOR_STATIC_MAXCOL;
 
-            let html = '<table class="le-grid"><thead><tr><th class="le-corner"></th>';
-            for (let c = 1; c <= maxCol; c++) html += `<th>${leColLetters(c)}</th>`;
+            // colgroup drives the actual rendered widths so the col-resizer
+            // drag handles (added to each header cell below) can resize a
+            // single column live, Excel-style. col[0] = row-number column.
+            let colgroupHtml = '<colgroup><col style="width:44px">';
+            for (let c = 1; c <= maxCol; c++) colgroupHtml += `<col style="width:${leColWidth(c)}px">`;
+            colgroupHtml += '</colgroup>';
+
+            let html = '<table class="le-grid">' + colgroupHtml + '<thead><tr><th class="le-corner"></th>';
+            for (let c = 1; c <= maxCol; c++) {
+                html += `<th>${leColLetters(c)}<div class="le-col-resizer" data-col="${c}" title="Drag to resize column ${leColLetters(c)}"></div></th>`;
+            }
             html += '</tr></thead><tbody>';
 
             for (let r = 1; r <= maxRow; r++) {
-                html += `<tr><td class="le-rownum">${r}</td>`;
+                html += `<tr data-row="${r}" style="height:${leRowHeight(r)}px"><td class="le-rownum" style="height:${leRowHeight(r)}px">${r}<div class="le-row-resizer" data-row="${r}" title="Drag to resize row ${r}"></div></td>`;
                 for (let c = 1; c <= maxCol; c++) {
                     html += leGridCell(r, c);
                 }
@@ -4829,6 +5099,18 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
             html += '</tbody></table>';
             wrap.innerHTML = html;
+
+            // Re-apply the active-cell highlight + fill handle after the
+            // wholesale re-render above (which otherwise drops both, since
+            // it replaces every cell's DOM node).
+            if (leSelectedCell) {
+                const addr = leColLetters(leSelectedCell.c) + leSelectedCell.r;
+                const td = wrap.querySelector(`td[data-addr="${addr}"]`);
+                if (td) {
+                    td.classList.add('le-cell-selected');
+                    leAttachFillHandle();
+                }
+            }
         }
 
         // Builds one <td> for the full-grid replica at (row, col).
@@ -7641,6 +7923,10 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 dashboard's live tank/axle data (blue cells) instead of the formula engine.<strong>
     Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry
     =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight</strong>
+    Just like Excel: drag a column header's right edge (or a row number's bottom edge) to resize it, and
+    click a cell then drag the small blue square at its bottom-right corner to fill/copy — formulas adjust
+    their cell references automatically (e.g. <code>=B1+10</code> in A1 becomes <code>=B2+10</code> when
+    filled into A2), and a <strong>$</strong> before a column or row (e.g. <code>$A$1</code>) locks it in place.
     Every amber cell edit is also saved to Firebase automatically, so it's still here next time you reopen this page — even outside Excel.
 </p>
             <div class="le-toolbar-row">
