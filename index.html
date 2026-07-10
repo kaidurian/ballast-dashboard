@@ -1863,7 +1863,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 35-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 37-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4494,6 +4494,100 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             } catch (e) {
                 console.warn('CREST_301 Excel refresh failed', e);
                 logAutoBallast('⚠️ CREST_301: could not read from Excel — ' + (e.message || e));
+            }
+        }
+
+        // ============================================================
+        // TIDE EDITOR SUPPORT — mirrors the CREST_301 Table Viewer
+        // pattern above, but for TIDE.html. Unlike CREST_301 (which
+        // starts empty and is seeded entirely from Firebase), TIDE.html
+        // already has its full static/formula dataset baked in, so it
+        // only needs Firebase for *edits* on top of that baseline
+        // (node "tideEditorEdits", a flat {"G10":1.62,...} cell map).
+        // "Refresh TIDE from Excel" therefore reads the live TIDE sheet
+        // straight from Excel and overwrites that whole edits node, so
+        // the popup picks up whatever is currently in Excel next time
+        // it (re)loads.
+        // ============================================================
+        const TIDE_EDITOR_PAGE_URL = 'TIDE.html';
+        const TIDE_EDITS_FIREBASE_NODE = 'tideEditorEdits';
+        const TIDE_SHEET_NAME_FOR_EXCEL = 'TIDE';
+        let tideEditorWindow = null;
+
+        // Opens (or refocuses) the TIDE Editor in its own popup window.
+        // Reuses the same named window on repeat clicks instead of
+        // piling up duplicates — identical behaviour to
+        // openCrest301TablePage().
+        function openTideEditorPage() {
+            tideEditorWindow = window.open(
+                TIDE_EDITOR_PAGE_URL,
+                'tideEditorViewer',
+                'width=1100,height=800'
+            );
+            if (tideEditorWindow) tideEditorWindow.focus();
+            else logAutoBallast('⚠️ TIDE Editor page was blocked by the browser — allow pop-ups for this site and try again.');
+        }
+
+        // Reads the whole used range of the TIDE sheet straight from
+        // Excel (same Excel.run approach as crest301RefreshFromExcelAndPush)
+        // and PUTs it to the "tideEditorEdits" Firebase node as a flat
+        // {"G10":1.62,"F9":"=Load_Editor!R147",...} cell map — the same
+        // shape TIDE.html's own tdEditsFetchAndApply()/tdSaveEditToFirebase()
+        // read/write. This overwrites the whole node (rather than
+        // patching individual cells) so a fresh Excel read always wins;
+        // the TIDE Editor popup's own "Refresh" (re-fetch from Firebase)
+        // then picks this up next time it's opened or reloaded.
+        async function tideRefreshFromExcelAndPush() {
+            if (typeof Excel === 'undefined') {
+                logAutoBallast('⚠️ TIDE refresh: not running inside Excel.');
+                return;
+            }
+            logAutoBallast('🔄 TIDE: reading sheet from Excel...');
+            try {
+                const dataOut = await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem(TIDE_SHEET_NAME_FOR_EXCEL);
+                    const used = sheet.getUsedRange();
+                    used.load(['values', 'formulas', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
+                    await context.sync();
+
+                    const out = {};
+                    const startRow = used.rowIndex;
+                    const startCol = used.columnIndex;
+
+                    function colLetters(nZeroBased) {
+                        let n = nZeroBased + 1, s = '';
+                        while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+                        return s;
+                    }
+
+                    for (let r = 0; r < used.rowCount; r++) {
+                        for (let c = 0; c < used.columnCount; c++) {
+                            const v = used.values[r][c];
+                            const f = used.formulas[r][c];
+                            if (v !== '' && v !== null && v !== undefined) {
+                                const colLetter = colLetters(startCol + c);
+                                const rowNumber = startRow + r + 1;
+                                const key = colLetter + rowNumber;
+                                // Prefer the formula (so =HLOOKUP(...) etc. keep
+                                // recalculating live in TIDE.html) and fall back
+                                // to the plain value for non-formula cells.
+                                out[key] = (typeof f === 'string' && f.startsWith('=')) ? f : v;
+                            }
+                        }
+                    }
+                    return out;
+                });
+
+                await fetch(`${FIREBASE_URL}/${TIDE_EDITS_FIREBASE_NODE}.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dataOut)
+                });
+
+                logAutoBallast(`✅ TIDE: refreshed ${Object.keys(dataOut).length} cells from Excel and pushed to Firebase.`);
+            } catch (e) {
+                console.warn('TIDE Excel refresh failed', e);
+                logAutoBallast('⚠️ TIDE: could not read from Excel — ' + (e.message || e));
             }
         }
 
@@ -7954,6 +8048,8 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 </label>
                 <button type="button" class="tg-btn" title="Open the CREST_301 Table Viewer in a separate window — useful for looking up cell coordinates (e.g. Q30) to reference in a =CREST_301!... formula" onclick="openCrest301TablePage()">🧭 Open CREST_301 Table</button>
                 <button type="button" class="tg-btn" title="Re-read the CREST_301 sheet from Excel and push it to Firebase. Run this after editing CREST_301 in Excel — the CREST_301 Table Viewer popup only reads from Firebase, it has no direct Excel connection, so this is the step that actually picks up your changes." onclick="crest301RefreshFromExcelAndPush()">🔄 Refresh CREST_301 from Excel</button>
+                <button type="button" class="tg-btn" title="Open the TIDE Editor in a separate window — a cell-for-cell replica of the Excel TIDE sheet with its own HLOOKUP/MAX/MIN formulas, same pattern as the CREST_301 Table Viewer." onclick="openTideEditorPage()">🌊 Open TIDE Editor</button>
+                <button type="button" class="tg-btn" title="Re-read the TIDE sheet's used range from Excel and push it to Firebase (tideEditorEdits). Run this after editing TIDE in Excel — the TIDE Editor popup only reads its saved edits from Firebase, it has no direct Excel connection, so this is the step that actually picks up your changes." onclick="tideRefreshFromExcelAndPush()">🔄 Refresh TIDE from Excel</button>
             </div>
             <div class="le-formula-bar" title="Formula bar — click any cell in the grid to see its address and raw content here (formula text or plain value), same as Excel. Edit here and press Enter to commit.">
                 <div class="le-formula-bar-addr" id="leFormulaBarAddr">—</div>
