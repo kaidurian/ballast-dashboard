@@ -661,29 +661,8 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(patch)
                 });
-                tdNotifyOpenerOfEdit();
             } catch (e) {
                 console.warn('TIDE editor: could not save cell edit to Firebase', e);
-            }
-        }
-
-        // Pushes a live-refresh signal to the Load Editor tab that
-        // opened this popup (via openTideEditorPage()'s window.open()),
-        // so its HyperFormula TIDE sheet re-seeds from Firebase right
-        // away instead of only picking up this edit on next page load
-        // or the next "Refresh TIDE from Excel" click. Best-effort: if
-        // this page was opened standalone (no window.opener), was
-        // opened from a different origin/page without that function,
-        // or the opener tab has since been closed, this silently no-ops
-        // rather than breaking the save that already succeeded above.
-        function tdNotifyOpenerOfEdit() {
-            try {
-                if (window.opener && !window.opener.closed && typeof window.opener.tideFetchAndSeed === 'function') {
-                    window.opener.tideFetchAndSeed(true);
-                }
-            } catch (e) {
-                // Cross-origin or opener-gone errors land here — safe to ignore.
-                console.warn('TIDE editor: could not notify opener of edit', e);
             }
         }
 
