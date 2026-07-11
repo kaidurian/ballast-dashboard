@@ -1863,7 +1863,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast 37-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast 38-index_Autoballast_GenTrailer_Clude</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4357,9 +4357,11 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             leEngine = HyperFormula.buildEmpty({ licenseKey: 'gpl-v3' });
             leEngine.addSheet(LE_SHEET_NAME);
             leEngine.addSheet(CREST301_SHEET_NAME);
+            leEngine.addSheet(TIDE_SHEET_NAME);
             const sheetId = leEngine.getSheetId(LE_SHEET_NAME);
             leSeedEngine(sheetId);
             crest301FetchAndSeed();
+            tideFetchAndSeed();
             leEditsFetchAndApply();
             // Whatever barge C2 starts out as (from the static
             // snapshot or a restored Firebase edit), make sure its
@@ -4512,7 +4514,16 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         const TIDE_EDITOR_PAGE_URL = 'TIDE.html';
         const TIDE_EDITS_FIREBASE_NODE = 'tideEditorEdits';
         const TIDE_SHEET_NAME_FOR_EXCEL = 'TIDE';
+        // Name of the live HyperFormula sheet inside the Load Editor
+        // engine that lets any Load Editor cell reference TIDE data
+        // via =TIDE!<cell> (or =INDIRECT("TIDE!"&...)), the same way
+        // =CREST_301!<cell> already works. Kept as its own constant
+        // (rather than reusing TIDE_SHEET_NAME_FOR_EXCEL) since the
+        // Excel worksheet name and the HyperFormula sheet name happen
+        // to match today but are conceptually separate things.
+        const TIDE_SHEET_NAME = 'TIDE';
         let tideEditorWindow = null;
+        let tideLoadPromise = null;
 
         // Opens (or refocuses) the TIDE Editor in its own popup window.
         // Reuses the same named window on repeat clicks instead of
@@ -4589,6 +4600,45 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 console.warn('TIDE Excel refresh failed', e);
                 logAutoBallast('⚠️ TIDE: could not read from Excel — ' + (e.message || e));
             }
+            // Also re-seed the live TIDE HyperFormula sheet so
+            // =TIDE!<cell> formulas in this Load Editor session pick
+            // up the fresh Excel read immediately, without waiting for
+            // a page reload — same as crest301RefreshFromExcelAndPush()
+            // does for =CREST_301!<cell>.
+            tideFetchAndSeed(true);
+        }
+
+        // Fetches the tideEditorEdits Firebase node and seeds the TIDE
+        // HyperFormula sheet from it, so Load Editor formulas can do
+        // =TIDE!<cell> the same way they already do =CREST_301!<cell>.
+        // Reuses crest301DataToGrid() since tideEditorEdits is stored
+        // in the identical flat {"G10":1.62,...} cell-map shape. Safe
+        // to call more than once (subsequent calls reuse the same
+        // in-flight/settled promise) — pass force=true to re-pull a
+        // fresher snapshot (e.g. right after tideRefreshFromExcelAndPush
+        // just overwrote the node).
+        function tideFetchAndSeed(force) {
+            if (tideLoadPromise && !force) return tideLoadPromise;
+            tideLoadPromise = fetch(`${FIREBASE_URL}/${TIDE_EDITS_FIREBASE_NODE}.json`, { cache: 'no-store' })
+                .then(res => res.json())
+                .then(json => {
+                    if (!json) {
+                        logAutoBallast('⚠️ TIDE: no data at Firebase node "tideEditorEdits" yet — open the TIDE Editor page once, or run "Refresh TIDE from Excel", to seed it.');
+                        return null;
+                    }
+                    const engine = leGetEngine();
+                    const tideId = engine.getSheetId(TIDE_SHEET_NAME);
+                    engine.setSheetContent(tideId, crest301DataToGrid(json));
+                    logAutoBallast(`📥 TIDE: loaded ${Object.keys(json).length} cells from Firebase. Load Editor formulas can now reference =TIDE!<cell>.`);
+                    refreshLoadEditorPageIfOpen();
+                    return json;
+                })
+                .catch(e => {
+                    console.warn('TIDE Firebase fetch failed', e);
+                    logAutoBallast('⚠️ TIDE: could not reach Firebase — cross-sheet =TIDE!<cell> formulas will show blank until it is reachable.');
+                    return null;
+                });
+            return tideLoadPromise;
         }
 
         // Fetches the crest301 Firebase node once per session and seeds
