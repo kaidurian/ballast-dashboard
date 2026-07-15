@@ -1962,7 +1962,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-4</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-5</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4840,17 +4840,114 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
         }
 
+        // Reads the whole used range of the real Excel "Load_Editor"
+        // sheet (same Excel.run approach as crest301RefreshFromExcelAndPush
+        // / tideRefreshFromExcelAndPush) and PUTs it to the
+        // "loadEditorEdits" Firebase node as a flat
+        // {"C4":91.44,"B14":"=CREST_301!C13",...} cell map — the same
+        // shape leEditsFetchAndApply()/leSaveEditToFirebase() already
+        // read/write for individual amber-cell edits. This OVERWRITES
+        // the whole node (rather than patching individual cells) so a
+        // fresh Excel read always wins, then immediately re-seeds the
+        // in-page HyperFormula grid (static baseline + this fresh
+        // snapshot on top) so the Load Editor grid updates without a
+        // reload — this is what was missing before: the combined
+        // "Refresh from Excel" button only ever re-read CREST_301 and
+        // TIDE, never Load_Editor itself.
+        async function loadEditorRefreshFromExcelAndPush() {
+            if (typeof Excel === 'undefined') {
+                logAutoBallast('⚠️ Load_Editor refresh: not running inside Excel.');
+                return;
+            }
+            logAutoBallast('🔄 Load_Editor: reading sheet from Excel...');
+            try {
+                const dataOut = await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const used = sheet.getUsedRange();
+                    used.load(['values', 'formulas', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
+                    await context.sync();
+
+                    const out = {};
+                    const startRow = used.rowIndex;
+                    const startCol = used.columnIndex;
+
+                    function colLetters(nZeroBased) {
+                        let n = nZeroBased + 1, s = '';
+                        while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+                        return s;
+                    }
+
+                    for (let r = 0; r < used.rowCount; r++) {
+                        for (let c = 0; c < used.columnCount; c++) {
+                            const v = used.values[r][c];
+                            const f = used.formulas[r][c];
+                            if (v !== '' && v !== null && v !== undefined) {
+                                const colLetter = colLetters(startCol + c);
+                                const rowNumber = startRow + r + 1;
+                                const key = colLetter + rowNumber;
+                                // Prefer the formula (so =B14*CREST_301!C13 etc.
+                                // keep recalculating live) and fall back to the
+                                // plain value for non-formula cells.
+                                out[key] = (typeof f === 'string' && f.startsWith('=')) ? f : v;
+                            }
+                        }
+                    }
+                    return out;
+                });
+
+                await fetch(`${FIREBASE_URL}/${LE_EDITS_FIREBASE_NODE}.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dataOut)
+                });
+
+                // Re-seed the local engine immediately: start from the
+                // static baseline, then lay this fresh Excel snapshot on
+                // top — same order leGetEngine()/leEditsFetchAndApply()
+                // apply things on a normal page load.
+                leLocalEditsCache = Object.assign({}, dataOut);
+                const engine = leGetEngine();
+                const sheetId = engine.getSheetId(LE_SHEET_NAME);
+                leSeedEngine(sheetId);
+                let count = 0;
+                for (const addr in dataOut) {
+                    const m = /^([A-Za-z]+)(\d+)$/.exec(addr);
+                    if (!m) continue;
+                    const c = crest301ColLettersToIndex(m[1].toUpperCase());
+                    const r = parseInt(m[2], 10);
+                    const val = dataOut[addr];
+                    if (val === null || val === undefined) continue;
+                    engine.setCellContents({ sheet: sheetId, row: r - 1, col: c - 1 }, [[val]]);
+                    count++;
+                }
+                leEnsureActiveBargeSheet(); // C2 ("Select Barge") may have changed
+                refreshLoadEditorPageIfOpen();
+
+                logAutoBallast(`✅ Load_Editor: refreshed ${count} cells from Excel and pushed to Firebase.`);
+            } catch (e) {
+                console.warn('Load_Editor Excel refresh failed', e);
+                logAutoBallast('⚠️ Load_Editor: could not read from Excel — ' + (e.message || e));
+            }
+        }
+
         // ============================================================
         // COMBINED "🔄 Refresh from Excel" BUTTON — replaces the old
         // separate "Open CREST_301 Table" / "Refresh CREST_301 from
         // Excel" / "Open TIDE Editor" / "Refresh TIDE from Excel"
-        // buttons. Runs both refreshes back-to-back and drives a small
-        // progress bar in the toolbar so the operator can see it's
-        // actually doing something (each Excel.run + Firebase PUT pair
-        // can take a second or two). The CREST_301.html and TIDE.html
-        // popups themselves are unaffected — they're still reachable
-        // directly by URL/file if needed, this just removes the
-        // in-page shortcut buttons that used to open them.
+        // buttons. Re-reads all three live sheets — CREST_301, TIDE,
+        // AND Load_Editor itself — back-to-back, pushes each to its
+        // Firebase node, and finishes by re-running pullExcelTankData()
+        // so the main dashboard side panel (which reads specific
+        // Load_Editor/CREST_301/BALLASTPLAN cells such as E8/E9,
+        // I1:I6, P31:R31, the trailer-axle block, pump list, and Auto
+        // Ballast targets) picks up the change too — not just the
+        // Load Editor grid. Drives a small progress bar in the toolbar
+        // so the operator can see it's actually doing something (each
+        // Excel.run + Firebase PUT pair can take a second or two). The
+        // CREST_301.html and TIDE.html popups themselves are
+        // unaffected — they're still reachable directly by URL/file if
+        // needed, this just removes the in-page shortcut buttons that
+        // used to open them.
         // ============================================================
 
         // Shows/updates/hides the progress bar next to the button.
@@ -4878,8 +4975,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             try {
                 leSetRefreshProgress(5, 'Reading CREST_301 from Excel…');
                 await crest301RefreshFromExcelAndPush();
-                leSetRefreshProgress(55, 'CREST_301 done — reading TIDE…');
+                leSetRefreshProgress(30, 'CREST_301 done — reading TIDE…');
                 await tideRefreshFromExcelAndPush();
+                leSetRefreshProgress(55, 'TIDE done — reading Load_Editor…');
+                await loadEditorRefreshFromExcelAndPush();
+                leSetRefreshProgress(85, 'Load_Editor done — updating side panel…');
+                await pullExcelTankData();
                 leSetRefreshProgress(100, '✅ Done');
             } catch (e) {
                 console.warn('Combined Excel refresh failed', e);
@@ -8449,7 +8550,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     <input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)">
                     Write formula-cell edits to Excel
                 </label>
-                <button type="button" class="tg-btn" id="leRefreshExcelBtn" title="Re-read both the CREST_301 and TIDE sheets from Excel and push them to Firebase, in one step. Run this after editing CREST_301 or TIDE in Excel — neither the CREST_301 Table Viewer nor the TIDE Editor popups have a direct Excel connection, so this is the step that actually picks up your changes." onclick="refreshAllFromExcelWithProgress()">🔄 Refresh from Excel</button>
+                <button type="button" class="tg-btn" id="leRefreshExcelBtn" title="Re-read CREST_301, TIDE, and Load_Editor from Excel and push them to Firebase, then refresh the side panel — all in one step. Run this after editing any of those sheets in Excel: none of the CREST_301 Table Viewer, TIDE Editor, or this Load Editor grid has a live/continuous Excel connection, so this button is the step that actually picks up your changes." onclick="refreshAllFromExcelWithProgress()">🔄 Refresh from Excel</button>
                 <div class="le-refresh-progress" id="leRefreshProgress" style="display:none;">
                     <div class="le-refresh-progress-track"><div class="le-refresh-progress-fill" id="leRefreshProgressFill"></div></div>
                     <span class="le-refresh-progress-label" id="leRefreshProgressLabel">Refreshing…</span>
