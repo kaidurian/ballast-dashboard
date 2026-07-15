@@ -1526,6 +1526,77 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         }
         .le-writeback-toggle input { cursor: pointer; }
 
+        /* ---- Cell search / "Go to cell" box ----
+           Small address input + button in the toolbar row. Typing a
+           cell address (e.g. D14) and pressing Enter/clicking Go
+           scrolls the grid so that cell is visible and selects it —
+           same idea as Excel's Name Box. */
+        .le-cell-search {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .le-cell-search-input {
+            width: 110px;
+            font-size: 12px;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+            background: var(--input-bg);
+            color: var(--text-main);
+        }
+        .le-cell-search-input::placeholder { font-family: inherit; }
+        .le-cell-search-input:focus { outline: none; border-color: var(--accent-blue); }
+        .le-cell-search-input.le-cell-search-error {
+            border-color: #ef4444;
+            box-shadow: 0 0 0 2px rgba(239,68,68,0.25);
+        }
+
+        /* ---- Excel-style scrollbar step arrows ----
+           The grid wrap keeps its native scrollbar (dragging still
+           works normally); these small buttons sit beside it and step
+           the view exactly one row/column at a time, like clicking the
+           arrow buttons at the ends of a real Excel scrollbar. Geometry
+           is read live from the rendered header cells / row cells, so
+           stepping still lands exactly on the next row/column even
+           after columns or rows have been manually resized. */
+        .le-grid-shell {
+            display: flex;
+            align-items: stretch;
+            gap: 4px;
+        }
+        .le-grid-shell .le-grid-wrap { flex: 1 1 auto; min-width: 0; }
+        .le-vscroll-arrows {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            flex: 0 0 auto;
+        }
+        .le-hscroll-arrows {
+            display: flex;
+            justify-content: flex-end;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        .le-nav-arrow {
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+            background: var(--panel-bg);
+            color: var(--text-main);
+            font-size: 11px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .le-nav-arrow:hover { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+        .le-nav-arrow:active { transform: scale(0.9); }
+
         /* ---- Excel-style formula bar ----
            Sits above the grid: a "Name box" showing the selected cell
            address (e.g. D14), an fx icon, and an input mirroring that
@@ -1863,7 +1934,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-1</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-2</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4924,6 +4995,97 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             letters = (letters || '').toUpperCase();
             for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
             return n;
+        }
+
+        // ---- Cell search ("Go to cell", like Excel's Name Box) ----
+        // Parses an address typed into #leCellSearchInput (e.g. "D14",
+        // "ab123", "$D$14"), scrolls the grid so that cell is visible,
+        // and focuses it (which selects it + updates the formula bar
+        // through the cell's normal onfocus handler).
+        function leCellSearchKeydown(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                leGoToCell();
+            }
+        }
+
+        function leGoToCell() {
+            const input = document.getElementById('leCellSearchInput');
+            if (!input) return;
+            const raw = (input.value || '').trim().toUpperCase().replace(/\$/g, '');
+            const m = raw.match(/^([A-Z]{1,3})([0-9]{1,5})$/);
+            const ok = m && leJumpToCell(parseInt(m[2], 10), leColLetterToIndex(m[1]));
+            if (!ok) {
+                input.classList.add('le-cell-search-error');
+                setTimeout(() => input.classList.remove('le-cell-search-error'), 900);
+                return;
+            }
+            input.classList.remove('le-cell-search-error');
+        }
+
+        // Scrolls #leGridWrap so cell (r, c) is visible (centered, with
+        // room left for the sticky header row / sticky row-number
+        // column so the cell doesn't land hidden underneath them), then
+        // focuses its input — same as clicking the cell. Returns the
+        // <td> on success, or false if that address isn't in the
+        // rendered grid (out of range).
+        function leJumpToCell(r, c) {
+            const wrap = document.getElementById('leGridWrap');
+            if (!wrap || !r || !c || r < 1 || c < 1) return false;
+            const addr = leColLetters(c) + r;
+            const td = wrap.querySelector(`td[data-addr="${addr}"]`);
+            if (!td) return false;
+
+            const wrapRect = wrap.getBoundingClientRect();
+            const tdRect = td.getBoundingClientRect();
+            const headerH = 30, rownumW = 46;
+            const wantTop = wrap.scrollTop + (tdRect.top - wrapRect.top) - Math.max(headerH, (wrap.clientHeight - tdRect.height) / 2);
+            const wantLeft = wrap.scrollLeft + (tdRect.left - wrapRect.left) - Math.max(rownumW, (wrap.clientWidth - tdRect.width) / 2);
+            wrap.scrollTop = Math.max(0, wantTop);
+            wrap.scrollLeft = Math.max(0, wantLeft);
+
+            const inputEl = td.querySelector('input');
+            if (inputEl) {
+                inputEl.focus();
+                if (inputEl.select) inputEl.select();
+            }
+            return td;
+        }
+
+        // ---- Excel-style scrollbar step arrows ----
+        // Moves the grid view exactly one row/column at a time, the
+        // same as clicking the arrow buttons at the ends of a real
+        // Excel scrollbar. Reads actual rendered header/row geometry
+        // (rather than a fixed pixel step) so it still lands cleanly on
+        // the next row/column after columns or rows have been resized.
+        function leScrollByCell(dir) {
+            const wrap = document.getElementById('leGridWrap');
+            if (!wrap) return;
+            const wrapRect = wrap.getBoundingClientRect();
+
+            if (dir === 'left' || dir === 'right') {
+                const headerRow = wrap.querySelector('.le-grid thead tr');
+                if (!headerRow) return;
+                const ths = Array.from(headerRow.querySelectorAll('th')).filter(th => !th.classList.contains('le-corner'));
+                if (!ths.length) return;
+                const rownumW = 46;
+                const edge = wrapRect.left + rownumW;
+                let idx = ths.findIndex(th => th.getBoundingClientRect().right > edge + 1);
+                if (idx === -1) idx = ths.length - 1;
+                idx = (dir === 'left') ? Math.max(0, idx - 1) : Math.min(ths.length - 1, idx + 1);
+                const delta = ths[idx].getBoundingClientRect().left - edge;
+                wrap.scrollLeft = Math.max(0, wrap.scrollLeft + delta);
+            } else {
+                const rows = Array.from(wrap.querySelectorAll('.le-grid tbody tr'));
+                if (!rows.length) return;
+                const headerH = 30;
+                const edge = wrapRect.top + headerH;
+                let idx = rows.findIndex(tr => tr.getBoundingClientRect().bottom > edge + 1);
+                if (idx === -1) idx = rows.length - 1;
+                idx = (dir === 'up') ? Math.max(0, idx - 1) : Math.min(rows.length - 1, idx + 1);
+                const delta = rows[idx].getBoundingClientRect().top - edge;
+                wrap.scrollTop = Math.max(0, wrap.scrollTop + delta);
+            }
         }
 
         // ---- Excel-style column width / row height resize ----
@@ -8042,6 +8204,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
     Every amber cell edit is also saved to Firebase automatically, so it's still here next time you reopen this page — even outside Excel.
 </p>
             <div class="le-toolbar-row">
+                <div class="le-cell-search" title="Go to a cell by address, e.g. D14 or AB123">
+                    <input type="text" id="leCellSearchInput" class="le-cell-search-input"
+                           placeholder="Go to cell (e.g. D14)"
+                           onkeydown="leCellSearchKeydown(event)">
+                    <button type="button" class="tg-btn" onclick="leGoToCell()">🔎 Go</button>
+                </div>
                 <label class="le-writeback-toggle" title="When on, every amber-cell edit is also written to the real Excel Load_Editor sheet. Turn off to experiment with formulas in the browser only.">
                     <input type="checkbox" id="leWriteToExcelToggle" onchange="leSetWriteToExcel(this.checked)">
                     Write formula-cell edits to Excel
@@ -8060,7 +8228,17 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                        onkeydown="leFormulaBarKeydown(event)"
                        onblur="leCommitFormulaBar()">
             </div>
-            <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
+            <div class="le-grid-shell">
+                <div class="le-table-wrap le-grid-wrap" id="leGridWrap"><!-- full grid rendered by renderLoadEditorPage() --></div>
+                <div class="le-vscroll-arrows">
+                    <button type="button" class="le-nav-arrow" title="Scroll up one row" onclick="leScrollByCell('up')">▲</button>
+                    <button type="button" class="le-nav-arrow" title="Scroll down one row" onclick="leScrollByCell('down')">▼</button>
+                </div>
+            </div>
+            <div class="le-hscroll-arrows">
+                <button type="button" class="le-nav-arrow" title="Scroll left one column" onclick="leScrollByCell('left')">◀</button>
+                <button type="button" class="le-nav-arrow" title="Scroll right one column" onclick="leScrollByCell('right')">▶</button>
+            </div>
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeLoadEditorPage()">Close</button>
             </div>
