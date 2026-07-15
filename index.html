@@ -1957,6 +1957,9 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
+            <button type="button" class="tg-btn" title="Save all current dashboard data (trim/heel/tanks, Load Editor edits, CREST_301 data) to a .json file on this PC — no internet needed. Copy that file to a USB drive to carry it to another offline PC." onclick="exportDataToFile()">💾 Save file</button>
+            <button type="button" class="tg-btn" title="Load a .json file previously saved with 'Save file' (e.g. from a USB drive) — restores it into this dashboard with no internet needed." onclick="triggerImportDataFromFile()">📂 Load file</button>
+            <input type="file" id="localFileImportInput" accept="application/json,.json" style="display:none;" onchange="importDataFromFile(this)">
         </div>
     </header>
     <div class="main-layout">
@@ -3870,39 +3873,48 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         //     same index.html in a plain browser tab (not inside Excel)
         //     will pick it up via pullFirebaseData() below.
         // ============================================================
+        // Builds the same snapshot object that goes to Firebase. Pulled out
+        // on its own so both publishToFirebase() (network) and the local
+        // "Save to file" button (no network needed — for USB-drive transfer
+        // between offline PCs) share one source of truth for what a full
+        // dashboard snapshot contains.
+        function buildBallastPayload() {
+            const tanks = {};
+            tankData.forEach(t => { tanks["row" + t.row] = parseFloat(t.weight) || 0; });
+            return {
+                trim: currentTrimDegrees,
+                heel: currentHeelDegrees,
+                tanks: tanks,
+                tankConfig: TANK_CONFIG,
+                trailerAxles: trailerAxles,
+                trailerAxleMeta: trailerAxleMeta,
+                bargeCoG: bargeCoG,
+                pumpLocations: pumpLocations,
+                bargeCornerLabels: bargeCornerLabels,
+                bargeName: BARGE_NAME,
+                showTrailer: showTrailer,
+                targetTrim: targetTrimDegrees,
+                targetHeel: targetHeelDegrees,
+                targetDeck: targetDeck,
+                pumpCapacityMTPerHr: pumpCapacityMTPerHr,
+                bufferTankNames: Array.from(bufferTankNames),
+                failedPumps: Array.from(failedPumps),
+                abHeelWeight: abHeelWeight,
+                abTrimWeight: abTrimWeight,
+                abDeckWeights: abDeckWeights,
+                trailerPredictionLevel: trailerPredictionLevel,
+                nextTrailerMove: nextTrailerMove,
+                trailerMoveSequence: trailerMoveSequence,
+                updatedAt: new Date().toISOString(),
+                source: "excel-addin"
+            };
+        }
+
         async function publishToFirebase() {
             if (firebasePublishInFlight) return;
             firebasePublishInFlight = true;
             try {
-                const tanks = {};
-                tankData.forEach(t => { tanks["row" + t.row] = parseFloat(t.weight) || 0; });
-                const payload = {
-                    trim: currentTrimDegrees,
-                    heel: currentHeelDegrees,
-                    tanks: tanks,
-                    tankConfig: TANK_CONFIG,
-                    trailerAxles: trailerAxles,
-                    trailerAxleMeta: trailerAxleMeta,
-                    bargeCoG: bargeCoG,
-                    pumpLocations: pumpLocations,
-                    bargeCornerLabels: bargeCornerLabels,
-                    bargeName: BARGE_NAME,
-                    showTrailer: showTrailer,
-                    targetTrim: targetTrimDegrees,
-                    targetHeel: targetHeelDegrees,
-                    targetDeck: targetDeck,
-                    pumpCapacityMTPerHr: pumpCapacityMTPerHr,
-                    bufferTankNames: Array.from(bufferTankNames),
-                    failedPumps: Array.from(failedPumps),
-                    abHeelWeight: abHeelWeight,
-                    abTrimWeight: abTrimWeight,
-                    abDeckWeights: abDeckWeights,
-                    trailerPredictionLevel: trailerPredictionLevel,
-                    nextTrailerMove: nextTrailerMove,
-                    trailerMoveSequence: trailerMoveSequence,
-                    updatedAt: new Date().toISOString(),
-                    source: "excel-addin"
-                };
+                const payload = buildBallastPayload();
                 const res = await fetch(`${FIREBASE_URL}/ballast.json`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
@@ -3921,6 +3933,74 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // another PC) so it shows the same live data without needing the
         // Excel file open. showAsManual=true forces a status update / mock
         // fallback even if nothing changed since the last check.
+        // Applies a ballast snapshot object (same shape as buildBallastPayload()
+        // produces) to the live dashboard state and redraws everything.
+        // Shared by pullFirebaseData() (network) and importDataFromFile()
+        // (local file, no network needed) so both paths behave identically.
+        function applyBallastSnapshot(data) {
+            if (!data) return;
+
+            if (Array.isArray(data.tankConfig) && data.tankConfig.length) {
+                TANK_CONFIG = data.tankConfig;
+            }
+            recomputeBargeExtents();
+            rebuildTankDataFromConfig();
+            BARGE_NAME = data.bargeName || BARGE_NAME;
+            updateBargeInfoNote();
+
+            currentTrimDegrees = parseFloat(data.trim || 0);
+            currentHeelDegrees = parseFloat(data.heel || 0);
+
+            if (data.tanks) {
+                tankData.forEach(tank => {
+                    const val = data.tanks["row" + tank.row];
+                    if (val !== undefined) {
+                        tank.weight = parseFloat(val).toFixed(2);
+                        const cfg = TANK_CONFIG.find(t => t.id === tank.row);
+                        tank.percent = (cfg && cfg.capacity) ? Math.min(parseFloat(val) / cfg.capacity, 1) : 0;
+                    }
+                });
+            }
+            if (Array.isArray(data.trailerAxles)) trailerAxles = data.trailerAxles;
+            trailerAxleMeta = Array.isArray(data.trailerAxleMeta) ? data.trailerAxleMeta : [];
+            if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
+            if (data.bargeCoG && typeof data.bargeCoG === 'object') {
+                bargeCoG = Object.assign({ lcg: 0, tcg: 0, vcg: 0, valid: false }, data.bargeCoG);
+            }
+            if (Array.isArray(data.pumpLocations)) pumpLocations = data.pumpLocations;
+            if (Array.isArray(data.bargeCornerLabels)) bargeCornerLabels = data.bargeCornerLabels;
+            updateCurrentDeckFromLabels();
+            if (typeof data.targetTrim === 'number') targetTrimDegrees = data.targetTrim;
+            if (typeof data.targetHeel === 'number') targetHeelDegrees = data.targetHeel;
+            if (data.targetDeck) targetDeck = Object.assign({}, targetDeck, data.targetDeck);
+            if (typeof data.pumpCapacityMTPerHr === 'number') pumpCapacityMTPerHr = data.pumpCapacityMTPerHr;
+            if (Array.isArray(data.bufferTankNames)) bufferTankNames = new Set(data.bufferTankNames);
+            if (Array.isArray(data.failedPumps)) failedPumps = new Set(data.failedPumps);
+            if (typeof data.abHeelWeight === 'number') abHeelWeight = data.abHeelWeight;
+            if (typeof data.abTrimWeight === 'number') abTrimWeight = data.abTrimWeight;
+            if (data.abDeckWeights) abDeckWeights = Object.assign({}, abDeckWeights, data.abDeckWeights);
+            if (typeof data.trailerPredictionLevel === 'number') trailerPredictionLevel = data.trailerPredictionLevel;
+            if (data.nextTrailerMove) nextTrailerMove = Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, data.nextTrailerMove);
+            if (Array.isArray(data.trailerMoveSequence)) {
+                // showGhost defaults to true for steps synced from an
+                // older snapshot that predates the ghost toggle.
+                trailerMoveSequence = data.trailerMoveSequence.map(m => Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, m));
+            }
+            if (typeof syncTrailerLevelUI === 'function') syncTrailerLevelUI();
+            if (typeof data.showTrailer === 'boolean') {
+                showTrailer = data.showTrailer;
+                const trailerBox = document.getElementById('trailerToggleCheckbox');
+                if (trailerBox) trailerBox.checked = showTrailer;
+            }
+
+            initTankMatrix();
+            drawAttitudeGraphics();
+            refreshPlanView();
+            if (typeof refresh3DView === 'function') refresh3DView();
+            if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
+            syncBufferTankInputField();
+        }
+
         async function pullFirebaseData(showAsManual) {
             try {
                 const res = await fetch(`${FIREBASE_URL}/ballast.json`, { cache: "no-store" });
@@ -3939,65 +4019,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 if (data.updatedAt === lastFirebaseTimestamp && !showAsManual) return;
                 lastFirebaseTimestamp = data.updatedAt;
 
-                if (Array.isArray(data.tankConfig) && data.tankConfig.length) {
-                    TANK_CONFIG = data.tankConfig;
-                }
-                recomputeBargeExtents();
-                rebuildTankDataFromConfig();
-                BARGE_NAME = data.bargeName || BARGE_NAME;
-                updateBargeInfoNote();
-
-                currentTrimDegrees = parseFloat(data.trim || 0);
-                currentHeelDegrees = parseFloat(data.heel || 0);
-
-                if (data.tanks) {
-                    tankData.forEach(tank => {
-                        const val = data.tanks["row" + tank.row];
-                        if (val !== undefined) {
-                            tank.weight = parseFloat(val).toFixed(2);
-                            const cfg = TANK_CONFIG.find(t => t.id === tank.row);
-                            tank.percent = (cfg && cfg.capacity) ? Math.min(parseFloat(val) / cfg.capacity, 1) : 0;
-                        }
-                    });
-                }
-                if (Array.isArray(data.trailerAxles)) trailerAxles = data.trailerAxles;
-                trailerAxleMeta = Array.isArray(data.trailerAxleMeta) ? data.trailerAxleMeta : [];
-                if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
-                if (data.bargeCoG && typeof data.bargeCoG === 'object') {
-                    bargeCoG = Object.assign({ lcg: 0, tcg: 0, vcg: 0, valid: false }, data.bargeCoG);
-                }
-                if (Array.isArray(data.pumpLocations)) pumpLocations = data.pumpLocations;
-                if (Array.isArray(data.bargeCornerLabels)) bargeCornerLabels = data.bargeCornerLabels;
-                updateCurrentDeckFromLabels();
-                if (typeof data.targetTrim === 'number') targetTrimDegrees = data.targetTrim;
-                if (typeof data.targetHeel === 'number') targetHeelDegrees = data.targetHeel;
-                if (data.targetDeck) targetDeck = Object.assign({}, targetDeck, data.targetDeck);
-                if (typeof data.pumpCapacityMTPerHr === 'number') pumpCapacityMTPerHr = data.pumpCapacityMTPerHr;
-                if (Array.isArray(data.bufferTankNames)) bufferTankNames = new Set(data.bufferTankNames);
-                if (Array.isArray(data.failedPumps)) failedPumps = new Set(data.failedPumps);
-                if (typeof data.abHeelWeight === 'number') abHeelWeight = data.abHeelWeight;
-                if (typeof data.abTrimWeight === 'number') abTrimWeight = data.abTrimWeight;
-                if (data.abDeckWeights) abDeckWeights = Object.assign({}, abDeckWeights, data.abDeckWeights);
-                if (typeof data.trailerPredictionLevel === 'number') trailerPredictionLevel = data.trailerPredictionLevel;
-                if (data.nextTrailerMove) nextTrailerMove = Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, data.nextTrailerMove);
-                if (Array.isArray(data.trailerMoveSequence)) {
-                    // showGhost defaults to true for steps synced from an
-                    // older snapshot that predates the ghost toggle.
-                    trailerMoveSequence = data.trailerMoveSequence.map(m => Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, m));
-                }
-                if (typeof syncTrailerLevelUI === 'function') syncTrailerLevelUI();
-                if (typeof data.showTrailer === 'boolean') {
-                    showTrailer = data.showTrailer;
-                    const trailerBox = document.getElementById('trailerToggleCheckbox');
-                    if (trailerBox) trailerBox.checked = showTrailer;
-                }
-
-                initTankMatrix();
-                drawAttitudeGraphics();
-                refreshPlanView();
-                if (typeof refresh3DView === 'function') refresh3DView();
-                if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
-                syncBufferTankInputField();
+                applyBallastSnapshot(data);
 
                 const when = data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "unknown time";
                 document.getElementById('connectionStatus').innerHTML =
@@ -4021,6 +4043,117 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 'Status: <span style="color: #eab308;">● Connecting...</span>';
             pullFirebaseData(true);
             setInterval(() => pullFirebaseData(false), FIREBASE_POLL_MS);
+        }
+
+        // ============================================================
+        // 5c. LOCAL FILE SAVE / LOAD — no internet required. Bundles the
+        //     same data that would otherwise go through Firebase into one
+        //     .json file you can save, copy to a USB thumb drive, and
+        //     open on another offline PC's "Load from file" button. This
+        //     is in addition to (not instead of) Firebase — when online,
+        //     Firebase sync keeps working exactly as before, and other
+        //     devices watching the live Firebase feed are unaffected by
+        //     using this locally.
+        //
+        //     NOTE ON SCOPE: this captures everything that lives inside
+        //     this page (main ballast/trim/heel/tank data, Load Editor
+        //     cell edits, and CREST_301 cross-sheet data). It does NOT
+        //     capture TIDE.html or the standalone CREST_301 Table Viewer
+        //     popup's own state — those are separate files that read
+        //     Firebase directly and aren't part of this index.html.
+        // ============================================================
+        function exportDataToFile() {
+            const payload = {
+                fileFormat: "ballast-dashboard-snapshot",
+                fileFormatVersion: 1,
+                savedAt: new Date().toISOString(),
+                ballast: buildBallastPayload(),
+                loadEditorEdits: leLocalEditsCache,
+                crest301: crest301DataCache
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const safeName = (BARGE_NAME || "barge").replace(/[^a-z0-9_-]+/gi, "_");
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `ballast-dashboard_${safeName}_${stamp}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            logAutoBallast("💾 Saved dashboard data to a local file (see your browser's Downloads) — copy it to a USB drive to move it to another PC.");
+        }
+
+        // Triggers the hidden <input type="file"> below; called by the
+        // "📂 Load file" button.
+        function triggerImportDataFromFile() {
+            const input = document.getElementById('localFileImportInput');
+            if (input) { input.value = ""; input.click(); }
+        }
+
+        // Reads a .json file picked via the hidden file input, applies the
+        // ballast snapshot, Load Editor edits, and CREST_301 data it
+        // contains — same effect as a Firebase pull, but entirely local.
+        function importDataFromFile(fileInput) {
+            const file = fileInput && fileInput.files && fileInput.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                let payload;
+                try {
+                    payload = JSON.parse(reader.result);
+                } catch (e) {
+                    logAutoBallast('⚠️ Load from file: that file is not valid JSON — ' + (e.message || e));
+                    return;
+                }
+                if (!payload || typeof payload !== 'object') {
+                    logAutoBallast('⚠️ Load from file: file did not contain a recognizable snapshot.');
+                    return;
+                }
+
+                if (payload.ballast) {
+                    applyBallastSnapshot(payload.ballast);
+                    lastFirebaseTimestamp = payload.ballast.updatedAt || lastFirebaseTimestamp;
+                }
+
+                if (payload.loadEditorEdits && typeof payload.loadEditorEdits === 'object') {
+                    leLocalEditsCache = Object.assign({}, leLocalEditsCache, payload.loadEditorEdits);
+                    const engine = leGetEngine();
+                    const sheetId = engine.getSheetId(LE_SHEET_NAME);
+                    let count = 0;
+                    for (const addr in payload.loadEditorEdits) {
+                        const m = /^([A-Za-z]+)(\d+)$/.exec(addr);
+                        if (!m) continue;
+                        const val = payload.loadEditorEdits[addr];
+                        if (val === null || val === undefined) continue;
+                        const c = crest301ColLettersToIndex(m[1].toUpperCase());
+                        const r = parseInt(m[2], 10);
+                        engine.setCellContents({ sheet: sheetId, row: r - 1, col: c - 1 }, [[val]]);
+                        count++;
+                    }
+                    if (count) logAutoBallast(`📥 Load from file: restored ${count} Load Editor cell edit(s).`);
+                    leEnsureActiveBargeSheet();
+                    refreshLoadEditorPageIfOpen();
+                }
+
+                if (payload.crest301 && typeof payload.crest301 === 'object') {
+                    crest301DataCache = payload.crest301;
+                    const engine = leGetEngine();
+                    const crestId = engine.getSheetId(CREST301_SHEET_NAME);
+                    engine.setSheetContent(crestId, crest301DataToGrid(payload.crest301));
+                    refreshLoadEditorPageIfOpen();
+                }
+
+                const when = payload.savedAt ? new Date(payload.savedAt).toLocaleString() : "unknown time";
+                document.getElementById('connectionStatus').innerHTML =
+                    `Status: <span style="color: var(--accent-blue);">● Loaded from file (saved ${when})</span>`;
+                logAutoBallast(`📂 Loaded dashboard data from local file "${file.name}" (saved ${when}).`);
+            };
+            reader.onerror = () => {
+                logAutoBallast('⚠️ Load from file: could not read that file.');
+            };
+            reader.readAsText(file);
         }
 
         // ============================================================
@@ -4374,12 +4507,21 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         const LE_EDITS_FIREBASE_NODE = "loadEditorEdits";
         let leEditsLoadPromise = null;
 
+        // In-memory mirror of every Load Editor cell edit currently known
+        // (whether it came from Firebase or was typed locally). Firebase
+        // itself has no single "give me everything" read for a fire-and-
+        // forget PATCH log, so this cache is what the local "Save to file"
+        // button reads from to include Load Editor edits in a USB-portable
+        // snapshot.
+        let leLocalEditsCache = {};
+
         function leEditsFetchAndApply(force) {
             if (leEditsLoadPromise && !force) return leEditsLoadPromise;
             leEditsLoadPromise = fetch(`${FIREBASE_URL}/${LE_EDITS_FIREBASE_NODE}.json`, { cache: 'no-store' })
                 .then(res => res.json())
                 .then(data => {
                     if (!data) return null;
+                    leLocalEditsCache = Object.assign({}, leLocalEditsCache, data);
                     const engine = leGetEngine();
                     const sheetId = engine.getSheetId(LE_SHEET_NAME);
                     let count = 0;
@@ -4410,9 +4552,17 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // here just means that one edit won't survive a reload, it never
         // blocks the in-browser calculation which already happened.
         async function leSaveEditToFirebase(addr, content) {
+            // Keep the local cache current regardless of network state, so
+            // "Save to file" always reflects the latest edit even when
+            // offline (Firebase PATCH below will just fail silently, same
+            // as before).
+            const normalized = (content === '' || content === undefined) ? null : content;
+            if (normalized === null) delete leLocalEditsCache[addr];
+            else leLocalEditsCache[addr] = normalized;
+
             try {
                 const patch = {};
-                patch[addr] = (content === '' || content === undefined) ? null : content;
+                patch[addr] = normalized;
                 await fetch(`${FIREBASE_URL}/${LE_EDITS_FIREBASE_NODE}.json`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -4668,6 +4818,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // promise) — call again with force=true (e.g. a future "refresh
         // CREST data" button) to pick up a newer Firebase snapshot
         // without reloading the page.
+        // In-memory mirror of the last-known CREST_301 cell map (sparse
+        // {"C4":91.44,...} format), whether it came from Firebase or from
+        // a locally-imported file. Read by the "Save to file" button so a
+        // USB-transferred snapshot can carry CREST_301 cross-sheet data too.
+        let crest301DataCache = null;
+
         function crest301FetchAndSeed(force) {
             if (crest301LoadPromise && !force) return crest301LoadPromise;
             crest301LoadPromise = fetch(`${CREST301_FIREBASE_URL}/${CREST301_FIREBASE_NODE}.json`, { cache: 'no-store' })
@@ -4680,6 +4836,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const engine = leGetEngine();
                     const crestId = engine.getSheetId(CREST301_SHEET_NAME);
                     engine.setSheetContent(crestId, crest301DataToGrid(json.data));
+                    crest301DataCache = json.data;
                     const when = json.updatedAt ? new Date(json.updatedAt).toLocaleString() : 'unknown time';
                     logAutoBallast(`📥 CREST_301: loaded ${Object.keys(json.data).length} cells from Firebase (snapshot from ${when}). Load Editor formulas can now reference =CREST_301!<cell>.`);
                     refreshLoadEditorPageIfOpen();
@@ -8201,7 +8358,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
     click a cell then drag the small blue square at its bottom-right corner to fill/copy — formulas adjust
     their cell references automatically (e.g. <code>=B1+10</code> in A1 becomes <code>=B2+10</code> when
     filled into A2), and a <strong>$</strong> before a column or row (e.g. <code>$A$1</code>) locks it in place.
-    Every amber cell edit is also saved to Firebase automatically, so it's still here next time you reopen this page — even outside Excel.
+    Every amber cell edit is also saved to Firebase automatically, so it's still here next time you reopen this page — even outside Excel. No internet? Use the "💾 Save file" / "📂 Load file" buttons in the header instead to carry your data between offline PCs (e.g. via a USB drive).
 </p>
             <div class="le-toolbar-row">
                 <div class="le-cell-search" title="Go to a cell by address, e.g. D14 or AB123">
