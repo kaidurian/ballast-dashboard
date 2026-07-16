@@ -1436,6 +1436,31 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             outline: none;
             box-shadow: 0 0 0 2px rgba(56,189,248,0.35);
         }
+        /* Read-only live cells (Filling[mT], RO-RO Line load/Xpos/Ypos/VCG):
+           no manual typing — value is only ever set by the 2D dashboard
+           (tank inputs / Generate Trailer), so this renders as plain text
+           with a "synced" look instead of an editable input box. */
+        .le-grid td.le-cell-live-readonly {
+            cursor: default;
+        }
+        .le-grid td.le-cell-live-readonly .le-live-value {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 13px;
+            padding: 5px 6px;
+            color: var(--text-main);
+            opacity: 0.9;
+        }
+        .le-grid td.le-cell-live-readonly::after {
+            content: "🔒";
+            position: absolute;
+            top: 2px;
+            right: 3px;
+            font-size: 8px;
+            opacity: 0.5;
+        }
+        .le-grid td.le-cell-live-readonly { position: relative; }
         .le-grid tr.le-row-header td, .le-grid tr.le-row-header th { background: rgba(148,163,184,0.12); font-weight: 700; }
         /* General editable cells, calculated by the embedded HyperFormula
            engine (leEngine). Distinct amber tint vs. the blue "live" cells
@@ -1962,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-6</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-7</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -5878,27 +5903,34 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         function leGridCell(r, c) {
             const cfg = (c === 4) ? TANK_CONFIG.find(t => t.id === r) : null;
             if (cfg) {
+                // Read-only, live-synced display — Filling[mT] is driven
+                // entirely by the 2D dashboard's tank inputs, never typed
+                // here directly.
                 const rec = tankData.find(t => t.row === r);
                 const fill = rec ? rec.weight : 0;
-                return `<td class="le-cell-live" data-addr="${leColLetters(c)}${r}" title="${escapeHtml(cfg.name)} — Filling[mT], linked to the 2D barge">` +
-                    `<input type="number" step="any" value="${fill}" onclick="this.select()" ` +
-                    `onfocus="leSelectCell(${r}, ${c}, this)" ` +
-                    `onchange="updateTankFill(${r}, this.value)"></td>`;
+                const displayFill = (typeof fill === 'number') ? (Math.round(fill * 1000) / 1000) : fill;
+                return `<td class="le-cell-live le-cell-live-readonly" data-addr="${leColLetters(c)}${r}" ` +
+                    `title="${escapeHtml(cfg.name)} — Filling[mT], read-only here: synced live from the 2D barge tank inputs">` +
+                    `<span class="le-live-value">${displayFill}</span></td>`;
             }
 
             const axleIdx = r - AXLE_START_ROW;
             if (axleIdx >= 0 && axleIdx < trailerAxles.length && c >= 4 && c <= 7) {
+                // Read-only, live-synced display — Line load / Xpos / Ypos
+                // / VCG come entirely from the current 2D-dashboard trailer
+                // axle layout (trailerAxles[]). Use "Generate Trailer" to
+                // change these values, not manual typing in this grid.
                 const axle = trailerAxles[axleIdx];
                 const meta = trailerAxleMeta[axleIdx];
                 const fieldByCol = { 4: 'load', 5: 'x', 6: 'y', 7: 'vcg' };
                 const field = fieldByCol[c];
                 let val = axle[field];
                 if (val === undefined) val = (field === 'load' && meta && meta.load !== undefined) ? meta.load : (field === 'vcg' ? 6.85 : 0);
+                const displayVal = (typeof val === 'number') ? (Math.round(val * 1000) / 1000) : val;
                 const label = (meta && meta.excelName) ? meta.excelName : `Axle_${axleIdx + 1}`;
-                return `<td class="le-cell-live" data-addr="${leColLetters(c)}${r}" title="${escapeHtml(label)} — linked to Generate Trailer">` +
-                    `<input type="number" step="any" value="${val}" onclick="this.select()" ` +
-                    `onfocus="leSelectCell(${r}, ${c}, this)" ` +
-                    `onchange="updateLoadEditorAxle(${axleIdx}, '${field}', this.value)"></td>`;
+                return `<td class="le-cell-live le-cell-live-readonly" data-addr="${leColLetters(c)}${r}" ` +
+                    `title="${escapeHtml(label)} — read-only here: synced live from the 2D dashboard's trailer axle layout. Use Generate Trailer to change it.">` +
+                    `<span class="le-live-value">${displayVal}</span></td>`;
             }
 
             const displayVal = leDisplayValue(r, c);
@@ -7943,6 +7975,86 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
         }
 
+        // ---- Pull the CURRENT live 2D-dashboard axle layout ----
+        // Same reconstruction as pullTrailerDataFromExcel() (cluster rows
+        // sharing Y/VCG into trains, recover axle order/spacing, re-group
+        // contiguous same-group runs) but reads straight from the
+        // in-memory trailerAxles[]/trailerAxleMeta[] the 2D dashboard is
+        // already rendering — no Excel connection required, so this works
+        // fully offline and always reflects exactly what's on screen right
+        // now, including any edits made via the Load Editor's read-only
+        // live cells, "Refresh from Excel", or a loaded save file.
+        function pullTrailerDataFromDashboard() {
+            if (!trailerAxles.length) {
+                alert('No trailer axle data is currently loaded on the 2D dashboard.');
+                return;
+            }
+
+            const parsed = trailerAxles.map((axle, i) => {
+                const meta = trailerAxleMeta[i];
+                return {
+                    name: (meta && meta.excelName) ? meta.excelName : `Axle_${i + 1}`,
+                    load: parseFloat(axle.load) || 0,
+                    x: parseFloat(axle.x) || 0,
+                    y: parseFloat(axle.y) || 0,
+                    vcg: (axle.vcg !== undefined) ? (parseFloat(axle.vcg) || 0) : 6.85
+                };
+            });
+
+            // Cluster rows into trains by (Y, VCG).
+            const clusters = [];
+            parsed.forEach(row => {
+                let cluster = clusters.find(c => Math.abs(c.y - row.y) < 1e-6 && Math.abs(c.vcg - row.vcg) < 1e-6);
+                if (!cluster) {
+                    cluster = { y: row.y, vcg: row.vcg, rows: [] };
+                    clusters.push(cluster);
+                }
+                cluster.rows.push(row);
+            });
+
+            const rebuiltTrains = clusters.map((cluster, idx) => {
+                const rows = cluster.rows.slice().sort((a, b) => b.x - a.x);
+                const spacing = rows.length > 1 ? (rows[0].x - rows[1].x) : 1.40;
+
+                const groups = [];
+                rows.forEach((row, i) => {
+                    const axleNum = i + 1;
+                    const m = /^Group_(\d+)_line_(\d+)$/i.exec(row.name);
+                    const groupNumber = m ? (parseInt(m[1], 10) || 1) : 1;
+                    const noLoad = row.load === 0;
+                    const last = groups[groups.length - 1];
+                    if (last && last.groupNumber === groupNumber && last.noLoad === noLoad &&
+                        Math.abs(last.load - row.load) < 1e-6 && last.to === axleNum - 1) {
+                        last.to = axleNum;
+                    } else {
+                        groups.push({
+                            id: trailerGenNextGroupId++,
+                            groupNumber,
+                            from: axleNum,
+                            to: axleNum,
+                            load: row.load,
+                            noLoad,
+                            color: getGroupColor(groupNumber)
+                        });
+                    }
+                });
+
+                return {
+                    id: trailerGenNextId++,
+                    name: `Train ${idx + 1}`,
+                    spacing: spacing,
+                    x: rows[0].x,
+                    y: cluster.y,
+                    vcg: cluster.vcg,
+                    groups: groups.length ? groups : [defaultAxleGroup(1, 1, 0, 1)]
+                };
+            });
+
+            trailerGenTrains = rebuiltTrains;
+            renderTrailerGeneratorModal();
+            logAutoBallast(`🔄 Pulled ${parsed.length} trailer axle row(s) from the live 2D dashboard into ${rebuiltTrains.length} train(s) for editing.`);
+        }
+
         function removeTrailerGenTrain(id) {
             trailerGenTrains = trailerGenTrains.filter(t => t.id !== id);
             if (trailerGenTrains.length === 0) trailerGenTrains.push(defaultTrailerGenTrain(1));
@@ -8626,6 +8738,8 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 
                     <div class="tg-train-list-actions">
                         <button type="button" class="tg-add-train-btn" onclick="addTrailerGenTrain()">+ Add Train</button>
+                        <button type="button" class="tg-add-train-btn" title="Rebuild these trains from the trailer axle layout currently shown on the 2D dashboard — works offline, no Excel connection needed"
+                                onclick="pullTrailerDataFromDashboard()">🔄 Pull from 2D Dashboard</button>
                         <button type="button" class="tg-add-train-btn" title="Read existing trailer axle data back from Load_Editor!B/D:G into these trains for editing"
                                 onclick="pullTrailerDataFromExcel()">⇩ Load from Excel</button>
                     </div>
