@@ -1962,7 +1962,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-5</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-6</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -5368,8 +5368,22 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         function leJumpToCell(r, c) {
             const wrap = document.getElementById('leGridWrap');
             if (!wrap || !r || !c || r < 1 || c < 1) return false;
+            if (leGridMaxRow && (r > leGridMaxRow || c > leGridMaxCol)) return false;
             const addr = leColLetters(c) + r;
-            const td = wrap.querySelector(`td[data-addr="${addr}"]`);
+            let td = wrap.querySelector(`td[data-addr="${addr}"]`);
+
+            if (!td && leGridMaxRow) {
+                // Row isn't in the currently-rendered window (virtualized
+                // grid) — jump straight to its known pixel offset, force
+                // the row window to rebuild around it, then look it up
+                // again before doing the normal center-it-in-view scroll
+                // below.
+                const offsets = leGetRowOffsets(leGridMaxRow);
+                const rowTop = offsets[r] || 0;
+                wrap.scrollTop = Math.max(0, rowTop - Math.floor((wrap.clientHeight || 600) / 2));
+                leRenderGridRowsIfWindowChanged();
+                td = wrap.querySelector(`td[data-addr="${addr}"]`);
+            }
             if (!td) return false;
 
             const wrapRect = wrap.getBoundingClientRect();
@@ -5379,6 +5393,10 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             const wantLeft = wrap.scrollLeft + (tdRect.left - wrapRect.left) - Math.max(rownumW, (wrap.clientWidth - tdRect.width) / 2);
             wrap.scrollTop = Math.max(0, wantTop);
             wrap.scrollLeft = Math.max(0, wantLeft);
+            // That vertical scroll may have shifted the view again —
+            // make sure the row window still covers it before focusing.
+            leRenderGridRowsIfWindowChanged();
+            td = wrap.querySelector(`td[data-addr="${addr}"]`) || td;
 
             const inputEl = td.querySelector('input');
             if (inputEl) {
@@ -5412,7 +5430,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 const delta = ths[idx].getBoundingClientRect().left - edge;
                 wrap.scrollLeft = Math.max(0, wrap.scrollLeft + delta);
             } else {
-                const rows = Array.from(wrap.querySelectorAll('.le-grid tbody tr'));
+                const rows = Array.from(wrap.querySelectorAll('.le-grid tbody tr:not(.le-spacer-row)'));
                 if (!rows.length) return;
                 const headerH = 30;
                 const edge = wrapRect.top + headerH;
@@ -5441,6 +5459,123 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         }
         function leRowHeight(r) {
             return leRowHeights[r] !== undefined ? leRowHeights[r] : LE_DEFAULT_ROW_H;
+        }
+
+        // ---- Row virtualization ----
+        // The Load Editor grid can be 1400+ rows x 230+ columns — building
+        // every <td> up front (300k+ DOM nodes) is what made the grid feel
+        // slow to open/scroll. Instead we only ever build <tr> elements for
+        // rows near the current scroll position (+ LE_ROW_BUFFER extra rows
+        // above/below so small scrolls don't need a rebuild), and represent
+        // the rest of the sheet's height with two lightweight spacer <tr>s
+        // so the scrollbar still reflects the true, full-sheet size and
+        // jumps to the right place. Columns are NOT virtualized (237 cols x
+        // ~70 rendered rows is a manageable ~16k cells, and virtualizing
+        // columns too would complicate the existing column-resize/sticky
+        // row-number logic for comparatively little extra benefit).
+        const LE_ROW_BUFFER = 20;
+        let leGridMaxRow = 0;
+        let leGridMaxCol = 0;
+        let leLastRenderedRowWindow = { first: 1, last: 0 };
+        let leRowOffsetsCache = null;
+        let leRowOffsetsCacheMaxRow = -1;
+        let leGridScrollRAF = null;
+
+        // Row heights are almost always the uniform default, so this cache
+        // (cumulative pixel offset of the top of each row) is cheap to
+        // rebuild (~1 array pass) and only needs to happen when a row's
+        // height changes or the sheet's row count changes — not on every
+        // scroll event.
+        function leInvalidateRowOffsets() {
+            leRowOffsetsCache = null;
+        }
+        function leGetRowOffsets(maxRow) {
+            if (leRowOffsetsCache && leRowOffsetsCacheMaxRow === maxRow) return leRowOffsetsCache;
+            const offsets = new Array(maxRow + 2);
+            offsets[1] = 0;
+            for (let r = 1; r <= maxRow; r++) offsets[r + 1] = offsets[r] + leRowHeight(r);
+            leRowOffsetsCache = offsets;
+            leRowOffsetsCacheMaxRow = maxRow;
+            return offsets;
+        }
+
+        // Binary search: returns the row whose [top, bottom) pixel range
+        // contains y (clamped to 1..maxRow).
+        function leFindRowAtOffset(offsets, y, maxRow) {
+            if (maxRow < 1) return 1;
+            let lo = 1, hi = maxRow;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (offsets[mid + 1] <= y) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+
+        function leComputeVisibleRowWindowForScrollTop(scrollTop, clientHeight, offsets, maxRow) {
+            const viewTop = Math.max(0, scrollTop);
+            const viewBottom = viewTop + (clientHeight || 600);
+            return {
+                first: leFindRowAtOffset(offsets, viewTop, maxRow),
+                last: leFindRowAtOffset(offsets, viewBottom, maxRow)
+            };
+        }
+
+        // Builds the <tr> markup for rows [first, last] plus top/bottom
+        // spacer rows representing the (unrendered) rest of the sheet, so
+        // the scrollable area's total height stays correct.
+        function leBuildRowsHtml(first, last, offsets, maxRow, maxCol) {
+            let html = '';
+            const topSpacerH = offsets[first] - offsets[1];
+            if (topSpacerH > 0) {
+                html += `<tr class="le-spacer-row" aria-hidden="true"><td colspan="${maxCol + 1}" style="height:${topSpacerH}px;padding:0;border:none;background:transparent"></td></tr>`;
+            }
+            for (let r = first; r <= last; r++) {
+                html += `<tr data-row="${r}" style="height:${leRowHeight(r)}px"><td class="le-rownum" style="height:${leRowHeight(r)}px">${r}<div class="le-row-resizer" data-row="${r}" title="Drag to resize row ${r}"></div></td>`;
+                for (let c = 1; c <= maxCol; c++) html += leGridCell(r, c);
+                html += '</tr>';
+            }
+            const bottomSpacerH = offsets[maxRow + 1] - offsets[last + 1];
+            if (bottomSpacerH > 0) {
+                html += `<tr class="le-spacer-row" aria-hidden="true"><td colspan="${maxCol + 1}" style="height:${bottomSpacerH}px;padding:0;border:none;background:transparent"></td></tr>`;
+            }
+            return html;
+        }
+
+        // Re-applies the active-cell highlight + fill handle after any
+        // render (full or scroll-triggered) that touched the tbody DOM.
+        function leRestoreGridSelection(wrap) {
+            if (!leSelectedCell) return;
+            const addr = leColLetters(leSelectedCell.c) + leSelectedCell.r;
+            const td = wrap.querySelector(`td[data-addr="${addr}"]`);
+            if (td) {
+                td.classList.add('le-cell-selected');
+                leAttachFillHandle();
+            }
+        }
+
+        // Scroll handler for #leGridWrap: rAF-throttled, and only rebuilds
+        // the rendered row window when the tight visible range is no
+        // longer fully covered by the buffer already on screen — so a
+        // typical scroll gesture (well under LE_ROW_BUFFER rows) costs
+        // nothing beyond the browser's native scroll.
+        function leOnGridScroll() {
+            if (leGridScrollRAF) return;
+            leGridScrollRAF = requestAnimationFrame(leRenderGridRowsIfWindowChanged);
+        }
+        function leRenderGridRowsIfWindowChanged() {
+            leGridScrollRAF = null;
+            const wrap = document.getElementById('leGridWrap');
+            if (!wrap || !leGridMaxRow) return;
+            const offsets = leGetRowOffsets(leGridMaxRow);
+            const { first: visFirst, last: visLast } = leComputeVisibleRowWindowForScrollTop(wrap.scrollTop, wrap.clientHeight, offsets, leGridMaxRow);
+            if (visFirst >= leLastRenderedRowWindow.first && visLast <= leLastRenderedRowWindow.last) return;
+            const renderFirst = Math.max(1, visFirst - LE_ROW_BUFFER);
+            const renderLast = Math.min(leGridMaxRow, visLast + LE_ROW_BUFFER);
+            leLastRenderedRowWindow = { first: renderFirst, last: renderLast };
+            const tbody = wrap.querySelector('.le-grid tbody');
+            if (!tbody) return;
+            tbody.innerHTML = leBuildRowsHtml(renderFirst, renderLast, offsets, leGridMaxRow, leGridMaxCol);
+            leRestoreGridSelection(wrap);
         }
 
         let leResizingCol = null, leResizeStartX = 0, leResizeStartColW = 0;
@@ -5494,6 +5629,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
         });
         document.addEventListener('mouseup', function () {
+            if (leResizingRow !== null) leInvalidateRowOffsets();
             leResizingCol = null;
             leResizingRow = null;
         });
@@ -5636,8 +5772,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         });
 
         function openLoadEditorPage() {
-            renderLoadEditorPage();
+            // Make the overlay visible FIRST — renderLoadEditorPage() now
+            // measures #leGridWrap's clientHeight to decide which rows to
+            // render (virtualized grid), and that's 0 while the overlay is
+            // still display:none.
             document.getElementById('leOverlay').classList.add('tg-open');
+            renderLoadEditorPage();
         }
 
         function closeLoadEditorPage() {
@@ -5675,6 +5815,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             const maxRow = Math.max(LOAD_EDITOR_STATIC_MAXROW, tankMaxRow, axleMaxRow);
             const maxCol = LOAD_EDITOR_STATIC_MAXCOL;
 
+            leGridMaxRow = maxRow;
+            leGridMaxCol = maxCol;
+            // Row count / config may have changed (tanks or axles added)
+            // since the last render, so rebuild the offset cache fresh.
+            leInvalidateRowOffsets();
+
             // colgroup drives the actual rendered widths so the col-resizer
             // drag handles (added to each header cell below) can resize a
             // single column live, Excel-style. col[0] = row-number column.
@@ -5694,33 +5840,37 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             for (let c = 1; c <= maxCol; c++) colgroupHtml += `<col style="width:${leColWidth(c)}px">`;
             colgroupHtml += '</colgroup>';
 
-            let html = `<table class="le-grid" style="width:${totalGridW}px">` + colgroupHtml + '<thead><tr><th class="le-corner"></th>';
+            let headHtml = '<thead><tr><th class="le-corner"></th>';
             for (let c = 1; c <= maxCol; c++) {
-                html += `<th>${leColLetters(c)}<div class="le-col-resizer" data-col="${c}" title="Drag to resize column ${leColLetters(c)}"></div></th>`;
+                headHtml += `<th>${leColLetters(c)}<div class="le-col-resizer" data-col="${c}" title="Drag to resize column ${leColLetters(c)}"></div></th>`;
             }
-            html += '</tr></thead><tbody>';
+            headHtml += '</tr></thead>';
 
-            for (let r = 1; r <= maxRow; r++) {
-                html += `<tr data-row="${r}" style="height:${leRowHeight(r)}px"><td class="le-rownum" style="height:${leRowHeight(r)}px">${r}<div class="le-row-resizer" data-row="${r}" title="Drag to resize row ${r}"></div></td>`;
-                for (let c = 1; c <= maxCol; c++) {
-                    html += leGridCell(r, c);
-                }
-                html += '</tr>';
+            // Only build <tr>s for rows near the current scroll position
+            // (see leBuildRowsHtml comment above) — preserving whatever
+            // scroll position the wrap already had (e.g. re-rendering
+            // after an edit shouldn't jump the view back to row 1).
+            const offsets = leGetRowOffsets(maxRow);
+            const prevScrollTop = wrap.scrollTop || 0;
+            const { first: visFirst, last: visLast } = leComputeVisibleRowWindowForScrollTop(prevScrollTop, wrap.clientHeight, offsets, maxRow);
+            const renderFirst = Math.max(1, visFirst - LE_ROW_BUFFER);
+            const renderLast = Math.min(maxRow, visLast + LE_ROW_BUFFER);
+            leLastRenderedRowWindow = { first: renderFirst, last: renderLast };
+
+            const bodyHtml = '<tbody>' + leBuildRowsHtml(renderFirst, renderLast, offsets, maxRow, maxCol) + '</tbody>';
+
+            wrap.innerHTML = `<table class="le-grid" style="width:${totalGridW}px">` + colgroupHtml + headHtml + bodyHtml + '</table>';
+            wrap.scrollTop = prevScrollTop;
+
+            if (!wrap.dataset.leScrollBound) {
+                wrap.addEventListener('scroll', leOnGridScroll);
+                wrap.dataset.leScrollBound = '1';
             }
-            html += '</tbody></table>';
-            wrap.innerHTML = html;
 
             // Re-apply the active-cell highlight + fill handle after the
-            // wholesale re-render above (which otherwise drops both, since
-            // it replaces every cell's DOM node).
-            if (leSelectedCell) {
-                const addr = leColLetters(leSelectedCell.c) + leSelectedCell.r;
-                const td = wrap.querySelector(`td[data-addr="${addr}"]`);
-                if (td) {
-                    td.classList.add('le-cell-selected');
-                    leAttachFillHandle();
-                }
-            }
+            // re-render above (which otherwise drops both, since it
+            // replaces every rendered cell's DOM node).
+            leRestoreGridSelection(wrap);
         }
 
         // Builds one <td> for the full-grid replica at (row, col).
