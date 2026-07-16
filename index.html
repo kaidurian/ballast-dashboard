@@ -3743,11 +3743,14 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const rangeCoG = editorSheet.getRange("P31:R31");
                     rangeCoG.load("values");
 
-                    // Trailer axle X/Y block: E124:F(124+N) — these (x,y)
-                    // pairs remain the CENTER of each axle GROUP (the two
-                    // rectangles + connector), so this read is unchanged.
+                    // Trailer axle D:G block: D124:G(124+N) — D=Line load,
+                    // E/F=(x,y) CENTER of each axle GROUP (the two
+                    // rectangles + connector), G=VCG. D and G are now read
+                    // here too (previously only E:F were pulled), so Line
+                    // load and VCG actually refresh from Excel instead of
+                    // silently falling back to 0 / a hardcoded default.
                     const axleEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
-                    const rangeAxles = editorSheet.getRange(`E${AXLE_START_ROW}:F${axleEndRow}`);
+                    const rangeAxles = editorSheet.getRange(`D${AXLE_START_ROW}:G${axleEndRow}`);
                     rangeAxles.load("values");
 
                     // Pump locations: BALLASTPLAN(mT)!A33:E(33+N) — column A
@@ -3881,19 +3884,29 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         }
                     });
 
-                    // Parse trailer axle rows until first blank pair (E and F both empty)
+                    // Parse trailer axle rows until first blank pair (E and F both empty).
+                    // Range is now D:G, so col indices are: 0=D(load), 1=E(x), 2=F(y), 3=G(vcg).
                     const axleValues = rangeAxles.values;
                     const parsedAxles = [];
                     for (let i = 0; i < axleValues.length; i++) {
-                        const rawX = axleValues[i][0];
-                        const rawY = axleValues[i][1];
+                        const rawLoad = axleValues[i][0];
+                        const rawX = axleValues[i][1];
+                        const rawY = axleValues[i][2];
+                        const rawVcg = axleValues[i][3];
                         const xEmpty = (rawX === '' || rawX === null || rawX === undefined);
                         const yEmpty = (rawY === '' || rawY === null || rawY === undefined);
                         if (xEmpty && yEmpty) break; // stop at first fully blank row
                         const x = parseFloat(rawX);
                         const y = parseFloat(rawY);
                         if (isNaN(x) || isNaN(y)) continue; // skip malformed row, keep scanning
-                        parsedAxles.push({ row: AXLE_START_ROW + i, x, y });
+                        const load = parseFloat(rawLoad);
+                        const vcg = parseFloat(rawVcg);
+                        parsedAxles.push({
+                            row: AXLE_START_ROW + i,
+                            x, y,
+                            load: isNaN(load) ? 0 : load,
+                            vcg: isNaN(vcg) ? 6.85 : vcg
+                        });
                     }
                     trailerAxles = parsedAxles;
                     // Plain Excel reads carry no group-color info — clear
@@ -8641,7 +8654,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 // Not running inside Excel (mock/demo mode) — update the
                 // in-memory overlay directly so the plan/3D views still
                 // reflect the generated trailer, including group colors.
-                trailerAxles = rows.map((r, i) => ({ row: AXLE_START_ROW + i, x: r.x, y: r.y }));
+                trailerAxles = rows.map((r, i) => ({ row: AXLE_START_ROW + i, x: r.x, y: r.y, load: r.load, vcg: (r.vcg !== undefined ? r.vcg : 6.85) }));
                 trailerAxleMeta = meta;
                 initTankMatrix();
                 refreshPlanView();
@@ -8677,7 +8690,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 });
                 logAutoBallast(`🚂 Wrote ${rows.length} trailer axle(s) across ${trailerGenTrains.length} train(s) to Load_Editor!B/D${AXLE_START_ROW}:G${AXLE_START_ROW + rows.length - 1}.`);
                 closeTrailerGeneratorModal();
-                // pullExcelTankData() re-reads E:F fresh from Excel (which
+                // pullExcelTankData() re-reads D:G fresh from Excel (which
                 // carries no color info) and clears trailerAxleMeta, so
                 // re-apply the group colors AFTER it finishes and refresh
                 // the views again to pick them up.
