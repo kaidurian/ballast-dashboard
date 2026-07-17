@@ -1987,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-7</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-8</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4208,6 +4208,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const engine = leGetEngine();
                     const crestId = engine.getSheetId(CREST301_SHEET_NAME);
                     engine.setSheetContent(crestId, crest301DataToGrid(payload.crest301));
+                    crest301MirrorIntoLoadEditor(engine, payload.crest301);
                     refreshLoadEditorPageIfOpen();
                 }
 
@@ -4476,7 +4477,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // https://ballast-dashboard-default-rtdb.firebaseio.com/crest301.json
         // — so no giant dataset needs to be duplicated/embedded here.
         // Once loaded, Load Editor formulas can reference it directly,
-        // e.g. =CREST_301!C4  or  ='CREST_301'!Q30
+        // e.g. =CREST_301!C4  or  ='CREST_301'!Q30 — the same data is
+        // also mirrored into this Load_Editor sheet itself at the CB2
+        // offset (see crest301MirrorIntoLoadEditor()), matching where
+        // CREST_301 now physically lives in the real (merged) Excel
+        // workbook, so the simpler same-sheet =CC4 / =CQ30 style works
+        // too.
         // The fetch is async and fires once on first engine build; the
         // 'CREST_301' sheet starts empty (so typing formulas doesn't
         // block) and is re-seeded + the grid re-rendered the moment the
@@ -4556,6 +4562,23 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         const CREST301_SHEET_NAME = 'CREST_301';
         const CREST301_FIREBASE_URL = "https://ballast-dashboard-default-rtdb.firebaseio.com";
         const CREST301_FIREBASE_NODE = "crest301";
+
+        // ---- Excel sheet merge offsets ----
+        // The Excel workbook no longer has standalone "TIDE" or
+        // "CREST_301" sheets — both were merged directly into
+        // "Load_Editor" so everything lives in one sheet on the Excel
+        // side. CREST_301's data (which used to start at CREST_301!B2)
+        // now starts at Load_Editor!CB2 — a +78 column shift, 0 row
+        // shift. TIDE's data (which used to start at TIDE!A1) now
+        // starts at Load_Editor!HT1 — a +227 column shift, 0 row shift.
+        // These offsets are used to (a) read the right sub-range out of
+        // the merged Load_Editor sheet in Excel, and (b) translate cell
+        // addresses back to their original CREST_301-/TIDE-relative
+        // addressing so the "crest301"/"tideEditorEdits" Firebase nodes,
+        // the CREST_301 Table Viewer, and TIDE.html keep working exactly
+        // as before, unaware the merge ever happened.
+        const CREST301_LE_COL_OFFSET = 78;   // Load_Editor!CB2 == former CREST_301!B2
+        const TIDE_LE_COL_OFFSET = 227;      // Load_Editor!HT1 == former TIDE!A1
         let crest301LoadPromise = null;
 
         // ---- Load Editor edits persistence (Firebase) ----
@@ -4683,6 +4706,35 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             return grid;
         }
 
+        // Mirrors CREST_301 data (same {"C4":91.44,"Q30":85.344,...} shape
+        // as the "crest301" Firebase node) into the local Load_Editor
+        // HyperFormula sheet at the CB2 offset, matching where it now
+        // physically lives in the real Excel workbook. This lets Load
+        // Editor formulas reference it either the old way — a
+        // cross-sheet =CREST_301!C4 (still supported, since the separate
+        // local CREST_301 sheet is still seeded alongside this) — or the
+        // new, simpler same-sheet way that mirrors the real merged
+        // workbook: =CC4 instead of =CREST_301!C4, =CQ30 instead of
+        // ='CREST_301'!Q30. Uses batch() to collapse every cell write
+        // into a single recalculation.
+        function crest301MirrorIntoLoadEditor(engine, data) {
+            const sheetId = engine.getSheetId(LE_SHEET_NAME);
+            engine.batch(() => {
+                for (const key in data) {
+                    const m = /^([A-Za-z]+)(\d+)$/.exec(key);
+                    if (!m) continue;
+                    const col = crest301ColLettersToIndex(m[1].toUpperCase());
+                    const row = parseInt(m[2], 10);
+                    const val = data[key];
+                    if (val === null || val === undefined) continue;
+                    engine.setCellContents(
+                        { sheet: sheetId, row: row - 1, col: (col - 1) + CREST301_LE_COL_OFFSET },
+                        [[val]]
+                    );
+                }
+            });
+        }
+
         // Path/URL to the CREST_301 Table Viewer page. Defaults to a
         // relative path assuming it's deployed alongside this file —
         // change to an absolute URL if it's hosted elsewhere (e.g. a
@@ -4703,17 +4755,26 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             else logAutoBallast('⚠️ CREST_301 Table page was blocked by the browser — allow pop-ups for this site and try again.');
         }
 
-        // Reads the whole used range of the CREST_301 sheet straight
-        // from Excel (this dashboard runs as a real Excel task pane,
-        // so Excel.run works here — unlike the CREST_301 Table Viewer
-        // popup, which is opened via window.open() and therefore has
-        // no genuine Office/Excel host connection; see project notes).
-        // Pushes the result to the shared "crest301" Firebase node and
-        // immediately re-seeds the local HyperFormula CREST_301 sheet
-        // so =CREST_301!... formulas in this session pick it up right
-        // away. The popup viewer picks up the same data next time its
-        // own "Refresh" button (which just re-pulls from Firebase) is
-        // clicked.
+        // Reads the CREST_301 portion of the (now merged) Excel
+        // "Load_Editor" sheet straight from Excel (this dashboard runs
+        // as a real Excel task pane, so Excel.run works here — unlike
+        // the CREST_301 Table Viewer popup, which is opened via
+        // window.open() and therefore has no genuine Office/Excel host
+        // connection; see project notes). CREST_301 no longer exists as
+        // its own Excel sheet — its data (formerly CREST_301!B2 onward)
+        // now lives inside Load_Editor starting at CB2 (columns Q:T,
+        // e.g., now read from Load_Editor columns CQ:CT). This reads
+        // Load_Editor's whole used range but only keeps the CREST_301
+        // band (CB onward, up to but excluding TIDE's own merged band
+        // starting at HT), and shifts each column back by
+        // CREST301_LE_COL_OFFSET so the output keeps using CREST_301's
+        // original B2-style addressing — unchanged from before the
+        // merge. Pushes the result to the shared "crest301" Firebase
+        // node and immediately re-seeds the local HyperFormula CREST_301
+        // sheet so =CREST_301!... formulas in this session pick it up
+        // right away. The popup viewer picks up the same data next time
+        // its own "Refresh" button (which just re-pulls from Firebase)
+        // is clicked.
         async function crest301RefreshFromExcelAndPush() {
             if (typeof Excel === 'undefined') {
                 logAutoBallast('⚠️ CREST_301 refresh: not running inside Excel.');
@@ -4722,7 +4783,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             logAutoBallast('🔄 CREST_301: reading sheet from Excel...');
             try {
                 const { data, meta } = await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem(CREST301_SHEET_NAME);
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
                     const used = sheet.getUsedRange();
                     used.load(['values', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
                     await context.sync();
@@ -4733,6 +4794,11 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const colWidth = {};
                     const startRow = used.rowIndex;
                     const startCol = used.columnIndex;
+                    // Zero-based column bounds of the CREST_301 band
+                    // inside the merged Load_Editor sheet: CB onward,
+                    // stopping just before TIDE's own band at HT.
+                    const bandStart0 = CREST301_LE_COL_OFFSET + 1; // CB, zero-based
+                    const bandEnd0 = TIDE_LE_COL_OFFSET;            // HT, zero-based (exclusive)
 
                     function colLetters(nZeroBased) {
                         let n = nZeroBased + 1, s = '';
@@ -4742,9 +4808,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 
                     for (let r = 0; r < used.rowCount; r++) {
                         for (let c = 0; c < used.columnCount; c++) {
+                            const actualCol0 = startCol + c;
+                            if (actualCol0 < bandStart0 || actualCol0 >= bandEnd0) continue;
                             const v = used.values[r][c];
                             if (v !== '' && v !== null && v !== undefined) {
-                                const colLetter = colLetters(startCol + c);
+                                const origCol0 = actualCol0 - CREST301_LE_COL_OFFSET;
+                                const colLetter = colLetters(origCol0);
                                 const rowNumber = startRow + r + 1;
                                 const key = colLetter + rowNumber;
                                 dataOut[key] = v;
@@ -4771,10 +4840,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 });
 
                 // Re-seed the local formula engine immediately so
-                // =CREST_301!... formulas update without a page reload.
+                // =CREST_301!... (and the new same-sheet =CC4-style)
+                // formulas update without a page reload.
                 const engine = leGetEngine();
                 const crestId = engine.getSheetId(CREST301_SHEET_NAME);
                 engine.setSheetContent(crestId, crest301DataToGrid(data));
+                crest301MirrorIntoLoadEditor(engine, data);
                 refreshLoadEditorPageIfOpen();
 
                 logAutoBallast(`✅ CREST_301: refreshed ${Object.keys(data).length} cells from Excel and pushed to Firebase.`);
@@ -4815,11 +4886,49 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             else logAutoBallast('⚠️ TIDE Editor page was blocked by the browser — allow pop-ups for this site and try again.');
         }
 
-        // Reads the whole used range of the TIDE sheet straight from
-        // Excel (same Excel.run approach as crest301RefreshFromExcelAndPush)
-        // and PUTs it to the "tideEditorEdits" Firebase node as a flat
-        // {"G10":1.62,"F9":"=Load_Editor!R147",...} cell map — the same
-        // shape TIDE.html's own tdEditsFetchAndApply()/tdSaveEditToFirebase()
+        // Adjusts a raw formula string read live from the merged Excel
+        // Load_Editor sheet so it reads correctly against TIDE.html's
+        // own original TIDE-relative (A1-based) addressing:
+        //  - Sheet-qualified references (e.g. "BALLASTPLAN(mT)!X1") are
+        //    left completely untouched — genuinely external, unaffected
+        //    by the TIDE merge.
+        //  - Unqualified references that land inside the merged TIDE
+        //    band (column >= HT) are TIDE-internal self-references —
+        //    they're shifted back by -TIDE_LE_COL_OFFSET so e.g. real
+        //    "HT5" reads as the original "A5" again.
+        //  - Unqualified references outside the band (e.g. "R147") are
+        //    genuine Load_Editor-native cells. Before the merge these
+        //    were written as explicit cross-sheet refs like
+        //    "=Load_Editor!R147"; now that TIDE physically lives inside
+        //    Load_Editor, Excel itself already serializes same-sheet
+        //    refs without a sheet qualifier (e.g. "=R147"), so these are
+        //    left exactly as Excel reports them — no further change
+        //    needed.
+        const TIDE_MERGE_REF_RE = /((?:'[^']*'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?)([A-Za-z]{1,3})(\$?)(\d{1,7})\b/g;
+        function tideNormalizeFormulaFromExcel(raw) {
+            if (typeof raw !== 'string' || raw.charAt(0) !== '=') return raw;
+            return raw.replace(TIDE_MERGE_REF_RE, function (token, sheetPart, colDollar, colLetters, rowDollar, rowDigits) {
+                if (sheetPart) return token; // explicit cross-sheet ref — leave alone
+                const col0 = leColLetterToIndex(colLetters) - 1; // zero-based
+                if (col0 < TIDE_LE_COL_OFFSET) return token; // outside the TIDE band — leave alone
+                const origCol0 = col0 - TIDE_LE_COL_OFFSET;
+                return colDollar + leColLetters(origCol0 + 1) + rowDollar + rowDigits;
+            });
+        }
+
+        // Reads the TIDE portion of the (now merged) Excel "Load_Editor"
+        // sheet straight from Excel (same Excel.run approach as
+        // crest301RefreshFromExcelAndPush). TIDE no longer exists as its
+        // own Excel sheet — its data (formerly TIDE!A1 onward) now lives
+        // inside Load_Editor starting at HT1. This reads Load_Editor's
+        // whole used range but only keeps the TIDE band (HT onward),
+        // shifts each column back by TIDE_LE_COL_OFFSET (via
+        // tideNormalizeFormulaFromExcel() for formula cell references,
+        // and directly for the output keys) so cell addresses keep using
+        // TIDE's original A1-style addressing, and PUTs the result to
+        // the "tideEditorEdits" Firebase node as a flat
+        // {"G10":1.62,"F9":"=R147",...} cell map — the same shape
+        // TIDE.html's own tdEditsFetchAndApply()/tdSaveEditToFirebase()
         // read/write. This overwrites the whole node (rather than
         // patching individual cells) so a fresh Excel read always wins;
         // the TIDE Editor popup's own "Refresh" (re-fetch from Firebase)
@@ -4832,7 +4941,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             logAutoBallast('🔄 TIDE: reading sheet from Excel...');
             try {
                 const dataOut = await Excel.run(async (context) => {
-                    const sheet = context.workbook.worksheets.getItem(TIDE_SHEET_NAME_FOR_EXCEL);
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
                     const used = sheet.getUsedRange();
                     used.load(['values', 'formulas', 'rowIndex', 'columnIndex', 'rowCount', 'columnCount']);
                     await context.sync();
@@ -4840,6 +4949,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const out = {};
                     const startRow = used.rowIndex;
                     const startCol = used.columnIndex;
+                    const bandStart0 = TIDE_LE_COL_OFFSET; // HT, zero-based (TIDE band start, no upper bound)
 
                     function colLetters(nZeroBased) {
                         let n = nZeroBased + 1, s = '';
@@ -4849,16 +4959,19 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 
                     for (let r = 0; r < used.rowCount; r++) {
                         for (let c = 0; c < used.columnCount; c++) {
+                            const actualCol0 = startCol + c;
+                            if (actualCol0 < bandStart0) continue;
                             const v = used.values[r][c];
                             const f = used.formulas[r][c];
                             if (v !== '' && v !== null && v !== undefined) {
-                                const colLetter = colLetters(startCol + c);
+                                const origCol0 = actualCol0 - TIDE_LE_COL_OFFSET;
+                                const colLetter = colLetters(origCol0);
                                 const rowNumber = startRow + r + 1;
                                 const key = colLetter + rowNumber;
                                 // Prefer the formula (so =HLOOKUP(...) etc. keep
                                 // recalculating live in TIDE.html) and fall back
                                 // to the plain value for non-formula cells.
-                                out[key] = (typeof f === 'string' && f.startsWith('=')) ? f : v;
+                                out[key] = (typeof f === 'string' && f.startsWith('=')) ? tideNormalizeFormulaFromExcel(f) : v;
                             }
                         }
                     }
@@ -5053,9 +5166,10 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const engine = leGetEngine();
                     const crestId = engine.getSheetId(CREST301_SHEET_NAME);
                     engine.setSheetContent(crestId, crest301DataToGrid(json.data));
+                    crest301MirrorIntoLoadEditor(engine, json.data);
                     crest301DataCache = json.data;
                     const when = json.updatedAt ? new Date(json.updatedAt).toLocaleString() : 'unknown time';
-                    logAutoBallast(`📥 CREST_301: loaded ${Object.keys(json.data).length} cells from Firebase (snapshot from ${when}). Load Editor formulas can now reference =CREST_301!<cell>.`);
+                    logAutoBallast(`📥 CREST_301: loaded ${Object.keys(json.data).length} cells from Firebase (snapshot from ${when}). Load Editor formulas can now reference =CREST_301!<cell> (or the same-sheet =CC4 style, matching the merged workbook).`);
                     refreshLoadEditorPageIfOpen();
                     return json.data;
                 })
@@ -8803,13 +8917,16 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             <p class="tg-modal-sub">
                 Cell-for-cell replica of the Excel <strong>Load_Editor</strong> sheet — same row numbers, same
                 column letters, same header text. Every cell is editable: type a plain value, or an Excel-style
-                <strong>=formula</strong> referencing other Load_Editor cells (e.g. <code>=D14*C13/100</code>) or the
-                <strong>CREST_301</strong> sheet (e.g. <code>=CREST_301!C4</code>), calculated live in the browser by
-                an embedded HyperFormula engine. <strong>Column D from row 14</strong> (Filling[mT]) and
+                <strong>=formula</strong> referencing other Load_Editor cells (e.g. <code>=D14*C13/100</code>), the
+                <strong>CREST_301</strong> data now merged in at column <strong>CB</strong> onward (e.g.
+                <code>=CC4</code>, matching the real workbook — the older cross-sheet <code>=CREST_301!C4</code>
+                style still works too), or the <strong>TIDE</strong> data merged in at column <strong>HT</strong>
+                onward, calculated live in the browser by an embedded HyperFormula engine.
+                <strong>Column D from row 14</strong> (Filling[mT]) and
                 <strong>columns D:G from row 124</strong> (RO-RO Line load/Xpos/Ypos/VCG) stay specially linked to the
                 dashboard's live tank/axle data (blue cells) instead of the formula engine.<strong>
-    Example of formuala.=CREST_301!C4 → Loa, ='CREST_301'!Q30 → tank X_aft geometry
-    =B14*'CREST_301'!C13→ Load_Editor cell × CREST_301 Lightweight</strong>
+    Example of formula: =CC4 → Loa, =CQ30 → tank X_aft geometry (was =CREST_301!C4, ='CREST_301'!Q30)
+    =B14*CC13 → Load_Editor cell × CREST_301 Lightweight (was =B14*'CREST_301'!C13)</strong>
     Just like Excel: drag a column header's right edge (or a row number's bottom edge) to resize it, and
     click a cell then drag the small blue square at its bottom-right corner to fill/copy — formulas adjust
     their cell references automatically (e.g. <code>=B1+10</code> in A1 becomes <code>=B2+10</code> when
