@@ -3719,14 +3719,25 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
             try {
                 await Excel.run(async (context) => {
-                    const crestSheet = context.workbook.worksheets.getItem(CREST_SHEET_NAME);
+                    // NOTE: CREST_301 no longer exists as its own Excel sheet —
+                    // it was merged into Load_Editor starting at CB2 (a
+                    // +CREST301_LE_COL_OFFSET column shift; see the merge-offset
+                    // notes near CREST301_LE_COL_OFFSET's definition further
+                    // down this file). Every former "CREST_301!<cell>" read
+                    // below is now read from Load_Editor at the shifted column
+                    // instead. Previously this called
+                    // worksheets.getItem(CREST_SHEET_NAME) for a sheet that no
+                    // longer exists, which throws at context.sync() and
+                    // silently aborted this ENTIRE pull (falling back to mock
+                    // data) — including the trim/heel/tank values that DO still
+                    // live on Load_Editor, which is why the dashboard stopped
+                    // updating after any edit (e.g. changing a tank's water
+                    // fill) once TIDE/CREST_301 were merged in.
                     const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
 
-                    crestSheet.load("name");
-
-                    // --- 1) Geometry source: CREST_301, Q:T, rows 30..30+N ---
+                    // --- 1) Geometry source: was CREST_301!Q:T, now Load_Editor!CQ:CT ---
                     const crestEndRow = CREST_START_ROW + CREST_MAX_ROWS - 1;
-                    const rangeCrest = crestSheet.getRange(`Q${CREST_START_ROW}:T${crestEndRow}`);
+                    const rangeCrest = editorSheet.getRange(`CQ${CREST_START_ROW}:CT${crestEndRow}`);
                     rangeCrest.load("values");
 
                     const cellTrim = editorSheet.getRange("E8");
@@ -3756,35 +3767,33 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     // Pump locations: BALLASTPLAN(mT)!A33:E(33+N) — column A
                     // = tank name, column E = pump name. Read a generous
                     // over-read block, trimmed below at the first row where
-                    // column A is blank.
-                    let rangePumps = null;
-                    try {
-                        const pumpSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
-                        const pumpEndRow = PUMP_START_ROW + PUMP_MAX_ROWS - 1;
-                        rangePumps = pumpSheet.getRange(`A${PUMP_START_ROW}:E${pumpEndRow}`);
-                        rangePumps.load("values");
-                    } catch (e) { /* sheet not found — pumps simply won't render */ }
+                    // column A is blank. Uses getItemOrNullObject (NOT
+                    // getItem inside try/catch) because this workbook doesn't
+                    // have a BALLASTPLAN(mT) sheet at all — getItem() only
+                    // throws ItemNotFound at context.sync() time, so wrapping
+                    // just the synchronous getItem() call in try/catch never
+                    // actually caught it; it aborted the whole batch (every
+                    // range below, including trim/heel/tank data) instead.
+                    const pumpSheet = context.workbook.worksheets.getItemOrNullObject(PUMP_SHEET_NAME);
+                    pumpSheet.load("isNullObject");
+                    const pumpEndRow = PUMP_START_ROW + PUMP_MAX_ROWS - 1;
+                    const rangePumps = pumpSheet.getRangeOrNullObject(`A${PUMP_START_ROW}:E${pumpEndRow}`);
+                    rangePumps.load("values");
 
-                    // Auto Ballast target condition: CREST_301!P1:P9
-                    // (P1=trim, P2=heel, P4:P9=deck-to-quay AFT-PS..FWD-SB).
-                    let rangeTargets = null;
-                    try {
-                        const targetSheet = context.workbook.worksheets.getItem(TARGET_SHEET_NAME);
-                        rangeTargets = targetSheet.getRange("P1:P9");
-                        rangeTargets.load("values");
-                    } catch (e) { /* target sheet not found — targets stay at last-known value */ }
+                    // Auto Ballast target condition: was CREST_301!P1:P9, now
+                    // Load_Editor!CP1:CP9 (P1=trim, P2=heel, P4:P9=deck-to-quay
+                    // AFT-PS..FWD-SB) — same merge shift as the geometry range
+                    // above; CREST_301 is gone as its own sheet.
+                    const rangeTargets = editorSheet.getRange("CP1:CP9");
+                    rangeTargets.load("values");
 
                     // Auto Ballast pump capacity: BALLASTPLAN(mT)!C153.
-                    let rangePumpCap = null;
-                    try {
-                        const pumpCapSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
-                        rangePumpCap = pumpCapSheet.getRange("C153");
-                        rangePumpCap.load("values");
-                    } catch (e) { /* sheet not found — pump capacity stays at last-known value */ }
+                    const rangePumpCap = pumpSheet.getRangeOrNullObject("C153");
+                    rangePumpCap.load("values");
 
                     await context.sync();
 
-                    BARGE_NAME = crestSheet.name || CREST_SHEET_NAME;
+                    BARGE_NAME = CREST_SHEET_NAME;
                     currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
@@ -3817,12 +3826,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         targetDeck.SB     = parseFloat(tv[7][0]) || 0;
                         targetDeck.FWD_SB = parseFloat(tv[8][0]) || 0;
                     }
-                    if (rangePumpCap) {
+                    if (!rangePumpCap.isNullObject) {
                         pumpCapacityMTPerHr = parseFloat(rangePumpCap.values[0][0]) || pumpCapacityMTPerHr;
                     }
 
                     // Parse pump rows until column A is blank
-                    if (rangePumps) {
+                    if (!rangePumps.isNullObject) {
                         const pumpValues = rangePumps.values;
                         const parsedPumps = [];
                         for (let i = 0; i < pumpValues.length; i++) {
