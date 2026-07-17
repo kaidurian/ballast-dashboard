@@ -1987,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-8</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-10</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -2407,13 +2407,15 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // so the sign simply doesn't draw before the first sync.
         let bargeCoG = { lcg: 0, tcg: 0, vcg: 0, valid: false };
 
-        // Pump locations, sourced from BALLASTPLAN(mT)!A33:E... (until column
-        // A is blank). Column A = tank name (matches Load_Editor/CREST_301
-        // tank naming), column E = pump name (e.g. "P1"). A pump LABEL
-        // (text only — no dot/marker graphic) is shown at the matching
-        // tank's top-right corner. Multiple pumps can reference the same
-        // tank.
-        const PUMP_SHEET_NAME = "BALLASTPLAN(mT)";
+        // Pump locations, sourced from Load_Editor!JE33:JE... (until the
+        // first blank JE cell). Column JE is ROW-ALIGNED with the tank's
+        // own Load_Editor row (same row that carries that tank's
+        // name/weight/percent in columns B:E) — so the tank name for a
+        // given pump entry is simply whatever TANK_CONFIG/Load_Editor has
+        // for that same row, not a separate lookup column. JE holds the
+        // pump name (e.g. "P1"). A pump LABEL (text only — no dot/marker
+        // graphic) is shown at the matching tank's top-right corner.
+        const PUMP_SHEET_NAME = "BALLASTPLAN(mT)"; // still used for pump capacity (C153) only
         const PUMP_START_ROW = 33;
         const PUMP_MAX_ROWS = 200;
         let pumpLocations = []; // [{ tankName, pumpName }]
@@ -2479,7 +2481,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // Pump names the operator has marked FAILED (dedicated-pump
         // logic). Populated/edited from the "Pump Status" list in the
         // Auto Ballast panel, built from the pump labels already parsed
-        // out of BALLASTPLAN(mT) (pumpLocations).
+        // out of Load_Editor!JE (pumpLocations).
         let failedPumps = new Set();
 
         function isBufferTank(cfg) {
@@ -3764,21 +3766,28 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const rangeAxles = editorSheet.getRange(`D${AXLE_START_ROW}:G${axleEndRow}`);
                     rangeAxles.load("values");
 
-                    // Pump locations: BALLASTPLAN(mT)!A33:E(33+N) — column A
-                    // = tank name, column E = pump name. Read a generous
-                    // over-read block, trimmed below at the first row where
-                    // column A is blank. Uses getItemOrNullObject (NOT
-                    // getItem inside try/catch) because this workbook doesn't
-                    // have a BALLASTPLAN(mT) sheet at all — getItem() only
-                    // throws ItemNotFound at context.sync() time, so wrapping
-                    // just the synchronous getItem() call in try/catch never
+                    // Pump locations: Load_Editor!JE33:JE(33+N) — a SINGLE
+                    // column, row-aligned with each tank's own Load_Editor
+                    // row (same row that carries that tank's name in column
+                    // B). Read a generous over-read block, trimmed below at
+                    // the first blank JE cell. The tank name for each pump
+                    // entry is looked up from TANK_CONFIG by matching that
+                    // same row number (see parsing block below, after
+                    // TANK_CONFIG is built).
+                    const pumpEndRow = PUMP_START_ROW + PUMP_MAX_ROWS - 1;
+                    const rangePumpJE = editorSheet.getRangeOrNullObject(`JE${PUMP_START_ROW}:JE${pumpEndRow}`);
+                    rangePumpJE.load("values");
+
+                    // Pump capacity still lives on BALLASTPLAN(mT)!C153.
+                    // Uses getItemOrNullObject (NOT getItem inside
+                    // try/catch) because this workbook doesn't have a
+                    // BALLASTPLAN(mT) sheet at all — getItem() only throws
+                    // ItemNotFound at context.sync() time, so wrapping just
+                    // the synchronous getItem() call in try/catch never
                     // actually caught it; it aborted the whole batch (every
                     // range below, including trim/heel/tank data) instead.
                     const pumpSheet = context.workbook.worksheets.getItemOrNullObject(PUMP_SHEET_NAME);
                     pumpSheet.load("isNullObject");
-                    const pumpEndRow = PUMP_START_ROW + PUMP_MAX_ROWS - 1;
-                    const rangePumps = pumpSheet.getRangeOrNullObject(`A${PUMP_START_ROW}:E${pumpEndRow}`);
-                    rangePumps.load("values");
 
                     // Auto Ballast target condition: was CREST_301!P1:P9, now
                     // Load_Editor!CP1:CP9 (P1=trim, P2=heel, P4:P9=deck-to-quay
@@ -3830,24 +3839,6 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         pumpCapacityMTPerHr = parseFloat(rangePumpCap.values[0][0]) || pumpCapacityMTPerHr;
                     }
 
-                    // Parse pump rows until column A is blank
-                    if (!rangePumps.isNullObject) {
-                        const pumpValues = rangePumps.values;
-                        const parsedPumps = [];
-                        for (let i = 0; i < pumpValues.length; i++) {
-                            const rawTank = pumpValues[i][0];
-                            const rawPump = pumpValues[i][4];
-                            const tankEmpty = (rawTank === '' || rawTank === null || rawTank === undefined);
-                            if (tankEmpty) break; // stop at first blank tank-name row
-                            const pumpEmpty = (rawPump === '' || rawPump === null || rawPump === undefined);
-                            if (pumpEmpty) continue; // tank listed but no pump on this row — skip, keep scanning
-                            parsedPumps.push({ tankName: String(rawTank), pumpName: String(rawPump) });
-                        }
-                        pumpLocations = parsedPumps;
-                    } else {
-                        pumpLocations = [];
-                    }
-
                     // --- Parse CREST_301 geometry rows until first fully-blank row ---
                     const crestValues = rangeCrest.values;
                     const geometryRows = [];
@@ -3884,6 +3875,28 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     recomputeBargeExtents();
                     rebuildTankDataFromConfig();
                     updateBargeInfoNote();
+
+                    // Parse pump names from Load_Editor!JE, row-aligned with
+                    // TANK_CONFIG (row PUMP_START_ROW + i). Stop at the
+                    // first blank JE cell. Tank name comes from whichever
+                    // TANK_CONFIG entry shares that row id — falls back to
+                    // a "ROW n" placeholder if that row isn't a tank row.
+                    if (!rangePumpJE.isNullObject) {
+                        const jeValues = rangePumpJE.values;
+                        const parsedPumps = [];
+                        for (let i = 0; i < jeValues.length; i++) {
+                            const rawPump = jeValues[i][0];
+                            const pumpEmpty = (rawPump === '' || rawPump === null || rawPump === undefined);
+                            if (pumpEmpty) break; // stop at first blank JE cell
+                            const rowNum = PUMP_START_ROW + i;
+                            const cfg = TANK_CONFIG.find(t => t.id === rowNum);
+                            const tankName = cfg ? cfg.name : `ROW ${rowNum}`;
+                            parsedPumps.push({ tankName: tankName, pumpName: String(rawPump) });
+                        }
+                        pumpLocations = parsedPumps;
+                    } else {
+                        pumpLocations = [];
+                    }
 
                     tankData.forEach((tank, idx) => {
                         const extra = nameWeightRows[idx];
