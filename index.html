@@ -1987,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-10</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-11</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -3775,7 +3775,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     // same row number (see parsing block below, after
                     // TANK_CONFIG is built).
                     const pumpEndRow = PUMP_START_ROW + PUMP_MAX_ROWS - 1;
-                    const rangePumpJE = editorSheet.getRangeOrNullObject(`JE${PUMP_START_ROW}:JE${pumpEndRow}`);
+                    const rangePumpJE = editorSheet.getRange(`JE${PUMP_START_ROW}:JE${pumpEndRow}`);
                     rangePumpJE.load("values");
 
                     // Pump capacity still lives on BALLASTPLAN(mT)!C153.
@@ -3796,11 +3796,24 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const rangeTargets = editorSheet.getRange("CP1:CP9");
                     rangeTargets.load("values");
 
-                    // Auto Ballast pump capacity: BALLASTPLAN(mT)!C153.
-                    const rangePumpCap = pumpSheet.getRangeOrNullObject("C153");
-                    rangePumpCap.load("values");
-
                     await context.sync();
+
+                    // Auto Ballast pump capacity: BALLASTPLAN(mT)!C153.
+                    // Excel.Worksheet has no getRangeOrNullObject() — that
+                    // method only exists on Range/NamedItem/event-args
+                    // classes, NOT on Worksheet (calling it there throws
+                    // "getRangeOrNullObject is not a function"). Since
+                    // pumpSheet itself may be a null object (this workbook
+                    // doesn't have a BALLASTPLAN(mT) sheet), we must check
+                    // pumpSheet.isNullObject — now loaded from the sync
+                    // above — BEFORE calling getRange() on it, and run a
+                    // second, separate sync only when the sheet is real.
+                    let rangePumpCap = null;
+                    if (!pumpSheet.isNullObject) {
+                        rangePumpCap = pumpSheet.getRange("C153");
+                        rangePumpCap.load("values");
+                        await context.sync();
+                    }
 
                     BARGE_NAME = CREST_SHEET_NAME;
                     currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
@@ -3835,7 +3848,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         targetDeck.SB     = parseFloat(tv[7][0]) || 0;
                         targetDeck.FWD_SB = parseFloat(tv[8][0]) || 0;
                     }
-                    if (!rangePumpCap.isNullObject) {
+                    if (rangePumpCap) {
                         pumpCapacityMTPerHr = parseFloat(rangePumpCap.values[0][0]) || pumpCapacityMTPerHr;
                     }
 
