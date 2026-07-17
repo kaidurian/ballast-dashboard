@@ -3936,6 +3936,16 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             } catch (e) {
                 console.warn("Excel sync error, using mock", e);
                 generateMockSystemValues();
+                // Show WHY the pull failed instead of silently going to
+                // Mock — the previous version hid this, which is why this
+                // exact failure mode took so long to diagnose.
+                const statusEl = document.getElementById('connectionStatus');
+                if (statusEl) {
+                    const msg = String((e && (e.message || e.code)) || e).slice(0, 120);
+                    statusEl.innerHTML = 'Status: <span style="color: #eab308;">● Mock (no Excel)</span> '
+                        + '<span style="color:#f87171;font-size:0.85em;" title="'
+                        + msg.replace(/"/g, '&quot;') + '">⚠ ' + msg + '</span>';
+                }
             }
         }
 
@@ -4431,7 +4441,16 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     await context.sync();
                     setTimeout(pullExcelTankData, 300);
                 });
-            } catch (e) { console.warn("Excel write error", e); }
+            } catch (e) {
+                console.warn("Excel write error", e);
+                const statusEl = document.getElementById('connectionStatus');
+                if (statusEl) {
+                    const msg = String((e && (e.message || e.code)) || e).slice(0, 120);
+                    statusEl.innerHTML = 'Status: <span style="color: #f87171;">● Write to Excel failed</span> '
+                        + '<span style="color:#f87171;font-size:0.85em;" title="'
+                        + msg.replace(/"/g, '&quot;') + '">⚠ ' + msg + '</span>';
+                }
+            }
             refreshLoadEditorPageIfOpen();
         }
 
@@ -6849,7 +6868,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     sheet.onChanged.add(async () => { await pullExcelTankData(); });
                     await context.sync();
                 });
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                // Was silently ignored before — log it so a failure to even
+                // attach the change-listener isn't mistaken for "everything
+                // is fine, no edits detected."
+                console.warn("registerExcelAutoTrack failed to attach onChanged listener", e);
+            }
         }
 
         // initial render fallback — startFirebaseMode() handles mock fallback
