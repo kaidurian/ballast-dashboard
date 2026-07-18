@@ -4740,18 +4740,27 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // ============================================================
         // 7. UPDATE TANK FILL (with Excel write)
         // ============================================================
-        async function updateTankFill(row, value) {
+        // DOM/state-only half of a tank fill edit: updates the tank card
+        // visuals and the in-memory tankData record, but does NOT touch
+        // Excel, Firebase, or trigger a grid re-render. Split out of
+        // updateTankFill() so a multi-cell fill-handle drag can apply
+        // every touched tank's local state first and defer the
+        // network/render work to one batched pass afterward, instead of
+        // paying for it on every single cell.
+        // Returns the parsed numeric value, or null if `value` wasn't
+        // a valid number (caller should skip firebase/Excel writes then).
+        function leApplyTankFillLocal(row, value) {
             const parsed = parseFloat(value);
-            if (isNaN(parsed)) return;
+            if (isNaN(parsed)) return null;
             const cfg = TANK_CONFIG.find(t => t.id === row);
-            if (!cfg) return;
+            if (!cfg) return null;
             const mockMax = cfg.capacity || 1000;
             const isOverCapacity = parsed > mockMax;
             let targetPct = Math.max(0, Math.min(parsed / mockMax, 1.0));
             const pctNum = targetPct * 100;
 
             const card = document.getElementById(`tank_card_${row}`);
-            if (!card) return;
+            if (!card) return parsed;
             const water = card.querySelector('.tank-water-level');
             const label = document.getElementById(`lbl_Load${row}`);
             const input = document.getElementById(`txt_Row${row}`);
@@ -4785,6 +4794,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 tankRecord.weight = parsed.toFixed(2);
                 tankRecord.percent = targetPct;
             }
+            return parsed;
+        }
+
+        async function updateTankFill(row, value) {
+            const parsed = leApplyTankFillLocal(row, value);
+            if (parsed === null) return;
             update3DFillAndAttitude();
 
             if (!isOfficeInitialized) {
@@ -5066,6 +5081,33 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                 });
             } catch (e) {
                 console.warn('Load Editor: could not save cell edit to Firebase', e);
+            }
+        }
+
+        // Same as leSaveEditToFirebase() but for many cells at once: one
+        // PATCH request instead of one per cell. `edits` is a plain
+        // { addr: value } map. Used by the fill-handle drag path, where
+        // firing one fetch() per touched cell was queuing behind the
+        // browser's per-host connection limit on larger fills.
+        async function leSaveEditsToFirebaseBatch(edits) {
+            const addrs = Object.keys(edits);
+            if (!addrs.length) return;
+            const patch = {};
+            addrs.forEach(addr => {
+                const raw = edits[addr];
+                const normalized = (raw === '' || raw === undefined) ? null : raw;
+                if (normalized === null) delete leLocalEditsCache[addr];
+                else leLocalEditsCache[addr] = normalized;
+                patch[addr] = normalized;
+            });
+            try {
+                await fetch(`${FIREBASE_URL}/${LE_EDITS_FIREBASE_NODE}.json`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(patch)
+                });
+            } catch (e) {
+                console.warn('Load Editor: could not save batched cell edits to Firebase', e);
             }
         }
 
@@ -6361,13 +6403,42 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // other cell in the drag range, routed through the same
         // update*() functions each cell type already uses so Excel
         // write-back and the live tank/RO-RO wiring stay correct.
-        function leApplyFill() {
+        // Applies a fill-handle drag across leFillAnchor..leFillTarget.
+        //
+        // Previously this called updateTankFill()/updateLoadEditorAxle()/
+        // updateLoadEditorCell() once PER CELL, and each of those does a
+        // full round trip on its own: one engine.setCellContents() (one
+        // HyperFormula recalculation), one Firebase PATCH fetch(), one
+        // Excel.run()+context.sync() when connected, AND a full grid
+        // re-render — so a fill across N cells paid for N recalculations,
+        // N network requests, up to N Excel round-trips, and N re-renders.
+        // On a large drag (or with Excel connected, where each
+        // context.sync() is a real host round-trip) that's what caused
+        // the reported hangs.
+        //
+        // This version separates "figure out what goes where" from
+        // "write it everywhere": it computes every target cell's value
+        // first with no side effects, then applies each category of
+        // side effect exactly once for the whole range:
+        //   - one engine.batch() for every HyperFormula-backed cell
+        //   - one local DOM/state update per tank/axle cell, then one
+        //     3D/plan-view refresh for the whole batch
+        //   - one Firebase PATCH covering every touched cell
+        //   - one Excel.run()/context.sync() covering every touched cell
+        //   - one grid re-render at the end
+        async function leApplyFill() {
             if (!leFillAnchor || !leFillTarget) return;
             const range = leGetFillRange();
             const anchorR = leFillAnchor.r, anchorC = leFillAnchor.c;
             const engine = leGetEngine();
             const sourceRaw = engine.getCellSerialized(leAddr(anchorR, anchorC));
             const isFormulaSource = typeof sourceRaw === 'string' && sourceRaw.charAt(0) === '=';
+
+            // Pass 1: classify every target cell and compute its value.
+            // No engine/DOM/network calls happen in this loop.
+            const plainWrites = [];   // { r, c, addr, content, isFormula, raw }
+            const tankWrites = [];    // { row, rawValue }
+            const axleWrites = [];    // { index, field, rawValue }
             for (let r = range.r1; r <= range.r2; r++) {
                 for (let c = range.c1; c <= range.c2; c++) {
                     if (r === anchorR && c === anchorC) continue;
@@ -6380,15 +6451,106 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const cfg = (c === 4) ? TANK_CONFIG.find(t => t.id === r) : null;
                     const axleIdx = r - AXLE_START_ROW;
                     if (cfg) {
-                        updateTankFill(r, valueToWrite);
+                        tankWrites.push({ row: r, rawValue: valueToWrite });
                     } else if (axleIdx >= 0 && axleIdx < trailerAxles.length && c >= 4 && c <= 7) {
                         const fieldByCol = { 4: 'load', 5: 'x', 6: 'y', 7: 'vcg' };
-                        updateLoadEditorAxle(axleIdx, fieldByCol[c], valueToWrite);
+                        axleWrites.push({ index: axleIdx, field: fieldByCol[c], rawValue: valueToWrite });
                     } else {
-                        updateLoadEditorCell(r, c, valueToWrite);
+                        const addr = leAddr(r, c);
+                        const trimmed = typeof valueToWrite === 'string' ? valueToWrite.trim() : valueToWrite;
+                        const isFormula = typeof trimmed === 'string' && trimmed[0] === '=';
+                        let content = trimmed;
+                        if (!isFormula && typeof trimmed === 'string' && trimmed !== '') {
+                            const num = Number(trimmed);
+                            if (!isNaN(num)) content = num;
+                        }
+                        plainWrites.push({ r, c, addr, content: (content === '' ? null : content), isFormula, raw: trimmed });
                     }
                 }
             }
+
+            // Pass 2: one HyperFormula recalculation for the whole fill.
+            if (plainWrites.length) {
+                const applyToEngine = () => {
+                    plainWrites.forEach(w => engine.setCellContents(w.addr, [[w.content]]));
+                };
+                if (engine.batch) engine.batch(applyToEngine); else applyToEngine();
+                // C2 ("Select Barge") can appear mid-range on an unusual
+                // drag; keep the same live-switch behavior as the
+                // single-cell path if it was touched.
+                if (plainWrites.some(w => w.r === 2 && w.c === 3)) leEnsureActiveBargeSheet(true);
+            }
+
+            // Pass 3: tank/axle cells are DOM+state "live" cells, not
+            // engine cells — apply each one's local state, then refresh
+            // the 3D/plan view once for the whole batch instead of once
+            // per cell.
+            const tankRows = [];
+            tankWrites.forEach(w => {
+                const parsed = leApplyTankFillLocal(w.row, w.rawValue);
+                if (parsed !== null) tankRows.push({ row: w.row, parsed });
+            });
+            const axleRows = [];
+            axleWrites.forEach(w => {
+                const parsed = leApplyAxleLocal(w.index, w.field, w.rawValue);
+                if (parsed !== null) axleRows.push({ index: w.index, field: w.field, parsed });
+            });
+            if (tankRows.length) update3DFillAndAttitude();
+            if (axleRows.length) {
+                refreshPlanView();
+                if (typeof refresh3DView === 'function') refresh3DView();
+            }
+
+            // Pass 4: one Firebase PATCH for every touched cell.
+            const firebasePatch = {};
+            plainWrites.forEach(w => { firebasePatch[leColLetters(w.c) + w.r] = w.content; });
+            tankRows.forEach(w => { firebasePatch['D' + w.row] = w.parsed; });
+            const axleColMap = { load: 'D', x: 'E', y: 'F', vcg: 'G' };
+            axleRows.forEach(w => {
+                const axle = trailerAxles[w.index];
+                const row = (axle && axle.row) || (AXLE_START_ROW + w.index);
+                firebasePatch[axleColMap[w.field] + row] = w.parsed;
+            });
+            leSaveEditsToFirebaseBatch(firebasePatch);
+
+            // Pass 5: one Excel.run()/context.sync() for every touched
+            // cell when connected — Office.js queues range assignments
+            // locally and only sends one host round-trip at sync(), so
+            // this turns what used to be N round-trips into 1.
+            if (isOfficeInitialized) {
+                try {
+                    await Excel.run(async (context) => {
+                        const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                        plainWrites.forEach(w => {
+                            const cellRange = sheet.getRange(w.addr);
+                            if (w.isFormula) cellRange.formulas = [[w.raw]];
+                            else cellRange.values = [[w.content]];
+                        });
+                        tankRows.forEach(w => {
+                            sheet.getRange(`D${w.row}`).values = [[w.parsed]];
+                        });
+                        axleRows.forEach(w => {
+                            const axle = trailerAxles[w.index];
+                            const row = (axle && axle.row) || (AXLE_START_ROW + w.index);
+                            sheet.getRange(`${axleColMap[w.field]}${row}`).values = [[w.parsed]];
+                        });
+                        await context.sync();
+                    });
+                    if (tankRows.length) setTimeout(pullExcelTankData, 300);
+                } catch (e) {
+                    console.warn('Excel write error (fill)', e);
+                    const statusEl = document.getElementById('connectionStatus');
+                    if (statusEl) {
+                        const msg = String((e && (e.message || e.code)) || e).slice(0, 120);
+                        statusEl.innerHTML = 'Status: <span style="color: #f87171;">● Write to Excel failed</span> '
+                            + '<span style="color:#f87171;font-size:0.85em;" title="'
+                            + msg.replace(/"/g, '&quot;') + '">⚠ ' + msg + '</span>';
+                    }
+                }
+            } else if (plainWrites.length) {
+                scheduleStandaloneLoadEditorPublish();
+            }
+
             document.querySelectorAll('.le-grid td.le-cell-fill-preview').forEach(td => td.classList.remove('le-cell-fill-preview'));
             leFillTarget = null;
             renderLoadEditorPageIfOpen_internal();
@@ -6573,12 +6735,25 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // Trailer" overlays read from (so the overlay updates live),
         // and writes straight to Load_Editor!D:G124.. like
         // generateTrailerAndWriteToExcel() does.
-        async function updateLoadEditorAxle(index, field, value) {
+        // State-only half of an axle edit: writes the parsed value onto
+        // the in-memory axle record. Does NOT refresh the plan/3D view,
+        // touch Excel, or touch Firebase — split out of
+        // updateLoadEditorAxle() so a fill-handle drag spanning several
+        // axle rows can apply every value first and refresh the view /
+        // sync outward exactly once, rather than once per axle.
+        // Returns the parsed numeric value, or null if invalid.
+        function leApplyAxleLocal(index, field, value) {
             const parsed = parseFloat(value);
-            if (isNaN(parsed)) return;
+            if (isNaN(parsed)) return null;
             const axle = trailerAxles[index];
-            if (!axle) return;
+            if (!axle) return null;
             axle[field] = parsed;
+            return parsed;
+        }
+
+        async function updateLoadEditorAxle(index, field, value) {
+            const parsed = leApplyAxleLocal(index, field, value);
+            if (parsed === null) return;
 
             refreshPlanView();
             if (typeof refresh3DView === 'function') refresh3DView();
@@ -6586,7 +6761,8 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             if (isOfficeInitialized) {
                 const colMap = { load: 'D', x: 'E', y: 'F', vcg: 'G' };
                 const col = colMap[field];
-                const row = axle.row || (AXLE_START_ROW + index);
+                const axle = trailerAxles[index];
+                const row = (axle && axle.row) || (AXLE_START_ROW + index);
                 try {
                     await Excel.run(async (context) => {
                         const sheet = context.workbook.worksheets.getItem("Load_Editor");
