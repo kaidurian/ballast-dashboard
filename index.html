@@ -1987,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-11</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-12</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -4022,7 +4022,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         }
 
         async function publishToFirebase() {
-            if (firebasePublishInFlight) return;
+            if (firebasePublishInFlight) return false;
             firebasePublishInFlight = true;
             try {
                 const payload = buildBallastPayload();
@@ -4032,11 +4032,45 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     body: JSON.stringify(payload)
                 });
                 if (!res.ok) throw new Error("Request failed: " + res.status);
+                // Record the timestamp we just published so the next
+                // pullFirebaseData() poll recognizes this as "our own"
+                // write (data.updatedAt === lastFirebaseTimestamp) and
+                // skips a pointless re-apply/re-render of data we already
+                // have locally, instead of racing our own edit.
+                lastFirebaseTimestamp = payload.updatedAt;
+                return true;
             } catch (e) {
                 console.warn("Firebase publish error (check FIREBASE_URL / internet)", e);
+                return false;
             } finally {
                 firebasePublishInFlight = false;
             }
+        }
+
+        // Debounced standalone-mode publish: tank-fill edits (from the 2D
+        // cards, the Load Editor Filling[mT] column, or a Load Editor
+        // fill-handle drag across several tank rows) previously only
+        // updated the in-page UI when no Excel session was connected —
+        // nothing was ever written to Firebase, so the edit silently
+        // reverted on refresh and never reached other devices. This
+        // schedules a single publishToFirebase() call ~600ms after the
+        // last edit in a burst, so a fill-handle drag across many tank
+        // rows doesn't fire one PUT per cell.
+        let standaloneBallastPublishTimer = null;
+        function scheduleStandaloneBallastPublish() {
+            if (standaloneBallastPublishTimer) clearTimeout(standaloneBallastPublishTimer);
+            standaloneBallastPublishTimer = setTimeout(() => {
+                standaloneBallastPublishTimer = null;
+                publishToFirebase().then(ok => {
+                    const statusEl = document.getElementById('connectionStatus');
+                    if (!statusEl) return;
+                    if (ok) {
+                        statusEl.innerHTML = 'Status: <span style="color: var(--accent-blue);">● Saved (browser edit, not GHS-recalculated)</span>';
+                    } else {
+                        statusEl.innerHTML = 'Status: <span style="color: #f87171;">● Edit not saved — check connection</span>';
+                    }
+                });
+            }, 600);
         }
 
         // Pull the latest published snapshot from Firebase. Used on any
@@ -4456,6 +4490,14 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             update3DFillAndAttitude();
 
             if (!isOfficeInitialized) {
+                // No Excel session to write to (or recalculate GHS from),
+                // but the edit still needs to survive a refresh and reach
+                // other devices — publish the updated weight to Firebase.
+                // NOTE: this only syncs the raw tank weight; trim/heel/
+                // draft/GM are NOT recalculated here (GHS lives in Excel
+                // only) and will stay at whatever an Excel session last
+                // published until one reconnects and republishes.
+                scheduleStandaloneBallastPublish();
                 refreshLoadEditorPageIfOpen();
                 return;
             }
