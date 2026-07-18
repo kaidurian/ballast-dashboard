@@ -1987,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-13</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-14</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -3718,11 +3718,10 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         // ============================================================
         async function pullExcelTankData() {
             if (!isOfficeInitialized) {
-                // Not running inside Excel: if a viewer Firebase session is
-                // active, re-check Firebase instead of falling straight to
-                // mock data.
-                if (dataMode === "firebase") pullFirebaseData(true);
-                else generateMockSystemValues();
+                // Not running inside Excel: link to the local Load
+                // Editor engine (same cell addresses, computed via
+                // HyperFormula) instead of Excel.
+                pullLoadEditorTankData(true);
                 return;
             }
             try {
@@ -3980,6 +3979,220 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         + msg.replace(/"/g, '&quot;') + '">⚠ ' + msg + '</span>';
                 }
             }
+        }
+
+        // ============================================================
+        // 5a1b. LOAD EDITOR (standalone) — mirrors pullExcelTankData()
+        //     above cell-for-cell, but reads from the local leEngine
+        //     (HyperFormula, same LE_SHEET_NAME sheet used by the Load
+        //     Editor grid page) instead of a live Excel session. This is
+        //     what a plain browser tab (no Office host) now links to,
+        //     replacing the old Firebase-published-snapshot dependency:
+        //     the dashboard computes its own trim/heel/CoG from the
+        //     SAME Load_Editor cell addresses Excel mode reads, using
+        //     whatever formulas + edits are already loaded into leEngine
+        //     (static extract + Firebase-restored cell edits).
+        // ============================================================
+        function leCellNum(r, c) {
+            return parseFloat(leDisplayValue(r, c));
+        }
+
+        async function pullLoadEditorTankData(showAsManual) {
+            try {
+                leGetEngine();
+                // Make sure the active barge's own sheet (CREST_301 by
+                // default) is registered/loading — in case C2 changed
+                // since leGetEngine() first ran.
+                leEnsureActiveBargeSheet();
+
+                BARGE_NAME = CREST_SHEET_NAME;
+                currentTrimDegrees = leCellNum(8, crest301ColLettersToIndex('E')) || 0;
+                currentHeelDegrees = leCellNum(9, crest301ColLettersToIndex('E')) || 0;
+
+                const iCol = crest301ColLettersToIndex('I');
+                bargeCornerLabels = [];
+                for (let r = 1; r <= 6; r++) {
+                    const v = leDisplayValue(r, iCol);
+                    bargeCornerLabels.push(v === null || v === undefined ? '' : String(v));
+                }
+                updateCurrentDeckFromLabels();
+
+                // CoG: Load_Editor!P31 (LCG), Q31 (TCG), R31 (VCG)
+                const lcg = leCellNum(31, crest301ColLettersToIndex('P'));
+                const tcg = leCellNum(31, crest301ColLettersToIndex('Q'));
+                const vcg = leCellNum(31, crest301ColLettersToIndex('R'));
+                bargeCoG.valid = !isNaN(lcg) && !isNaN(tcg);
+                if (bargeCoG.valid) {
+                    bargeCoG.lcg = lcg;
+                    bargeCoG.tcg = tcg;
+                    bargeCoG.vcg = isNaN(vcg) ? 0 : vcg;
+                }
+
+                // Auto Ballast target condition: Load_Editor!CP1:CP9
+                const cpCol = crest301ColLettersToIndex('CP');
+                targetTrimDegrees = leCellNum(1, cpCol) || 0;
+                targetHeelDegrees = leCellNum(2, cpCol) || 0;
+                targetDeck.AFT_PS = leCellNum(4, cpCol) || 0;
+                targetDeck.PS     = leCellNum(5, cpCol) || 0;
+                targetDeck.FWD_PS = leCellNum(6, cpCol) || 0;
+                targetDeck.AFT_SB = leCellNum(7, cpCol) || 0;
+                targetDeck.SB     = leCellNum(8, cpCol) || 0;
+                targetDeck.FWD_SB = leCellNum(9, cpCol) || 0;
+                // Pump capacity (BALLASTPLAN(mT)!C153) isn't loaded into
+                // leEngine yet — leave pumpCapacityMTPerHr at whatever
+                // it currently is (default or last known).
+
+                // --- Geometry: Load_Editor!CQ:CT (was CREST_301!Q:T) ---
+                const cqCol = crest301ColLettersToIndex('CQ');
+                const crCol = crest301ColLettersToIndex('CR');
+                const csCol = crest301ColLettersToIndex('CS');
+                const ctCol = crest301ColLettersToIndex('CT');
+                const geometryRows = [];
+                for (let i = 0; i < CREST_MAX_ROWS; i++) {
+                    const row = CREST_START_ROW + i;
+                    const rawQ = leDisplayValue(row, cqCol), rawR = leDisplayValue(row, crCol);
+                    const rawS = leDisplayValue(row, csCol), rawT = leDisplayValue(row, ctCol);
+                    const allEmpty = [rawQ, rawR, rawS, rawT].every(
+                        v => v === '' || v === null || v === undefined
+                    );
+                    if (allEmpty) break;
+                    const q = parseFloat(rawQ), r = parseFloat(rawR);
+                    const s = parseFloat(rawS), t = parseFloat(rawT);
+                    if ([q, r, s, t].some(isNaN)) continue;
+                    geometryRows.push({ q, r, s, t });
+                }
+
+                // --- Load_Editor!B:E name/weight/percent/capacity ---
+                let nameWeightRows = [];
+                if (geometryRows.length > 0) {
+                    const bCol = crest301ColLettersToIndex('B');
+                    const cCol = crest301ColLettersToIndex('C');
+                    const dCol = crest301ColLettersToIndex('D');
+                    const eCol = crest301ColLettersToIndex('E');
+                    for (let i = 0; i < geometryRows.length; i++) {
+                        const row = EXCEL_START_ROW + i;
+                        const name = leDisplayValue(row, bCol);
+                        nameWeightRows.push({
+                            name: name || null,
+                            weight: parseFloat(leDisplayValue(row, dCol) || 0),
+                            percent: parseFloat(leDisplayValue(row, eCol) || 0),
+                            capacity: parseFloat(leDisplayValue(row, cCol) || 0) || 0
+                        });
+                    }
+                }
+
+                TANK_CONFIG = buildTankConfigFromCrest(geometryRows, nameWeightRows);
+                recomputeBargeExtents();
+                rebuildTankDataFromConfig();
+                updateBargeInfoNote();
+
+                // Pump names: Load_Editor!JE, row-aligned with TANK_CONFIG
+                const jeCol = crest301ColLettersToIndex('JE');
+                const parsedPumps = [];
+                for (let i = 0; i < PUMP_MAX_ROWS; i++) {
+                    const row = PUMP_START_ROW + i;
+                    const rawPump = leDisplayValue(row, jeCol);
+                    if (rawPump === '' || rawPump === null || rawPump === undefined) break;
+                    const cfg = TANK_CONFIG.find(t => t.id === row);
+                    const tankName = cfg ? cfg.name : `ROW ${row}`;
+                    parsedPumps.push({ tankName: tankName, pumpName: String(rawPump) });
+                }
+                pumpLocations = parsedPumps;
+
+                tankData.forEach((tank, idx) => {
+                    const extra = nameWeightRows[idx];
+                    if (extra) {
+                        tank.weight = extra.weight.toFixed(2);
+                        tank.percent = extra.percent > 1 ? extra.percent / 100 : extra.percent;
+                    }
+                });
+
+                // Trailer axle D:G block: D124:G(124+N)
+                const dCol2 = crest301ColLettersToIndex('D');
+                const eCol2 = crest301ColLettersToIndex('E');
+                const fCol2 = crest301ColLettersToIndex('F');
+                const gCol2 = crest301ColLettersToIndex('G');
+                const parsedAxles = [];
+                for (let i = 0; i < AXLE_MAX_ROWS; i++) {
+                    const row = AXLE_START_ROW + i;
+                    const rawLoad = leDisplayValue(row, dCol2);
+                    const rawX = leDisplayValue(row, eCol2);
+                    const rawY = leDisplayValue(row, fCol2);
+                    const rawVcg = leDisplayValue(row, gCol2);
+                    const xEmpty = (rawX === '' || rawX === null || rawX === undefined);
+                    const yEmpty = (rawY === '' || rawY === null || rawY === undefined);
+                    if (xEmpty && yEmpty) break;
+                    const x = parseFloat(rawX), y = parseFloat(rawY);
+                    if (isNaN(x) || isNaN(y)) continue;
+                    const load = parseFloat(rawLoad), vcgAxle = parseFloat(rawVcg);
+                    parsedAxles.push({
+                        row, x, y,
+                        load: isNaN(load) ? 0 : load,
+                        vcg: isNaN(vcgAxle) ? 6.85 : vcgAxle
+                    });
+                }
+                trailerAxles = parsedAxles;
+                trailerAxleMeta = [];
+
+                initTankMatrix();
+                drawAttitudeGraphics();
+                refreshPlanView();
+                if (typeof refresh3DView === 'function') refresh3DView();
+                if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
+                if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
+
+                dataMode = "loadEditor";
+                const statusEl = document.getElementById('connectionStatus');
+                if (statusEl) {
+                    statusEl.innerHTML = 'Status: <span style="color: var(--accent-blue);">● Linked to Load Editor (standalone)</span>';
+                }
+            } catch (e) {
+                console.warn("Load Editor link error, using mock", e);
+                generateMockSystemValues();
+                if (showAsManual) {
+                    const statusEl = document.getElementById('connectionStatus');
+                    if (statusEl) {
+                        const msg = String((e && e.message) || e).slice(0, 120);
+                        statusEl.innerHTML = 'Status: <span style="color: #eab308;">● Mock (Load Editor error)</span> '
+                            + '<span style="color:#f87171;font-size:0.85em;" title="'
+                            + msg.replace(/"/g, '&quot;') + '">⚠ ' + msg + '</span>';
+                    }
+                }
+            }
+        }
+
+        let loadEditorLinkStarted = false;
+        // Starts standalone (non-Excel) mode: links the dashboard to the
+        // local Load Editor engine at the same cell addresses Excel mode
+        // uses, instead of polling a Firebase-published snapshot. Safe
+        // to call more than once; only the first call actually starts
+        // the interval.
+        function startLoadEditorMode() {
+            if (loadEditorLinkStarted) return;
+            loadEditorLinkStarted = true;
+            dataMode = "loadEditor";
+            const statusEl = document.getElementById('connectionStatus');
+            if (statusEl) statusEl.innerHTML = 'Status: <span style="color: #eab308;">● Linking to Load Editor...</span>';
+            pullLoadEditorTankData(true);
+            // Re-check for cell edits made on other devices/tabs (saved
+            // via leSaveEditToFirebase) and re-pull so trim/heel/CoG
+            // recalculate from the latest values.
+            setInterval(() => {
+                leEditsFetchAndApply(true).then(() => pullLoadEditorTankData(false));
+            }, FIREBASE_POLL_MS);
+        }
+
+        let standaloneLoadEditorPublishTimer = null;
+        // Debounced re-pull after a local Load Editor cell edit (tank
+        // fill from the 2D cards, a Load Editor grid edit, etc.) — a
+        // fill-handle drag across several rows shouldn't trigger one
+        // full dashboard refresh per cell.
+        function scheduleStandaloneLoadEditorPublish() {
+            if (standaloneLoadEditorPublishTimer) clearTimeout(standaloneLoadEditorPublishTimer);
+            standaloneLoadEditorPublishTimer = setTimeout(() => {
+                standaloneLoadEditorPublishTimer = null;
+                pullLoadEditorTankData(false);
+            }, 300);
         }
 
         // ============================================================
@@ -4575,14 +4788,19 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             update3DFillAndAttitude();
 
             if (!isOfficeInitialized) {
-                // No Excel session to write to (or recalculate GHS from),
-                // but the edit still needs to survive a refresh and reach
-                // other devices — publish the updated weight to Firebase.
-                // NOTE: this only syncs the raw tank weight; trim/heel/
-                // draft/GM are NOT recalculated here (GHS lives in Excel
-                // only) and will stay at whatever an Excel session last
-                // published until one reconnects and republishes.
-                scheduleStandaloneBallastPublish();
+                // No Excel session — write directly into the local
+                // Load_Editor HyperFormula engine at the same D{row}
+                // cell Excel mode would write to, so trim/heel/CoG
+                // recalculate immediately from Load_Editor's own
+                // formulas. Persist the edit (existing Firebase-backed
+                // cell-edit log, same one the Load Editor grid page
+                // uses) so it survives a refresh and reaches other
+                // devices, then refresh the dashboard from the engine.
+                const engine = leGetEngine();
+                const addr = leAddr(row, 4); // column D
+                engine.setCellContents(addr, [[parsed]]);
+                leSaveEditToFirebase(leColLetters(4) + row, parsed);
+                scheduleStandaloneLoadEditorPublish();
                 refreshLoadEditorPageIfOpen();
                 return;
             }
@@ -4808,6 +5026,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     if (count) logAutoBallast(`📥 Load Editor: restored ${count} saved cell edit(s) from Firebase.`);
                     leEnsureActiveBargeSheet(); // in case a restored edit changed C2
                     refreshLoadEditorPageIfOpen();
+                    if (dataMode === "loadEditor") pullLoadEditorTankData(false);
                     return data;
                 })
                 .catch(e => {
@@ -5369,6 +5588,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     const when = json.updatedAt ? new Date(json.updatedAt).toLocaleString() : 'unknown time';
                     logAutoBallast(`📥 CREST_301: loaded ${Object.keys(json.data).length} cells from Firebase (snapshot from ${when}). Load Editor formulas can now reference =CREST_301!<cell> (or the same-sheet =CC4 style, matching the merged workbook).`);
                     refreshLoadEditorPageIfOpen();
+                    if (dataMode === "loadEditor") pullLoadEditorTankData(false);
                     return json.data;
                 })
                 .catch(e => {
@@ -7004,23 +7224,23 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     // flow into Excel, not just ones made before it opened.
                     setInterval(pullStandaloneEditsIntoExcel, FIREBASE_POLL_MS);
                 } else {
-                    startFirebaseMode();
+                    startLoadEditorMode();
                 }
             });
         } else {
-            console.warn('Office.js unavailable (standalone webpage context) — starting Firebase viewer mode.');
+            console.warn('Office.js unavailable (standalone webpage context) — linking to Load Editor.');
             const statusEl = document.getElementById('connectionStatus');
             if (statusEl) statusEl.innerHTML = 'Status: <span style="color: #eab308;">● Connecting...</span>';
-            // NOTE: startFirebaseMode() is deferred to the window.load event
+            // NOTE: startLoadEditorMode() is deferred to the window.load event
             // so the 3D script block (defined below this one) has time to load
             // before refresh3DView() is first called.
         }
 
         // Fallback: if Office.js never calls onReady (e.g. this page is
         // just opened as a normal web link, not loaded as an Excel add-in),
-        // start Firebase viewer mode anyway after a short wait.
+        // link to the Load Editor anyway after a short wait.
         setTimeout(() => {
-            if (!isOfficeInitialized && !firebaseStarted) startFirebaseMode();
+            if (!isOfficeInitialized && !loadEditorLinkStarted) startLoadEditorMode();
         }, 1200);
 
         async function registerExcelAutoTrack() {
@@ -7038,10 +7258,10 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
             }
         }
 
-        // initial render fallback — startFirebaseMode() handles mock fallback
-        // on its own if Firebase is empty or unreachable.
+        // initial render fallback — startLoadEditorMode() handles mock
+        // fallback on its own if the Load Editor engine errors out.
         window.addEventListener('load', () => {
-            if (!isOfficeInitialized && !firebaseStarted) startFirebaseMode();
+            if (!isOfficeInitialized && !loadEditorLinkStarted) startLoadEditorMode();
         });
     </script>
     <script>
