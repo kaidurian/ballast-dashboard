@@ -1987,7 +1987,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-46-12</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-46-13</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="theme-toggle-container">
                 <span>Day</span>
@@ -2391,6 +2391,12 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
         let firebaseStarted = false;
         let lastFirebaseTimestamp = null;
         let firebasePublishInFlight = false;
+
+        // ---- Excel <- Firebase catch-up state (tank-fill edits made on a
+        //      standalone webpage need a way back INTO the real Excel
+        //      workbook — see pullStandaloneEditsIntoExcel() below) ----
+        let lastKnownFirebaseTankWeights = {}; // "row"+id -> weight, as last seen/published by THIS Excel session
+        let excelFirebaseSyncInFlight = false;
 
         // ---- state ----
         let isOfficeInitialized = false;
@@ -3957,6 +3963,7 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
                     dataMode = "excel";
                     publishToFirebase();
+                    snapshotKnownFirebaseTankWeights();
                     refreshLoadEditorPageIfOpen();
                 });
             } catch (e) {
@@ -3972,6 +3979,84 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                         + '<span style="color:#f87171;font-size:0.85em;" title="'
                         + msg.replace(/"/g, '&quot;') + '">⚠ ' + msg + '</span>';
                 }
+            }
+        }
+
+        // ============================================================
+        // 5a2. EXCEL <- FIREBASE CATCH-UP
+        //
+        //     pullExcelTankData() above only ever reads Excel and writes
+        //     TO Firebase — a tank-fill edit made on a standalone webpage
+        //     (no Office host, so Excel.run() is unavailable there) had
+        //     no way back into the actual workbook. It updated Firebase's
+        //     ballast.tanks node (see scheduleStandaloneBallastPublish()
+        //     in updateTankFill()), but nothing ever read that back into
+        //     Excel — so the standalone edit stuck around forever in
+        //     Firebase/the browser, while the real Load_Editor sheet
+        //     just sat there unchanged.
+        //
+        //     This closes the loop: while an Excel session is connected,
+        //     periodically (and immediately on connect) check whether
+        //     Firebase's ballast.tanks holds any weight THIS session
+        //     didn't itself just publish — i.e. a genuine edit made
+        //     elsewhere — and if so, write it into Load_Editor!D{row}
+        //     and let GHS recalculate normally from there.
+        // ============================================================
+        function snapshotKnownFirebaseTankWeights() {
+            lastKnownFirebaseTankWeights = {};
+            tankData.forEach(t => {
+                lastKnownFirebaseTankWeights["row" + t.row] = parseFloat(t.weight) || 0;
+            });
+        }
+
+        async function pullStandaloneEditsIntoExcel() {
+            if (!isOfficeInitialized || excelFirebaseSyncInFlight) return;
+            excelFirebaseSyncInFlight = true;
+            try {
+                const res = await fetch(`${FIREBASE_URL}/ballast/tanks.json`, { cache: "no-store" });
+                if (!res.ok) return;
+                const remoteTanks = await res.json();
+                if (!remoteTanks || typeof remoteTanks !== 'object') return;
+
+                // Only rows whose Firebase value differs from what THIS
+                // session last knew Firebase to hold are genuinely new —
+                // otherwise every poll would "discover" the value we
+                // ourselves just published a moment ago and write it
+                // straight back into Excel in a pointless loop.
+                const changedRows = [];
+                for (const key in remoteTanks) {
+                    const m = /^row(\d+)$/.exec(key);
+                    if (!m) continue;
+                    const row = parseInt(m[1], 10);
+                    const remoteVal = parseFloat(remoteTanks[key]);
+                    if (isNaN(remoteVal)) continue;
+                    const known = lastKnownFirebaseTankWeights[key];
+                    if (known === undefined || Math.abs(known - remoteVal) > 0.001) {
+                        changedRows.push({ row, value: remoteVal });
+                    }
+                }
+                if (!changedRows.length) return;
+
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem("Load_Editor");
+                    changedRows.forEach(({ row, value }) => {
+                        sheet.getRange(`D${row}`).values = [[value]];
+                    });
+                    await context.sync();
+                });
+
+                logAutoBallast(`📥 Pulled ${changedRows.length} tank-fill edit(s) made on a standalone webpage into Excel (Load_Editor!D${changedRows.map(c => c.row).join(', D')}).`);
+
+                // Re-pull from Excel so GHS recalculates trim/heel/GM from
+                // the now-current weights and republishes the corrected
+                // snapshot — this also re-snapshots
+                // lastKnownFirebaseTankWeights so we don't re-detect our
+                // own write as "new" on the next poll.
+                await pullExcelTankData();
+            } catch (e) {
+                console.warn("pullStandaloneEditsIntoExcel failed", e);
+            } finally {
+                excelFirebaseSyncInFlight = false;
             }
         }
 
@@ -6907,8 +6992,17 @@ function n(e){const t=[-1.3026537197817094,.6419697923564902,.019476473204185836
                     isOfficeInitialized = true;
                     dataMode = "excel";
                     document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
-                    pullExcelTankData();
+                    pullExcelTankData().then(() => {
+                        // Catch up on any tank-fill edits made on a
+                        // standalone webpage while this Excel session
+                        // wasn't open yet.
+                        pullStandaloneEditsIntoExcel();
+                    });
                     registerExcelAutoTrack();
+                    // Keep checking periodically too, so edits made on a
+                    // standalone webpage AFTER this session connects also
+                    // flow into Excel, not just ones made before it opened.
+                    setInterval(pullStandaloneEditsIntoExcel, FIREBASE_POLL_MS);
                 } else {
                     startFirebaseMode();
                 }
