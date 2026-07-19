@@ -216,6 +216,42 @@
     width: 160px; background: #0a0f14; border: 1px solid var(--panel-border);
     color: var(--text); font-family: var(--mono); padding: 5px; border-radius: 3px;
   }
+
+  /* Second toolbar row — Modify commands */
+  #modifybar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px 6px; background: linear-gradient(var(--panel-2), var(--panel));
+    border-bottom: 1px solid #111; flex-wrap: wrap;
+  }
+  #modifybar .rowlbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+    margin-right: 4px;
+  }
+  button.tool.mtool.active { background: var(--amber); border-color: var(--amber); color: #241a08; }
+
+  /* Selection box (rubber-band window/crossing select) */
+  #selBox {
+    position: absolute; border: 1px dashed var(--cyan); background: rgba(79,209,197,0.08);
+    pointer-events: none; display: none; z-index: 5;
+  }
+  #selBox.crossing { border-color: var(--amber); background: rgba(224,164,88,0.08); border-style: dotted; }
+
+  /* Layers panel */
+  #layerList { margin-bottom: 8px; }
+  .layer-row {
+    display: flex; align-items: center; gap: 6px; padding: 5px 4px; border-radius: 3px;
+    cursor: pointer; color: var(--text-dim); font-size: 11px;
+  }
+  .layer-row:hover { background: rgba(255,255,255,0.03); }
+  .layer-row.current { background: rgba(91,155,213,0.14); color: var(--acad-blue); }
+  .layer-row input[type=color] { width: 16px; height: 16px; padding: 0; }
+  .layer-row .lname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layer-row .licon { cursor: pointer; opacity: 0.75; width: 16px; text-align: center; flex-shrink:0; }
+  .layer-row .licon:hover { opacity: 1; color: var(--cyan); }
+  .layer-row .licon.off { opacity: 0.3; }
+  .layer-row .ldel { cursor: pointer; opacity: 0; color: var(--text-dim); flex-shrink:0; }
+  .layer-row:hover .ldel { opacity: 0.7; }
+  .layer-row .ldel:hover { color: var(--danger); opacity: 1; }
 </style>
 </head>
 <body>
@@ -243,6 +279,8 @@
       <option value="5">5</option>
       <option value="10">10</option>
     </select>
+    <label class="mini">Layer</label>
+    <select id="layerSelect" title="Current layer — new entities are placed on this layer"></select>
 
     <div class="divider"></div>
     <button class="action" id="undoBtn" title="Undo (Ctrl+Z)">↶ Undo</button>
@@ -258,11 +296,30 @@
     <button class="action" id="exportDxf" title="Export as .dxf">⬇ Export DXF</button>
     <button class="action" id="importDxfBtn" title="Import a .dxf file">⬆ Import DXF</button>
     <input type="file" id="fileImport" accept=".dxf">
+  </div>
 
+  <div id="modifybar">
+    <span class="rowlbl">Modify</span>
+    <button class="tool mtool" data-tool="move" title="Move — or type M/MOVE, Enter — pick entities, base point, destination">✛ Move</button>
+    <button class="tool mtool" data-tool="copy" title="Copy — or type CO/COPY, Enter — pick entities, base point, then one or more destinations">⧉ Copy</button>
+    <button class="tool mtool" data-tool="rotate" title="Rotate — or type RO/ROTATE, Enter — pick entities, base point, then angle">↻ Rotate</button>
+    <button class="tool mtool" data-tool="scale" title="Scale — or type SC/SCALE, Enter — pick entities, base point, then factor">⤢ Scale</button>
+    <button class="tool mtool" data-tool="mirror" title="Mirror — or type MI/MIRROR, Enter — pick entities, then 2 points for the mirror axis">⇌ Mirror</button>
+    <button class="tool mtool" data-tool="offset" title="Offset — or type O/OFFSET, Enter — pick one entity, set distance in Modify Options, click a side">‖ Offset</button>
+    <button class="tool mtool" data-tool="array" title="Array — or type AR/ARRAY, Enter — pick entities, set rows/cols or polar count in Modify Options">▦ Array</button>
     <div class="divider"></div>
-    <button class="action" id="importBargeBtn" title="Import tanks, trailer axles &amp; hull outline from a Barge Ballast export (.json)">⬆ Import from Barge</button>
-    <button class="action" id="exportBargeBtn" title="Export tanks, trailer axles &amp; hull outline back to a Barge Ballast project (.json)">⬇ Export to Barge</button>
-    <input type="file" id="fileImportBarge" accept=".json">
+    <button class="tool mtool" data-tool="trim" title="Trim — or type TR/TRIM, Enter — pick one cutting edge, then click the piece to remove">✂ Trim</button>
+    <button class="tool mtool" data-tool="extend" title="Extend — or type EX/EXTEND, Enter — pick one boundary, then click the line to extend">⇥ Extend</button>
+    <button class="tool mtool" data-tool="fillet" title="Fillet — or type F/FILLET, Enter — pick exactly 2 lines, set radius, Apply">◜ Fillet</button>
+    <button class="tool mtool" data-tool="chamfer" title="Chamfer — or type CHA/CHAMFER, Enter — pick exactly 2 lines, set distance, Apply">◲ Chamfer</button>
+    <div class="divider"></div>
+    <button class="tool mtool" data-tool="matchprop" title="Match Properties — or type MA/MATCHPROP, Enter — pick source entity, then click targets">✒ Match Prop</button>
+    <button class="tool mtool" data-tool="explode" title="Explode — or type X/EXPLODE, Enter — pick rectangles/polylines to break into lines">💥 Explode</button>
+    <button class="tool mtool" data-tool="hatch" title="Hatch — or type H/HATCH, Enter — pick one closed shape, set spacing/angle, Apply">▤ Hatch</button>
+    <button class="tool mtool" data-tool="block" title="Block — or type B/BLOCK, Enter — pick entities, click base point, name the block">⬒ Block</button>
+    <button class="tool mtool" data-tool="insert" title="Insert — or type I/INSERT, Enter — choose a block in Modify Options, click to place">⬓ Insert</button>
+    <div class="divider"></div>
+    <button class="action" id="addLayerBtn" title="Create a new layer">+ Layer</button>
   </div>
 
   <div id="main">
@@ -285,13 +342,21 @@
         <div id="textPrompt">
           <input type="text" id="textInput" placeholder="Text content" autofocus>
         </div>
+        <div id="selBox"></div>
       </div>
       <div id="sidebar">
+        <h3>Layers</h3>
+        <div id="layerList"></div>
+        <button class="formBtn secondary" id="addLayerBtn2">+ New Layer</button>
+
         <h3>Entities</h3>
         <div id="entityList"></div>
 
         <h3>Properties <span id="propsTypeTag"></span></h3>
         <div id="propsBody"><div class="empty-note">No entity selected. Click an entity to edit its exact values.</div></div>
+
+        <h3>Modify Options <span id="modifyTypeTag"></span></h3>
+        <div id="modifyBody"><div class="empty-note">Select entities, then pick a tool from the Modify row above.</div></div>
 
         <h3>Create by Dimensions</h3>
         <div id="manualBody"></div>
@@ -302,10 +367,12 @@
         <div class="field"><span>Units</span><span>mm (unitless)</span></div>
         <h3>Keys</h3>
         <div style="color:var(--text-dim); line-height:1.8; font-size:11px;">
-          Just start typing (anywhere) to enter a command — e.g. <b>L</b>, <b>C</b>, <b>REC</b>, <b>A</b>, <b>PL</b>, <b>T</b>, then <b>Enter</b><br>
-          Esc — cancel draw<br>
-          Enter (with nothing typed) / dblclick — finish polyline<br>
-          Del / Backspace — delete selected<br>
+          Just start typing (anywhere) to enter a command — e.g. <b>L</b>, <b>C</b>, <b>REC</b>, <b>A</b>, <b>PL</b>, <b>T</b>, <b>M</b>, <b>CO</b>, <b>TR</b>, then <b>Enter</b><br>
+          Shift+click — add/remove from selection<br>
+          Drag empty space — window (L→R) / crossing (R→L) select<br>
+          Esc — cancel draw or Modify tool<br>
+          Enter (with nothing typed) / dblclick — finish polyline; Enter also finishes a multi-Copy<br>
+          Del / Backspace — delete selected (all of them)<br>
           Ctrl+Z / Ctrl+Y — undo/redo<br>
           Wheel — zoom (unlimited) · Right-drag or Middle-drag — pan · Middle dblclick — zoom extents<br>
           Press <b>Enter</b> on an empty command line to repeat the last command
@@ -318,7 +385,7 @@
       <div id="cmdLog"></div>
       <div id="cmdInputRow">
         <span class="cmdLabel">Command:</span>
-        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Start typing anywhere on the page — e.g. LINE, CIRCLE, REC, ARC, PLINE, TEXT, MOVE, ERASE, UNDO, ZOOM, HELP — then press Enter">
+        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Type a command — LINE, REC, CIRCLE, ARC, PLINE, TEXT, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, ARRAY, TRIM, EXTEND, FILLET, CHAMFER, MATCHPROP, EXPLODE, HATCH, BLOCK, INSERT, LAYER, UNDO, ZOOM, HELP — then Enter">
       </div>
     </div>
 
@@ -349,8 +416,9 @@
   const infoZoom = document.getElementById('infoZoom');
 
   // ---------- State ----------
-  let entities = [];      // {id, type, ..., color, width}
-  let selectedId = null;
+  let entities = [];      // {id, type, layer, ..., color, width}
+  let selectedId = null;  // "primary" selection — drives the Properties panel
+  let selectedIds = new Set(); // full selection set — drives Modify tools
   let tool = 'select';
   let history = [];       // undo stack (snapshots)
   let future = [];        // redo stack
@@ -361,9 +429,29 @@
   let dragging = null;    // {id, startWorld, origEntitySnapshot}
   let panStart = null;
   let mouseWorld = { x: 0, y: 0 };
+  let selBoxStart = null; // {sx,sy,wx,wy} — rubber-band window/crossing select
+  let modifyGhosts = [];  // live-preview entities while a Move/Copy/Rotate/Scale/Mirror is in progress
 
   // Status-bar modes (classic AutoCAD toggles)
   let modeSnap = true, modeGrid = true, modeOrtho = false, modePolar = false, modeOsnap = true;
+
+  // ---------- Layers ----------
+  let layers = [ { name:'0', color:'#4fd1c5', visible:true, locked:false } ];
+  let currentLayer = '0';
+  function getLayer(name){ return layers.find(l => l.name === name) || layers[0]; }
+  function layerVisible(name){ const l = getLayer(name); return l ? l.visible : true; }
+  function layerLocked(name){ const l = getLayer(name); return l ? l.locked : false; }
+
+  // ---------- Blocks (BLOCK / INSERT) ----------
+  let blocks = {}; // name -> [{...entity relative to base, no id}]
+
+  // ---------- Osnap ----------
+  let currentOsnap = null; // {x,y,kind} last resolved snap point, for the marker + placePoint
+
+  // ---------- Modify-tool state machine ----------
+  let modifyStage = 0;
+  let modifyTemp = {};      // base points, snapshots, etc, per active modify tool
+  let modifyBoundaryId = null; // trim/extend cutting edge, matchprop source id
 
   function applyOrtho(from, world){
     if (!modeOrtho || !from) return world;
@@ -403,15 +491,15 @@
     if (!history.length) return;
     future.push(JSON.stringify(entities));
     entities = JSON.parse(history.pop());
-    selectedId = null;
-    render(); renderList(); buildPropsForm();
+    selectedId = null; selectedIds = new Set();
+    render(); renderList(); buildPropsForm(); buildModifyForm();
   }
   function redo(){
     if (!future.length) return;
     history.push(JSON.stringify(entities));
     entities = JSON.parse(future.pop());
-    selectedId = null;
-    render(); renderList(); buildPropsForm();
+    selectedId = null; selectedIds = new Set();
+    render(); renderList(); buildPropsForm(); buildModifyForm();
   }
 
   // ---------- Coordinate transforms ----------
@@ -442,17 +530,95 @@
     return { x: Math.round(p.x / s) * s, y: Math.round(p.y / s) * s };
   }
 
+  // ---------- Object snap (Osnap) ----------
+  // Gathers candidate snap points (endpoints, midpoints, centers, quadrants) from
+  // every visible entity, then resolveWorldPoint() picks the closest one within a
+  // screen-pixel tolerance — taking priority over grid snap, same as real AutoCAD.
+  function getOsnapCandidates(){
+    const pts = [];
+    for (const e of entities){
+      if (!layerVisible(e.layer)) continue;
+      if (e.type === 'line'){
+        pts.push({x:e.x1,y:e.y1,kind:'endpoint'}, {x:e.x2,y:e.y2,kind:'endpoint'});
+        pts.push({x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2, kind:'midpoint'});
+      } else if (e.type === 'rect'){
+        const corners = [[e.x1,e.y1],[e.x2,e.y1],[e.x2,e.y2],[e.x1,e.y2]];
+        corners.forEach(([x,y]) => pts.push({x,y,kind:'endpoint'}));
+        for (let i=0;i<4;i++){ const a=corners[i], b=corners[(i+1)%4]; pts.push({x:(a[0]+b[0])/2, y:(a[1]+b[1])/2, kind:'midpoint'}); }
+      } else if (e.type === 'circle'){
+        pts.push({x:e.cx,y:e.cy,kind:'center'});
+        [0,90,180,270].forEach(a => { const r=a*Math.PI/180; pts.push({x:e.cx+e.r*Math.cos(r), y:e.cy+e.r*Math.sin(r), kind:'quadrant'}); });
+      } else if (e.type === 'arc'){
+        pts.push({x:e.cx,y:e.cy,kind:'center'});
+        const sr=e.startAngle*Math.PI/180, er=e.endAngle*Math.PI/180;
+        pts.push({x:e.cx+e.r*Math.cos(sr), y:e.cy+e.r*Math.sin(sr), kind:'endpoint'});
+        pts.push({x:e.cx+e.r*Math.cos(er), y:e.cy+e.r*Math.sin(er), kind:'endpoint'});
+      } else if (e.type === 'polyline'){
+        e.points.forEach(p => pts.push({x:p.x,y:p.y,kind:'endpoint'}));
+        for (let i=0;i<e.points.length-1;i++){ const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
+        if (e.closed && e.points.length>1){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
+      } else if (e.type === 'text'){
+        pts.push({x:e.x,y:e.y,kind:'endpoint'});
+      }
+    }
+    return pts;
+  }
+  function resolveOsnap(sx, sy){
+    if (!modeOsnap || tool === 'select') return null;
+    const cands = getOsnapCandidates();
+    let best = null, bestD = 11; // px tolerance, independent of zoom
+    for (const p of cands){
+      const s = worldToScreen(p.x, p.y);
+      const d = Math.hypot(s.x/devicePixelRatio - sx, s.y/devicePixelRatio - sy);
+      if (d < bestD){ bestD = d; best = p; }
+    }
+    return best;
+  }
+  // The point-resolution entry point used by both mousemove (preview) and
+  // mousedown (commit): object snap wins when in range, else fall back to grid snap.
+  function resolveWorldPoint(sx, sy){
+    const snap = resolveOsnap(sx, sy);
+    if (snap){ currentOsnap = { x: snap.x, y: snap.y, kind: snap.kind }; return { x: snap.x, y: snap.y }; }
+    currentOsnap = null;
+    return snapPt(screenToWorld(sx, sy));
+  }
+
   // ---------- Rendering ----------
   function render(){
     const rect = wrap.getBoundingClientRect();
     ctx.setTransform(1,0,0,1,0,0);
     ctx.clearRect(0,0,canvas.width, canvas.height);
     drawGrid(rect);
-    for (const e of entities) drawEntity(e, e.id === selectedId);
+    for (const e of entities){
+      if (!layerVisible(e.layer)) continue;
+      drawEntity(e, e.id === selectedId || selectedIds.has(e.id));
+    }
     if (drawing) drawEntity(drawing, false, true);
+    for (const g of modifyGhosts) drawEntity(g, false, true);
+    if (currentOsnap) drawOsnapMarker(currentOsnap);
     infoCount.textContent = entities.length;
     infoZoom.textContent = Math.round(view.scale / 20 * 100) + '%';
     if (statZoomEl) statZoomEl.textContent = 'Zoom: ' + Math.round(view.scale / 20 * 100) + '%';
+  }
+
+  function drawOsnapMarker(p){
+    const s = worldToScreen(p.x, p.y);
+    const x = s.x/devicePixelRatio, y = s.y/devicePixelRatio;
+    ctx.save();
+    ctx.strokeStyle = '#ffd54a'; ctx.lineWidth = 1.6; ctx.shadowBlur = 0;
+    const k = p.kind;
+    if (k === 'endpoint'){
+      ctx.strokeRect(x-5, y-5, 10, 10);
+    } else if (k === 'midpoint'){
+      ctx.beginPath(); ctx.moveTo(x, y-6); ctx.lineTo(x-6, y+5); ctx.lineTo(x+6, y+5); ctx.closePath(); ctx.stroke();
+    } else if (k === 'center'){
+      ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI*2); ctx.stroke();
+    } else if (k === 'quadrant'){
+      ctx.beginPath(); ctx.moveTo(x,y-6); ctx.lineTo(x+6,y); ctx.lineTo(x,y+6); ctx.lineTo(x-6,y); ctx.closePath(); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(x-6,y); ctx.lineTo(x+6,y); ctx.moveTo(x,y-6); ctx.lineTo(x,y+6); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function drawGrid(rect){
@@ -551,6 +717,25 @@
         ctx.fillText(e.content, p.x, p.y);
         break;
       }
+      case 'hatch': {
+        ctx.lineWidth = Math.min(e.width||1, 1);
+        const b = e.boundary;
+        if (b.kind === 'circle'){
+          const c = toS(b.cx, b.cy);
+          ctx.beginPath(); ctx.arc(c.x, c.y, b.r*view.scale, 0, Math.PI*2); ctx.stroke();
+        } else {
+          ctx.beginPath();
+          b.points.forEach((p,i)=>{ const s=toS(p.x,p.y); i===0?ctx.moveTo(s.x,s.y):ctx.lineTo(s.x,s.y); });
+          ctx.closePath(); ctx.stroke();
+        }
+        ctx.beginPath();
+        for (const seg of (e.lines||[])){
+          const a = toS(seg.x1, seg.y1), c = toS(seg.x2, seg.y2);
+          ctx.moveTo(a.x,a.y); ctx.lineTo(c.x,c.y);
+        }
+        ctx.stroke();
+        break;
+      }
     }
     if (selected){
       ctx.shadowBlur = 0;
@@ -592,6 +777,7 @@
     const tol = (modeOsnap ? 9 : 6) / view.scale;
     for (let i = entities.length-1; i>=0; i--){
       const e = entities[i];
+      if (!layerVisible(e.layer) || layerLocked(e.layer)) continue;
       if (e.type === 'line'){
         if (distToSeg(world, {x:e.x1,y:e.y1}, {x:e.x2,y:e.y2}) < tol) return e;
       } else if (e.type === 'rect'){
@@ -619,9 +805,35 @@
         }
       } else if (e.type === 'text'){
         if (Math.hypot(world.x-e.x, world.y-e.y) < (e.height||3)) return e;
+      } else if (e.type === 'hatch'){
+        if (hitTestBoundary(world, e.boundary, tol)) return e;
       }
     }
     return null;
+  }
+  function hitTestBoundary(world, b, tol){
+    if (b.kind === 'circle'){
+      return Math.abs(Math.hypot(world.x-b.cx, world.y-b.cy) - b.r) < tol || Math.hypot(world.x-b.cx, world.y-b.cy) < b.r;
+    }
+    if (b.kind === 'polygon'){
+      // edge proximity or point-in-polygon
+      const pts = b.points;
+      for (let j=0;j<pts.length;j++){
+        const a = pts[j], c = pts[(j+1)%pts.length];
+        if (distToSeg(world, a, c) < tol) return true;
+      }
+      return pointInPolygon(world, pts);
+    }
+    return false;
+  }
+  function pointInPolygon(p, pts){
+    let inside = false;
+    for (let i=0, j=pts.length-1; i<pts.length; j=i++){
+      const xi=pts[i].x, yi=pts[i].y, xj=pts[j].x, yj=pts[j].y;
+      const intersect = ((yi>p.y) !== (yj>p.y)) && (p.x < (xj-xi)*(p.y-yi)/(yj-yi)+xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 
   // ---------- Entity list panel ----------
@@ -629,42 +841,119 @@
     entityListEl.innerHTML = '';
     for (const e of entities){
       const row = document.createElement('div');
-      row.className = 'entity-row' + (e.id===selectedId ? ' selected':'');
+      row.className = 'entity-row' + (e.id===selectedId || selectedIds.has(e.id) ? ' selected':'');
       row.innerHTML = `<span class="swatch" style="background:${e.color}"></span>
         <span class="lbl">${e.type} #${e.id}</span>
         <span class="del" title="Delete">✕</span>`;
       row.querySelector('.lbl').onclick = () => selectEntity(e.id);
       row.querySelector('.swatch').onclick = () => selectEntity(e.id);
-      row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); snapshot(); entities = entities.filter(x=>x.id!==e.id); if(selectedId===e.id) selectedId=null; render(); renderList(); buildPropsForm(); };
+      row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); snapshot(); entities = entities.filter(x=>x.id!==e.id); if(selectedId===e.id) selectedId=null; selectedIds.delete(e.id); render(); renderList(); buildPropsForm(); buildModifyForm(); };
       entityListEl.appendChild(row);
     }
   }
 
+  // ---------- Layers panel ----------
+  const layerListEl = document.getElementById('layerList');
+  const layerSelectEl = document.getElementById('layerSelect');
+
+  function renderLayers(){
+    layerListEl.innerHTML = '';
+    for (const l of layers){
+      const row = document.createElement('div');
+      row.className = 'layer-row' + (l.name===currentLayer ? ' current':'');
+      row.innerHTML = `
+        <span class="licon ${l.visible?'':'off'}" data-act="vis" title="Toggle visibility">${l.visible?'👁':'🚫'}</span>
+        <span class="licon ${l.locked?'':'off'}" data-act="lock" title="Toggle lock">${l.locked?'🔒':'🔓'}</span>
+        <input type="color" data-act="color" value="${l.color}" title="Layer color (organizational)">
+        <span class="lname" data-act="pick" title="Set as current layer">${l.name}${l.name===currentLayer?' (current)':''}</span>
+        <span class="ldel" data-act="del" title="Delete layer">✕</span>`;
+      row.querySelector('[data-act=pick]').onclick = () => { currentLayer = l.name; renderLayers(); syncLayerSelect(); };
+      row.querySelector('[data-act=vis]').onclick = (ev) => { ev.stopPropagation(); l.visible = !l.visible; renderLayers(); render(); renderList(); };
+      row.querySelector('[data-act=lock]').onclick = (ev) => { ev.stopPropagation(); l.locked = !l.locked; renderLayers(); };
+      row.querySelector('[data-act=color]').addEventListener('input', (ev) => { l.color = ev.target.value; renderLayers(); });
+      row.querySelector('[data-act=del]').onclick = (ev) => {
+        ev.stopPropagation();
+        if (l.name === '0'){ flashHint('Layer "0" cannot be deleted.'); return; }
+        const inUse = entities.some(e => e.layer === l.name);
+        if (inUse && !confirm(`Layer "${l.name}" has entities on it. Move them to layer "0" and delete "${l.name}"?`)) return;
+        snapshot();
+        entities.forEach(e => { if (e.layer === l.name) e.layer = '0'; });
+        layers = layers.filter(x => x.name !== l.name);
+        if (currentLayer === l.name) currentLayer = '0';
+        renderLayers(); syncLayerSelect(); render(); renderList();
+      };
+      layerListEl.appendChild(row);
+    }
+  }
+  function syncLayerSelect(){
+    layerSelectEl.innerHTML = layers.map(l => `<option value="${l.name}" ${l.name===currentLayer?'selected':''}>${l.name}</option>`).join('');
+  }
+  layerSelectEl.addEventListener('change', () => { currentLayer = layerSelectEl.value; renderLayers(); });
+
+  function addLayer(){
+    let base = 'Layer', n = 1;
+    while (layers.some(l => l.name === (base+n))) n++;
+    const name = (prompt('New layer name:', base+n) || '').trim();
+    if (!name) return;
+    if (layers.some(l => l.name === name)){ flashHint(`Layer "${name}" already exists.`); return; }
+    const palette = ['#4fd1c5','#e0a458','#5b9bd5','#e0685f','#8bd17c','#c792ea','#f2c94c'];
+    layers.push({ name, color: palette[layers.length % palette.length], visible:true, locked:false });
+    currentLayer = name;
+    renderLayers(); syncLayerSelect();
+  }
+  document.getElementById('addLayerBtn').onclick = addLayer;
+  document.getElementById('addLayerBtn2').onclick = addLayer;
+
   // ---------- Tool switching ----------
   const toolButtons = document.querySelectorAll('button.tool');
   const hints = {
-    select: 'Select tool. Click an entity to select and drag to move. Del to delete.',
+    select: 'Select tool. Click to select (Shift+click to add), drag an entity to move, drag empty space to window/crossing-select. Del to delete.',
     line: 'Line: click start point, then click end point.',
     rect: 'Rectangle: click one corner, then the opposite corner.',
     circle: 'Circle: click center, then click to set radius.',
     arc: 'Arc: click center, click for radius + start angle, click again for end angle.',
     polyline: 'Polyline: click points. Press Enter or double-click to finish, Esc to cancel.',
-    text: 'Text: click a location, then type your text and press Enter.'
+    text: 'Text: click a location, then type your text and press Enter.',
+    move: 'Move: select entities first. Click a base point, then the destination point.',
+    copy: 'Copy: select entities first. Click a base point, then one or more destination points (Enter/Esc to finish).',
+    rotate: 'Rotate: select entities first. Click the base point, then drag/click to set the angle.',
+    scale: 'Scale: select entities first. Click the base point, then drag/click — distance from base = scale factor.',
+    mirror: 'Mirror: select entities first. Click two points to define the mirror axis. Source is kept.',
+    offset: 'Offset: select ONE entity, set distance in Modify Options, then click the side to offset toward.',
+    array: 'Array: select entities first, set rows/cols or polar count in Modify Options, then Apply.',
+    trim: 'Trim: select ONE cutting edge first, then click the piece of a line you want removed.',
+    extend: 'Extend: select ONE boundary first, then click near the end of the line you want extended.',
+    fillet: 'Fillet: select exactly 2 lines, set a radius in Modify Options, then Apply.',
+    chamfer: 'Chamfer: select exactly 2 lines, set a distance in Modify Options, then Apply.',
+    matchprop: 'Match Properties: select the SOURCE entity first, then click target entities to copy its color/width/layer.',
+    explode: 'Explode: select rectangles/polylines, then Apply in Modify Options to break them into lines.',
+    hatch: 'Hatch: select ONE closed shape (circle, rect, or closed polyline), set spacing/angle, then Apply.',
+    block: 'Block: select entities first, then click the base point and name the block.',
+    insert: 'Insert: pick a block in Modify Options, then click to place it.'
   };
   function setTool(t){
     tool = t;
     drawing = null; polyPoints = [];
     lineStart = null; rectStart = null; circleCenter = null; arcStage = 0; arcTemp = {};
+    modifyStage = 0; modifyTemp = {}; currentOsnap = null;
+    if (['trim','extend','matchprop'].includes(t)){
+      modifyBoundaryId = activeSelectionIds().length === 1 ? activeSelectionIds()[0] : null;
+      if (modifyBoundaryId == null) flashHint('Select exactly one ' + (t==='matchprop'?'source':'cutting/boundary') + ' entity first.');
+    } else {
+      modifyBoundaryId = null;
+    }
     toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === t));
     hint.textContent = hints[t] || '';
     if (statToolEl) statToolEl.textContent = 'Tool: ' + t.toUpperCase();
     render();
     buildManualForm();
+    buildModifyForm();
   }
 
   function selectEntity(id){
     selectedId = id;
-    render(); renderList(); buildPropsForm();
+    selectedIds = id != null ? new Set([id]) : new Set();
+    render(); renderList(); buildPropsForm(); buildModifyForm();
   }
   toolButtons.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
 
@@ -677,19 +966,28 @@
     // panel, text prompt, color/select controls, etc.) let that field handle its own keys.
     if (inEditable) return;
 
-    if (e.key === 'Escape') { cancelDrawing(); log('*Cancel*', 'prompt'); return; }
+    if (e.key === 'Escape') {
+      cancelDrawing();
+      if (tool !== 'select') setTool('select');
+      log('*Cancel*', 'prompt');
+      return;
+    }
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (selectedId != null) {
+      const ids = activeSelectionIds();
+      if (ids.length) {
         snapshot();
-        entities = entities.filter(x=>x.id!==selectedId);
-        selectedId = null; render(); renderList(); buildPropsForm();
+        entities = entities.filter(x => !ids.includes(x.id));
+        selectedId = null; selectedIds = new Set();
+        render(); renderList(); buildPropsForm(); buildModifyForm();
+        log(`${ids.length} entit${ids.length===1?'y':'ies'} erased.`, 'prompt');
       }
       return;
     }
 
     if (e.key === 'Enter') {
-      if (tool === 'polyline' && polyPoints.length >= 2) finishPolyline();
+      if (tool === 'polyline' && polyPoints.length >= 2) { finishPolyline(); return; }
+      if (tool === 'copy' && modifyStage === 1) { finishModify(`Copy finished.`); return; }
       return;
     }
 
@@ -717,7 +1015,7 @@
   let circleCenter = null;
 
   function currentStyle(){
-    return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5 };
+    return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5, layer: currentLayer };
   }
 
   function finishPolyline(){
@@ -731,15 +1029,6 @@
 
   // Core point-input logic, shared by canvas clicks and command-line coordinate entry.
   function placePoint(world, screenPt){
-    if (tool === 'select'){
-      const hitE = hitTest(world);
-      selectEntity(hitE ? hitE.id : null);
-      if (hitE){
-        dragging = { id: hitE.id, startWorld: world, orig: JSON.parse(JSON.stringify(hitE)) };
-      }
-      return;
-    }
-
     if (tool === 'line'){
       if (!lineStart){ lineStart = applyOrtho(null, world); cmdPrompt('Specify next point:'); }
       else {
@@ -802,8 +1091,432 @@
       else { awaitingCmdText = world; cmdPrompt('Enter text:'); }
       return;
     }
+
+    // ---- Modify tools ----
+    if (tool === 'move' || tool === 'copy'){
+      const ids = activeSelectionIds();
+      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Move/Copy.'); setTool('select'); return; }
+      if (modifyStage === 0){
+        modifyTemp.base = world;
+        modifyTemp.orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
+        modifyStage = 1;
+        cmdPrompt('Specify destination point:');
+      } else {
+        const dx = world.x - modifyTemp.base.x, dy = world.y - modifyTemp.base.y;
+        snapshot();
+        if (tool === 'move'){
+          ids.forEach((id,i) => translateEntity(entities.find(x=>x.id===id), modifyTemp.orig[i], dx, dy));
+          finishModify(`Moved ${ids.length} entit${ids.length===1?'y':'ies'}.`);
+        } else {
+          const newIds = [];
+          modifyTemp.orig.forEach(o => { const c = JSON.parse(JSON.stringify(o)); c.id = uid(); translateEntity(c, o, dx, dy); entities.push(c); newIds.push(c.id); });
+          log(`Copied ${ids.length} entit${ids.length===1?'y':'ies'}.`, 'prompt');
+          render(); renderList();
+          // COPY supports multiple placements — stay active for another destination click
+          selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
+          cmdPrompt('Specify next destination point (Enter/Esc to finish):');
+        }
+      }
+      return;
+    }
+
+    if (tool === 'rotate'){
+      const ids = activeSelectionIds();
+      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Rotate.'); setTool('select'); return; }
+      if (modifyStage === 0){
+        modifyTemp.base = world;
+        modifyTemp.orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
+        modifyStage = 1;
+        cmdPrompt('Specify rotation angle (drag, or type degrees):');
+      } else {
+        const ang = Math.atan2(world.y-modifyTemp.base.y, world.x-modifyTemp.base.x) * 180/Math.PI;
+        snapshot();
+        ids.forEach((id,i) => rotateEntity(entities.find(x=>x.id===id), modifyTemp.orig[i], modifyTemp.base, ang));
+        finishModify(`Rotated ${ids.length} entit${ids.length===1?'y':'ies'} by ${ang.toFixed(2)}°.`);
+      }
+      return;
+    }
+
+    if (tool === 'scale'){
+      const ids = activeSelectionIds();
+      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Scale.'); setTool('select'); return; }
+      if (modifyStage === 0){
+        modifyTemp.base = world;
+        modifyTemp.orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
+        modifyStage = 1;
+        cmdPrompt('Specify scale factor (drag, or type a number):');
+      } else {
+        const factor = Math.max(0.001, Math.hypot(world.x-modifyTemp.base.x, world.y-modifyTemp.base.y));
+        snapshot();
+        ids.forEach((id,i) => scaleEntity(entities.find(x=>x.id===id), modifyTemp.orig[i], modifyTemp.base, factor));
+        finishModify(`Scaled ${ids.length} entit${ids.length===1?'y':'ies'} by ${factor.toFixed(3)}x.`);
+      }
+      return;
+    }
+
+    if (tool === 'mirror'){
+      const ids = activeSelectionIds();
+      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Mirror.'); setTool('select'); return; }
+      if (modifyStage === 0){
+        modifyTemp.p1 = world; modifyStage = 1;
+        cmdPrompt('Specify second point of mirror axis:');
+      } else {
+        snapshot();
+        const newIds = [];
+        ids.forEach(id => { const src = entities.find(x=>x.id===id); const c = mirrorEntityCopy(src, modifyTemp.p1, world); c.id = uid(); entities.push(c); newIds.push(c.id); });
+        selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
+        finishModify(`Mirrored ${ids.length} entit${ids.length===1?'y':'ies'} (source kept).`);
+      }
+      return;
+    }
+
+    if (tool === 'offset'){
+      const ids = activeSelectionIds();
+      if (ids.length !== 1){ flashHint('Select exactly one entity, then Offset.'); setTool('select'); return; }
+      const src = entities.find(x=>x.id===ids[0]);
+      const dist = Math.max(0.0001, parseFloat(document.getElementById('mo_dist')?.value) || 1);
+      const copy = offsetEntity(src, dist, world);
+      if (!copy){ flashHint('Offset isn\'t supported for this entity type yet.'); return; }
+      snapshot();
+      copy.id = uid();
+      entities.push(copy);
+      selectEntity(copy.id);
+      finishModify('Offset created.');
+      return;
+    }
+
+    if (tool === 'trim' || tool === 'extend'){
+      if (modifyBoundaryId == null){ flashHint('Select one cutting/boundary entity first, then ' + (tool==='trim'?'Trim.':'Extend.')); setTool('select'); return; }
+      const boundary = entities.find(x => x.id === modifyBoundaryId);
+      const target = hitTest(world);
+      if (!target || target.id === modifyBoundaryId || target.type !== 'line'){
+        flashHint('Click on a LINE entity near the end you want to ' + tool + '.'); return;
+      }
+      const ok = tool === 'trim' ? trimLineAt(target, boundary, world) : extendLineAt(target, boundary, world);
+      if (ok){ snapshot_noop_already_applied(); render(); renderList(); log((tool==='trim'?'Trimmed.':'Extended.'), 'prompt'); }
+      else flashHint('No intersection found with the boundary in that direction.');
+      return;
+    }
+
+    if (tool === 'matchprop'){
+      if (modifyBoundaryId == null){ flashHint('Select the SOURCE entity first, then Match Properties.'); setTool('select'); return; }
+      const src = entities.find(x => x.id === modifyBoundaryId);
+      const target = hitTest(world);
+      if (!target){ return; }
+      snapshot();
+      target.color = src.color; target.width = src.width; target.layer = src.layer;
+      render(); renderList(); buildPropsForm();
+      log(`Properties matched onto ${target.type} #${target.id}. Click more targets, Esc to finish.`, 'prompt');
+      return;
+    }
+
+    if (tool === 'block'){
+      const ids = activeSelectionIds();
+      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Block.'); setTool('select'); return; }
+      const name = (prompt('Block name:', 'Block' + (Object.keys(blocks).length+1)) || '').trim();
+      if (!name){ setTool('select'); return; }
+      blocks[name] = ids.map(id => { const c = JSON.parse(JSON.stringify(entities.find(x=>x.id===id))); delete c.id; translateEntity(c, c, -world.x, -world.y); return c; });
+      flashHint(`Block "${name}" defined (${ids.length} entities).`);
+      log(`Block "${name}" created from ${ids.length} entities, base point ${world.x.toFixed(2)},${world.y.toFixed(2)}.`, 'prompt');
+      buildModifyForm();
+      setTool('select');
+      return;
+    }
+
+    if (tool === 'insert'){
+      const name = document.getElementById('mo_blockpick')?.value;
+      if (!name || !blocks[name]){ flashHint('Pick a block to insert in Modify Options first.'); return; }
+      snapshot();
+      const newIds = [];
+      blocks[name].forEach(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); translateEntity(c, c, world.x, world.y); entities.push(c); newIds.push(c.id); });
+      selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
+      render(); renderList(); buildPropsForm();
+      log(`Inserted block "${name}" at ${world.x.toFixed(2)},${world.y.toFixed(2)}.`, 'prompt');
+      return;
+    }
   }
   let awaitingCmdText = null;
+
+  function activeSelectionIds(){
+    if (selectedIds.size) return [...selectedIds];
+    if (selectedId != null) return [selectedId];
+    return [];
+  }
+  function finishModify(msg){
+    modifyStage = 0; modifyTemp = {};
+    render(); renderList(); buildPropsForm();
+    log(msg, 'prompt');
+    setTool('select');
+  }
+  // Some in-place edits (trim/extend) call snapshot() themselves before mutating;
+  // this is just a readability marker at the call site.
+  function snapshot_noop_already_applied(){}
+
+  // ---- Geometry helpers shared by Modify tools ----
+  function translateEntity(e, o, dx, dy){
+    if (e.type === 'line' || e.type === 'rect'){ e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; }
+    else if (e.type === 'circle' || e.type === 'arc'){ e.cx=o.cx+dx; e.cy=o.cy+dy; }
+    else if (e.type === 'polyline'){ e.points = o.points.map(p => ({x:p.x+dx, y:p.y+dy})); }
+    else if (e.type === 'text'){ e.x=o.x+dx; e.y=o.y+dy; }
+    else if (e.type === 'hatch'){ e.boundary = translateBoundary(o.boundary, dx, dy); e.lines = (o.lines||[]).map(s=>({x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy})); }
+  }
+  function translateBoundary(b, dx, dy){
+    if (b.kind === 'circle') return { kind:'circle', cx:b.cx+dx, cy:b.cy+dy, r:b.r };
+    return { kind:'polygon', points: b.points.map(p=>({x:p.x+dx,y:p.y+dy})) };
+  }
+  function rotatePt(p, base, rad){
+    const dx = p.x-base.x, dy = p.y-base.y;
+    return { x: base.x + dx*Math.cos(rad) - dy*Math.sin(rad), y: base.y + dx*Math.sin(rad) + dy*Math.cos(rad) };
+  }
+  function rotateEntity(e, o, base, angDeg){
+    const rad = angDeg*Math.PI/180;
+    if (e.type === 'line' || e.type === 'rect'){
+      const p1 = rotatePt({x:o.x1,y:o.y1}, base, rad), p2 = rotatePt({x:o.x2,y:o.y2}, base, rad);
+      if (e.type === 'rect'){
+        // a rotated rect can't stay axis-aligned — convert to a closed polyline
+        const corners = [[o.x1,o.y1],[o.x2,o.y1],[o.x2,o.y2],[o.x1,o.y2]].map(([x,y]) => rotatePt({x,y}, base, rad));
+        Object.assign(e, { type:'polyline', points: corners, closed:true });
+        delete e.x1; delete e.y1; delete e.x2; delete e.y2;
+      } else { e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; }
+    } else if (e.type === 'circle'){
+      const c = rotatePt({x:o.cx,y:o.cy}, base, rad); e.cx=c.x; e.cy=c.y;
+    } else if (e.type === 'arc'){
+      const c = rotatePt({x:o.cx,y:o.cy}, base, rad); e.cx=c.x; e.cy=c.y;
+      e.startAngle = o.startAngle + angDeg; e.endAngle = o.endAngle + angDeg;
+    } else if (e.type === 'polyline'){
+      e.points = o.points.map(p => rotatePt(p, base, rad));
+    } else if (e.type === 'text'){
+      const p = rotatePt({x:o.x,y:o.y}, base, rad); e.x=p.x; e.y=p.y;
+    } else if (e.type === 'hatch'){
+      const b = o.boundary;
+      e.boundary = b.kind==='circle' ? { kind:'circle', cx: rotatePt({x:b.cx,y:b.cy},base,rad).x, cy: rotatePt({x:b.cx,y:b.cy},base,rad).y, r:b.r }
+                                      : { kind:'polygon', points: b.points.map(p=>rotatePt(p,base,rad)) };
+      e.lines = (o.lines||[]).map(s => { const a=rotatePt({x:s.x1,y:s.y1},base,rad), c=rotatePt({x:s.x2,y:s.y2},base,rad); return {x1:a.x,y1:a.y,x2:c.x,y2:c.y}; });
+    }
+  }
+  function scalePt(p, base, f){ return { x: base.x + (p.x-base.x)*f, y: base.y + (p.y-base.y)*f }; }
+  function scaleEntity(e, o, base, f){
+    if (e.type === 'line' || e.type === 'rect'){
+      const p1=scalePt({x:o.x1,y:o.y1},base,f), p2=scalePt({x:o.x2,y:o.y2},base,f);
+      e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y;
+    } else if (e.type === 'circle' || e.type === 'arc'){
+      const c = scalePt({x:o.cx,y:o.cy}, base, f); e.cx=c.x; e.cy=c.y; e.r = Math.max(0.001, o.r*f);
+    } else if (e.type === 'polyline'){
+      e.points = o.points.map(p => scalePt(p, base, f));
+    } else if (e.type === 'text'){
+      const p = scalePt({x:o.x,y:o.y}, base, f); e.x=p.x; e.y=p.y; e.height = Math.max(0.05, (o.height||3)*f);
+    } else if (e.type === 'hatch'){
+      const b = o.boundary;
+      e.boundary = b.kind==='circle' ? { kind:'circle', cx: scalePt({x:b.cx,y:b.cy},base,f).x, cy: scalePt({x:b.cx,y:b.cy},base,f).y, r: Math.max(0.001,b.r*f) }
+                                      : { kind:'polygon', points: b.points.map(p=>scalePt(p,base,f)) };
+      e.lines = (o.lines||[]).map(s => { const a=scalePt({x:s.x1,y:s.y1},base,f), c=scalePt({x:s.x2,y:s.y2},base,f); return {x1:a.x,y1:a.y,x2:c.x,y2:c.y}; });
+    }
+  }
+  function mirrorPt(p, a, b){
+    const dx=b.x-a.x, dy=b.y-a.y; const len2=dx*dx+dy*dy || 1;
+    const t = ((p.x-a.x)*dx + (p.y-a.y)*dy)/len2;
+    const fx = a.x+t*dx, fy = a.y+t*dy;
+    return { x: 2*fx-p.x, y: 2*fy-p.y };
+  }
+  function mirrorEntityCopy(src, a, b){
+    const c = JSON.parse(JSON.stringify(src));
+    if (c.type === 'line' || c.type === 'rect'){
+      const p1=mirrorPt({x:c.x1,y:c.y1},a,b), p2=mirrorPt({x:c.x2,y:c.y2},a,b);
+      if (c.type === 'rect'){ Object.assign(c, {type:'polyline', points:[p1,{x:p2.x,y:p1.y},p2,{x:p1.x,y:p2.y}], closed:true}); delete c.x1;delete c.y1;delete c.x2;delete c.y2; }
+      else { c.x1=p1.x; c.y1=p1.y; c.x2=p2.x; c.y2=p2.y; }
+    } else if (c.type === 'circle'){
+      const p = mirrorPt({x:c.cx,y:c.cy},a,b); c.cx=p.x; c.cy=p.y;
+    } else if (c.type === 'arc'){
+      const p = mirrorPt({x:c.cx,y:c.cy},a,b); c.cx=p.x; c.cy=p.y;
+      const s0 = mirrorPt({x:c.cx+ (src.r)*Math.cos(src.startAngle*Math.PI/180), y:c.cy+(src.r)*Math.sin(src.startAngle*Math.PI/180)}, a, b);
+      const e0 = mirrorPt({x:c.cx+ (src.r)*Math.cos(src.endAngle*Math.PI/180), y:c.cy+(src.r)*Math.sin(src.endAngle*Math.PI/180)}, a, b);
+      c.startAngle = Math.atan2(e0.y-p.y, e0.x-p.x)*180/Math.PI;
+      c.endAngle = Math.atan2(s0.y-p.y, s0.x-p.x)*180/Math.PI;
+    } else if (c.type === 'polyline'){
+      c.points = c.points.map(p => mirrorPt(p,a,b));
+    } else if (c.type === 'text'){
+      const p = mirrorPt({x:c.x,y:c.y},a,b); c.x=p.x; c.y=p.y;
+    }
+    return c;
+  }
+
+  // ---- Offset ----
+  function offsetEntity(src, dist, sidePoint){
+    const c = JSON.parse(JSON.stringify(src));
+    delete c.id;
+    if (src.type === 'line'){
+      const dx = src.x2-src.x1, dy = src.y2-src.y1, len = Math.hypot(dx,dy) || 1;
+      const nx = -dy/len, ny = dx/len; // unit normal
+      const side = ((sidePoint.x-src.x1)*nx + (sidePoint.y-src.y1)*ny) >= 0 ? 1 : -1;
+      c.x1 = src.x1 + nx*dist*side; c.y1 = src.y1 + ny*dist*side;
+      c.x2 = src.x2 + nx*dist*side; c.y2 = src.y2 + ny*dist*side;
+      return c;
+    }
+    if (src.type === 'circle' || src.type === 'arc'){
+      const d = Math.hypot(sidePoint.x-src.cx, sidePoint.y-src.cy);
+      c.r = Math.max(0.001, d < src.r ? src.r - dist : src.r + dist);
+      return c;
+    }
+    if (src.type === 'rect'){
+      const cx=(src.x1+src.x2)/2, cy=(src.y1+src.y2)/2;
+      const inside = sidePoint.x>Math.min(src.x1,src.x2) && sidePoint.x<Math.max(src.x1,src.x2) && sidePoint.y>Math.min(src.y1,src.y2) && sidePoint.y<Math.max(src.y1,src.y2);
+      const s = inside ? -1 : 1;
+      const sx = src.x1<src.x2?1:-1, sy = src.y1<src.y2?1:-1;
+      c.x1 = src.x1 - sx*dist*s; c.y1 = src.y1 - sy*dist*s;
+      c.x2 = src.x2 + sx*dist*s; c.y2 = src.y2 + sy*dist*s;
+      return c;
+    }
+    if (src.type === 'polyline'){
+      const pts = src.points;
+      const n = pts.length;
+      const segNormal = (a,b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return {x:-dy/len, y:dx/len}; };
+      // determine a global side using the point closest to sidePoint
+      let closestI = 0, bestD = Infinity;
+      for (let i=0;i<n-(src.closed?0:1);i++){
+        const a=pts[i], b=pts[(i+1)%n];
+        const d = distToSeg(sidePoint, a, b);
+        if (d<bestD){ bestD=d; closestI=i; }
+      }
+      const refA = pts[closestI], refB = pts[(closestI+1)%n];
+      const refN = segNormal(refA, refB);
+      const side = ((sidePoint.x-refA.x)*refN.x + (sidePoint.y-refA.y)*refN.y) >= 0 ? 1 : -1;
+      const newPts = pts.map((p,i) => {
+        const prev = pts[(i-1+n)%n], next = pts[(i+1)%n];
+        let nAcc = {x:0,y:0}, count=0;
+        if (i>0 || src.closed){ const nn=segNormal(prev,p); nAcc.x+=nn.x; nAcc.y+=nn.y; count++; }
+        if (i<n-1 || src.closed){ const nn=segNormal(p,next); nAcc.x+=nn.x; nAcc.y+=nn.y; count++; }
+        if (!count) return {x:p.x,y:p.y};
+        const len = Math.hypot(nAcc.x,nAcc.y) || 1;
+        return { x: p.x + (nAcc.x/len)*dist*side, y: p.y + (nAcc.y/len)*dist*side };
+      });
+      c.points = newPts;
+      return c;
+    }
+    return null;
+  }
+
+  // ---- Trim / Extend (line vs line, line vs circle) ----
+  function segSegIntersect(a,b,c,d){
+    const d1x=b.x-a.x, d1y=b.y-a.y, d2x=d.x-c.x, d2y=d.y-c.y;
+    const denom = d1x*d2y - d1y*d2x;
+    if (Math.abs(denom) < 1e-9) return null;
+    const t = ((c.x-a.x)*d2y - (c.y-a.y)*d2x) / denom;
+    return { x: a.x + t*d1x, y: a.y + t*d1y, t };
+  }
+  function lineCircleIntersect(a,b,cx,cy,r){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const fx=a.x-cx, fy=a.y-cy;
+    const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), C=fx*fx+fy*fy-r*r;
+    const disc = B*B-4*A*C;
+    if (disc < 0) return [];
+    const sq = Math.sqrt(disc);
+    const t1=(-B-sq)/(2*A), t2=(-B+sq)/(2*A);
+    return [t1,t2].map(t => ({ x:a.x+t*dx, y:a.y+t*dy, t }));
+  }
+  function boundaryIntersections(line, boundary){
+    const a = {x:line.x1,y:line.y1}, b = {x:line.x2,y:line.y2};
+    if (boundary.type === 'line'){
+      const p = segSegIntersect(a,b,{x:boundary.x1,y:boundary.y1},{x:boundary.x2,y:boundary.y2});
+      return p ? [p] : [];
+    }
+    if (boundary.type === 'circle' || boundary.type === 'arc'){
+      return lineCircleIntersect(a,b,boundary.cx,boundary.cy,boundary.r);
+    }
+    if (boundary.type === 'rect'){
+      const x1=Math.min(boundary.x1,boundary.x2), x2=Math.max(boundary.x1,boundary.x2);
+      const y1=Math.min(boundary.y1,boundary.y2), y2=Math.max(boundary.y1,boundary.y2);
+      const edges = [[{x:x1,y:y1},{x:x2,y:y1}],[{x:x2,y:y1},{x:x2,y:y2}],[{x:x2,y:y2},{x:x1,y:y2}],[{x:x1,y:y2},{x:x1,y:y1}]];
+      const out = [];
+      edges.forEach(([c,d]) => { const p = segSegIntersect(a,b,c,d); if (p) out.push(p); });
+      return out;
+    }
+    return [];
+  }
+  function trimLineAt(target, boundary, clickWorld){
+    const hits = boundaryIntersections(target, boundary).filter(p => p.t > 1e-6 && p.t < 1-1e-6);
+    if (!hits.length) return false;
+    const clickT = ((clickWorld.x-target.x1)*(target.x2-target.x1)+(clickWorld.y-target.y1)*(target.y2-target.y1)) / (Math.pow(target.x2-target.x1,2)+Math.pow(target.y2-target.y1,2) || 1);
+    // choose the intersection nearest the clicked side to trim away
+    let best = hits[0], bestD = Math.abs(hits[0].t - clickT);
+    for (const h of hits){ const d = Math.abs(h.t-clickT); if (d<bestD){ bestD=d; best=h; } }
+    snapshot();
+    if (clickT > best.t){ target.x1 = best.x; target.y1 = best.y; }
+    else { target.x2 = best.x; target.y2 = best.y; }
+    return true;
+  }
+  function extendLineAt(target, boundary, clickWorld){
+    const dNear = Math.hypot(clickWorld.x-target.x1, clickWorld.y-target.y1) < Math.hypot(clickWorld.x-target.x2, clickWorld.y-target.y2) ? 1 : 2;
+    // build a much longer virtual line in the direction being extended, then intersect
+    const dx = target.x2-target.x1, dy = target.y2-target.y1, len = Math.hypot(dx,dy) || 1;
+    const ux = dx/len, uy = dy/len;
+    const big = 1e6;
+    const virtual = dNear===1
+      ? { x1: target.x1-ux*big, y1: target.y1-uy*big, x2: target.x2, y2: target.y2 }
+      : { x1: target.x1, y1: target.y1, x2: target.x2+ux*big, y2: target.y2+uy*big };
+    const hits = boundaryIntersections(virtual, boundary);
+    if (!hits.length) return false;
+    let best = null, bestD = Infinity;
+    const from = dNear===1 ? {x:target.x1,y:target.y1} : {x:target.x2,y:target.y2};
+    for (const h of hits){ const d = Math.hypot(h.x-from.x, h.y-from.y); if (d<bestD && d>1e-6){ bestD=d; best=h; } }
+    if (!best) return false;
+    snapshot();
+    if (dNear===1){ target.x1 = best.x; target.y1 = best.y; } else { target.x2 = best.x; target.y2 = best.y; }
+    return true;
+  }
+
+  // ---- Hatch generation (parallel lines clipped to a polygon or circle boundary) ----
+  function buildHatchBoundary(e){
+    if (e.type === 'circle') return { type:'circle', kind:'circle', cx:e.cx, cy:e.cy, r:e.r };
+    if (e.type === 'rect'){
+      const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2), y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
+      return { type:'polygon', kind:'polygon', points:[{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}] };
+    }
+    if (e.type === 'polyline' && e.closed && e.points.length>=3) return { type:'polygon', kind:'polygon', points: e.points };
+    return null;
+  }
+  function clipLineToPolygon(a, b, pts){
+    // sample the segment finely and keep only sub-segments whose midpoint is inside the polygon
+    const N = 40;
+    const segs = [];
+    let runStart = null;
+    for (let i=0;i<=N;i++){
+      const t = i/N;
+      const mx = a.x+(b.x-a.x)*t, my = a.y+(b.y-a.y)*t;
+      const inside = pointInPolygon({x:mx,y:my}, pts);
+      if (inside && runStart===null) runStart = {x:mx,y:my};
+      if (!inside && runStart!==null){ segs.push({x1:runStart.x,y1:runStart.y,x2:mx,y2:my}); runStart=null; }
+    }
+    if (runStart!==null) segs.push({x1:runStart.x,y1:runStart.y,x2:b.x,y2:b.y});
+    return segs;
+  }
+  function generateHatchLines(boundary, spacing, angleDeg){
+    spacing = Math.max(0.05, spacing);
+    const rad = angleDeg*Math.PI/180;
+    const dirX = Math.cos(rad), dirY = Math.sin(rad);
+    const nX = -dirY, nY = dirX;
+    let bounds;
+    if (boundary.kind === 'circle') bounds = { minX:boundary.cx-boundary.r, maxX:boundary.cx+boundary.r, minY:boundary.cy-boundary.r, maxY:boundary.cy+boundary.r };
+    else {
+      const xs = boundary.points.map(p=>p.x), ys = boundary.points.map(p=>p.y);
+      bounds = { minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys) };
+    }
+    const diag = Math.hypot(bounds.maxX-bounds.minX, bounds.maxY-bounds.minY) + spacing*2;
+    const cx = (bounds.minX+bounds.maxX)/2, cy=(bounds.minY+bounds.maxY)/2;
+    const lines = [];
+    const steps = Math.ceil(diag/spacing);
+    for (let i=-steps; i<=steps; i++){
+      const ox = cx + nX*i*spacing, oy = cy + nY*i*spacing;
+      const a = { x: ox-dirX*diag, y: oy-dirY*diag };
+      const b = { x: ox+dirX*diag, y: oy+dirY*diag };
+      if (boundary.kind === 'circle'){
+        const hits = lineCircleIntersect(a,b,boundary.cx,boundary.cy,boundary.r);
+        if (hits.length===2) lines.push({x1:hits[0].x,y1:hits[0].y,x2:hits[1].x,y2:hits[1].y});
+      } else {
+        lines.push(...clipLineToPolygon(a,b,boundary.points));
+      }
+    }
+    return lines;
+  }
 
   let lastMiddleClickTime = 0;
   const MIDDLE_DBLCLICK_MS = 350;
@@ -811,7 +1524,7 @@
   canvas.addEventListener('mousedown', (e) => {
     const rect = wrap.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-    const world = snapPt(screenToWorld(sx, sy));
+    const world = resolveWorldPoint(sx, sy);
 
     if (e.button === 1) { // middle button = pan (hold) / double-click = zoom extents
       e.preventDefault();
@@ -831,6 +1544,33 @@
       return;
     }
     if (e.button !== 0) return;
+
+    if (tool === 'select'){
+      const hitE = hitTest(world);
+      if (hitE){
+        if (e.shiftKey){
+          if (selectedIds.has(hitE.id)) selectedIds.delete(hitE.id); else selectedIds.add(hitE.id);
+          selectedId = selectedIds.size === 1 ? [...selectedIds][0] : (selectedIds.has(hitE.id) ? hitE.id : null);
+          render(); renderList(); buildPropsForm(); buildModifyForm();
+        } else {
+          if (selectedIds.has(hitE.id) && selectedIds.size > 1){
+            selectedId = hitE.id;
+            render(); renderList(); buildPropsForm(); buildModifyForm();
+          } else {
+            selectedIds = new Set([hitE.id]);
+            selectEntity(hitE.id);
+          }
+          const ids = [...selectedIds];
+          dragging = { ids, startWorld: world, origMap: Object.fromEntries(ids.map(id => [id, JSON.parse(JSON.stringify(entities.find(x=>x.id===id)))])) };
+        }
+        return;
+      }
+      // empty space: start a rubber-band window/crossing select (unless shift, which just clears nothing extra)
+      if (!e.shiftKey) { selectedIds = new Set(); selectEntity(null); }
+      selBoxStart = { sx, sy, wx: world.x, wy: world.y };
+      return;
+    }
+
     placePoint(world, {x:sx, y:sy});
   });
 
@@ -845,8 +1585,18 @@
   canvas.addEventListener('mousemove', (e) => {
     const rect = wrap.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-    const world = snapPt(screenToWorld(sx, sy));
+    const world = resolveWorldPoint(sx, sy);
     mouseWorld = world;
+
+    if (selBoxStart){
+      const x1 = Math.min(selBoxStart.sx, sx), x2 = Math.max(selBoxStart.sx, sx);
+      const y1 = Math.min(selBoxStart.sy, sy), y2 = Math.max(selBoxStart.sy, sy);
+      const box = document.getElementById('selBox');
+      box.style.display = 'block';
+      box.style.left = x1+'px'; box.style.top = y1+'px';
+      box.style.width = (x2-x1)+'px'; box.style.height = (y2-y1)+'px';
+      box.classList.toggle('crossing', sx < selBoxStart.sx); // dragging right-to-left = crossing select
+    }
     coordsEl.textContent = `x: ${world.x.toFixed(2)}  y: ${world.y.toFixed(2)}`;
 
     if (panStart){
@@ -859,18 +1609,11 @@
     if (dragging){
       const dx = world.x - dragging.startWorld.x;
       const dy = world.y - dragging.startWorld.y;
-      const e2 = entities.find(x=>x.id===dragging.id);
-      const o = dragging.orig;
-      if (!e2) return;
-      if (e2.type === 'line' || e2.type==='rect'){
-        e2.x1 = o.x1+dx; e2.y1=o.y1+dy; e2.x2=o.x2+dx; e2.y2=o.y2+dy;
-      } else if (e2.type === 'circle' || e2.type==='arc'){
-        e2.cx = o.cx+dx; e2.cy = o.cy+dy;
-      } else if (e2.type === 'polyline'){
-        e2.points = o.points.map(p => ({x:p.x+dx, y:p.y+dy}));
-      } else if (e2.type === 'text'){
-        e2.x = o.x+dx; e2.y = o.y+dy;
-      }
+      dragging.ids.forEach(id => {
+        const e2 = entities.find(x=>x.id===id);
+        const o = dragging.origMap[id];
+        if (e2 && o) translateEntity(e2, o, dx, dy);
+      });
       render();
       return;
     }
@@ -888,6 +1631,22 @@
     else if (tool==='polyline' && polyPoints.length) drawing = { type:'polyline', points:[...polyPoints, world], closed:false, ...currentStyle() };
     else drawing = null;
 
+    modifyGhosts = [];
+    if ((tool==='move' || tool==='copy') && modifyStage===1){
+      const dx = world.x-modifyTemp.base.x, dy = world.y-modifyTemp.base.y;
+      modifyGhosts = modifyTemp.orig.map(o => { const g=JSON.parse(JSON.stringify(o)); translateEntity(g,o,dx,dy); return g; });
+    } else if (tool==='rotate' && modifyStage===1){
+      const ang = Math.atan2(world.y-modifyTemp.base.y, world.x-modifyTemp.base.x) * 180/Math.PI;
+      modifyGhosts = modifyTemp.orig.map(o => { const g=JSON.parse(JSON.stringify(o)); rotateEntity(g,o,modifyTemp.base,ang); return g; });
+    } else if (tool==='scale' && modifyStage===1){
+      const f = Math.max(0.001, Math.hypot(world.x-modifyTemp.base.x, world.y-modifyTemp.base.y));
+      modifyGhosts = modifyTemp.orig.map(o => { const g=JSON.parse(JSON.stringify(o)); scaleEntity(g,o,modifyTemp.base,f); return g; });
+    } else if (tool==='mirror' && modifyStage===1){
+      drawing = { type:'line', x1:modifyTemp.p1.x, y1:modifyTemp.p1.y, x2:world.x, y2:world.y, color:'#e0a458', width:1 };
+      const ids = activeSelectionIds();
+      modifyGhosts = ids.map(id => mirrorEntityCopy(entities.find(x=>x.id===id), modifyTemp.p1, world));
+    }
+
     // crosshair + status-bar coordinate readout
     crosshairV.style.left = sx + 'px';
     crosshairH.style.top = sy + 'px';
@@ -904,14 +1663,44 @@
     crosshairV.style.display = 'none'; crosshairH.style.display = 'none'; cursorBox.style.display = 'none';
   });
 
-  window.addEventListener('mouseup', () => {
+  window.addEventListener('mouseup', (e) => {
     if (dragging){ snapshot_after_drag(); buildPropsForm(); }
     dragging = null;
     panStart = null;
+    if (selBoxStart){
+      const rect = wrap.getBoundingClientRect();
+      const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+      const moved = Math.hypot(sx-selBoxStart.sx, sy-selBoxStart.sy) > 4;
+      if (moved){
+        const w1 = screenToWorld(Math.min(selBoxStart.sx,sx), Math.min(selBoxStart.sy,sy));
+        const w2 = screenToWorld(Math.max(selBoxStart.sx,sx), Math.max(selBoxStart.sy,sy));
+        const crossing = sx < selBoxStart.sx; // right-to-left drag = crossing (touch), left-to-right = window (fully inside)
+        const picked = entities.filter(en => {
+          if (!layerVisible(en.layer) || layerLocked(en.layer)) return false;
+          const bb = entityBBox(en);
+          if (!bb) return false;
+          if (crossing) return !(bb.maxX < w1.x || bb.minX > w2.x || bb.maxY < w1.y || bb.minY > w2.y);
+          return bb.minX >= w1.x && bb.maxX <= w2.x && bb.minY >= w1.y && bb.maxY <= w2.y;
+        });
+        picked.forEach(en => selectedIds.add(en.id));
+        selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+        render(); renderList(); buildPropsForm(); buildModifyForm();
+      }
+      selBoxStart = null;
+      document.getElementById('selBox').style.display = 'none';
+    }
   });
+  function entityBBox(e){
+    if (e.type==='line'||e.type==='rect') return { minX:Math.min(e.x1,e.x2), maxX:Math.max(e.x1,e.x2), minY:Math.min(e.y1,e.y2), maxY:Math.max(e.y1,e.y2) };
+    if (e.type==='circle'||e.type==='arc') return { minX:e.cx-e.r, maxX:e.cx+e.r, minY:e.cy-e.r, maxY:e.cy+e.r };
+    if (e.type==='polyline') return { minX:Math.min(...e.points.map(p=>p.x)), maxX:Math.max(...e.points.map(p=>p.x)), minY:Math.min(...e.points.map(p=>p.y)), maxY:Math.max(...e.points.map(p=>p.y)) };
+    if (e.type==='text') return { minX:e.x, maxX:e.x+e.content.length*e.height*0.6, minY:e.y, maxY:e.y+e.height };
+    if (e.type==='hatch'){ const b=e.boundary; return b.kind==='circle' ? {minX:b.cx-b.r,maxX:b.cx+b.r,minY:b.cy-b.r,maxY:b.cy+b.r} : {minX:Math.min(...b.points.map(p=>p.x)),maxX:Math.max(...b.points.map(p=>p.x)),minY:Math.min(...b.points.map(p=>p.y)),maxY:Math.max(...b.points.map(p=>p.y))}; }
+    return null;
+  }
   function snapshot_after_drag(){
     // push the pre-drag state we captured at drag start
-    history.push(JSON.stringify(entities.map(x => x.id===dragging.id ? dragging.orig : x)));
+    history.push(JSON.stringify(entities.map(x => dragging.origMap[x.id] || x)));
     if (history.length>100) history.shift();
     future = [];
   }
@@ -980,7 +1769,23 @@
     ARC:'arc', A:'arc',
     PLINE:'polyline', PL:'polyline', POLYLINE:'polyline',
     TEXT:'text', T:'text', DT:'text',
-    SELECT:'select', V:'select'
+    SELECT:'select', V:'select',
+    MOVE:'move', M:'move',
+    COPY:'copy', CO:'copy', CP:'copy',
+    ROTATE:'rotate', RO:'rotate',
+    SCALE:'scale', SC:'scale',
+    MIRROR:'mirror', MI:'mirror',
+    OFFSET:'offset', O:'offset',
+    ARRAY:'array', AR:'array',
+    TRIM:'trim', TR:'trim',
+    EXTEND:'extend', EX:'extend',
+    FILLET:'fillet', F:'fillet',
+    CHAMFER:'chamfer', CHA:'chamfer',
+    MATCHPROP:'matchprop', MA:'matchprop',
+    EXPLODE:'explode', X:'explode',
+    HATCH:'hatch', H:'hatch',
+    BLOCK:'block', B:'block',
+    INSERT:'insert', I:'insert'
   };
   let lastCommand = '';
 
@@ -1028,6 +1833,8 @@
   function cancelDrawing(){
     lineStart = null; rectStart = null; circleCenter = null;
     arcStage = 0; arcTemp = {}; polyPoints = []; drawing = null;
+    modifyStage = 0; modifyTemp = {}; modifyGhosts = []; selBoxStart = null;
+    const sb = document.getElementById('selBox'); if (sb) sb.style.display = 'none';
     render();
   }
 
@@ -1089,10 +1896,19 @@
       case 'GRID': modeGrid = !modeGrid; syncToggles(); render(); log('GRID ' + (modeGrid?'on':'off') + '.', 'prompt'); break;
       case 'POLAR': modePolar = !modePolar; syncToggles(); log('POLAR ' + (modePolar?'on':'off') + '.', 'prompt'); break;
       case 'OSNAP': modeOsnap = !modeOsnap; syncToggles(); log('OSNAP ' + (modeOsnap?'on':'off') + '.', 'prompt'); break;
-      case 'MOVE': case 'M': log('Switch to SELECT, click an entity, and drag it to move.', 'prompt'); break;
       case 'CLEAR': document.getElementById('clearBtn').click(); break;
+      case 'LAYER': case 'LA': {
+        const name = trimmed.split(/\s+/).slice(1).join(' ').trim();
+        if (!name){ log('Layers: ' + layers.map(l=>l.name+(l.name===currentLayer?' (current)':'')).join(', '), 'prompt'); break; }
+        if (!layers.some(l=>l.name===name)) layers.push({ name, color:'#4fd1c5', visible:true, locked:false });
+        currentLayer = name; renderLayers(); syncLayerSelect();
+        log('Current layer: ' + name, 'prompt');
+        break;
+      }
       case 'HELP': case '?':
-        log('Commands: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V) ERASE(E) MOVE UNDO(U) REDO ZOOM(Z) [E]xtents SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
+        log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V)', 'prompt');
+        log('Modify: MOVE(M) COPY(CO) ROTATE(RO) SCALE(SC) MIRROR(MI) OFFSET(O) ARRAY(AR) TRIM(TR) EXTEND(EX) FILLET(F) CHAMFER(CHA) MATCHPROP(MA) EXPLODE(X) HATCH(H) BLOCK(B) INSERT(I)', 'prompt');
+        log('Other: ERASE(E) UNDO(U) REDO ZOOM(Z) LAYER(LA) SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
         log('While drawing, type coordinates as "10,5" (absolute), "@2,0" (relative), or a plain number for distance.', 'prompt');
         break;
       default:
@@ -1262,6 +2078,323 @@
     if (entities.length === 1) zoomToFit();
   }
 
+  // ---------- Modify Options panel (contextual params for the active Modify tool) ----------
+  const modifyBody = document.getElementById('modifyBody');
+  const modifyTypeTag = document.getElementById('modifyTypeTag');
+  let arrayMode = 'rect'; // 'rect' | 'polar'
+
+  function selectionCentroid(ids){
+    const pts = [];
+    ids.forEach(id => { const b = entityBBox(entities.find(x=>x.id===id)); if (b) pts.push({x:(b.minX+b.maxX)/2, y:(b.minY+b.maxY)/2}); });
+    if (!pts.length) return {x:0,y:0};
+    return { x: pts.reduce((s,p)=>s+p.x,0)/pts.length, y: pts.reduce((s,p)=>s+p.y,0)/pts.length };
+  }
+
+  function buildModifyForm(){
+    const ids = activeSelectionIds();
+    modifyTypeTag.textContent = ids.length ? `— ${ids.length} selected` : '';
+    let html = '';
+
+    if (['move','copy'].includes(tool)){
+      const label = tool==='copy' ? 'Copy' : 'Move';
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected. Click on canvas for a base point + destination, or set an exact offset here.</div>`;
+      html += row('Offset dx', numInput('mo_dx', 5));
+      html += row('Offset dy', numInput('mo_dy', 0));
+      if (tool==='copy') html += row('Copies', numInput('mo_count', 1, 1));
+      html += `<button class="formBtn" id="mo_apply">${label==='Copy'?'⧉ Apply Copy':'✛ Apply Move'}</button>`;
+      modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        if (!ids.length){ flashHint('Nothing selected.'); return; }
+        const dx = parseFloat(document.getElementById('mo_dx').value)||0;
+        const dy = parseFloat(document.getElementById('mo_dy').value)||0;
+        const orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
+        snapshot();
+        if (tool==='move'){
+          ids.forEach((id,i)=>translateEntity(entities.find(x=>x.id===id), orig[i], dx, dy));
+        } else {
+          const count = Math.max(1, Math.round(parseFloat(document.getElementById('mo_count').value)||1));
+          const newIds = [];
+          for (let k=1;k<=count;k++){
+            orig.forEach(o => { const c=JSON.parse(JSON.stringify(o)); c.id=uid(); translateEntity(c,o,dx*k,dy*k); entities.push(c); newIds.push(c.id); });
+          }
+          selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
+        }
+        render(); renderList(); buildPropsForm();
+        log(`${label} applied (dx ${dx}, dy ${dy}).`, 'prompt');
+      };
+      return;
+    }
+
+    if (tool === 'rotate' || tool === 'scale'){
+      const c = selectionCentroid(ids);
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected. Click on canvas for base point + drag, or set exact values here.</div>`;
+      html += row('Base X', numInput('mo_bx', c.x.toFixed(2)));
+      html += row('Base Y', numInput('mo_by', c.y.toFixed(2)));
+      if (tool==='rotate') html += row('Angle (°)', numInput('mo_ang', 90, 1));
+      else html += row('Scale factor', numInput('mo_factor', 2, 0.1));
+      html += `<button class="formBtn" id="mo_apply">${tool==='rotate'?'↻ Apply Rotate':'⤢ Apply Scale'}</button>`;
+      modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        if (!ids.length){ flashHint('Nothing selected.'); return; }
+        const base = { x: parseFloat(document.getElementById('mo_bx').value)||0, y: parseFloat(document.getElementById('mo_by').value)||0 };
+        const orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
+        snapshot();
+        if (tool==='rotate'){
+          const ang = parseFloat(document.getElementById('mo_ang').value)||0;
+          ids.forEach((id,i)=>rotateEntity(entities.find(x=>x.id===id), orig[i], base, ang));
+          log(`Rotated by ${ang}° about (${base.x},${base.y}).`, 'prompt');
+        } else {
+          const f = Math.max(0.001, parseFloat(document.getElementById('mo_factor').value)||1);
+          ids.forEach((id,i)=>scaleEntity(entities.find(x=>x.id===id), orig[i], base, f));
+          log(`Scaled by ${f}x about (${base.x},${base.y}).`, 'prompt');
+        }
+        render(); renderList(); buildPropsForm();
+      };
+      return;
+    }
+
+    if (tool === 'mirror'){
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected. Click two axis points on canvas, or set them here. Source is kept.</div>`;
+      html += row('Axis P1 X', numInput('mo_x1', 0));
+      html += row('Axis P1 Y', numInput('mo_y1', 0));
+      html += row('Axis P2 X', numInput('mo_x2', 0));
+      html += row('Axis P2 Y', numInput('mo_y2', 10));
+      html += `<button class="formBtn" id="mo_apply">⇌ Apply Mirror</button>`;
+      modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        if (!ids.length){ flashHint('Nothing selected.'); return; }
+        const p1 = {x:parseFloat(document.getElementById('mo_x1').value)||0, y:parseFloat(document.getElementById('mo_y1').value)||0};
+        const p2 = {x:parseFloat(document.getElementById('mo_x2').value)||0, y:parseFloat(document.getElementById('mo_y2').value)||0};
+        snapshot();
+        const newIds = [];
+        ids.forEach(id => { const c = mirrorEntityCopy(entities.find(x=>x.id===id), p1, p2); c.id = uid(); entities.push(c); newIds.push(c.id); });
+        selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
+        render(); renderList(); buildPropsForm();
+        log(`Mirrored ${ids.length} entit${ids.length===1?'y':'ies'}.`, 'prompt');
+      };
+      return;
+    }
+
+    if (tool === 'offset'){
+      html += ids.length===1 ? `<div class="empty-note">Set a distance, then click a side on canvas.</div>` : `<div class="empty-note">Select exactly ONE entity to offset.</div>`;
+      html += row('Distance', numInput('mo_dist', 1, 0.1));
+      modifyBody.innerHTML = html;
+      return;
+    }
+
+    if (tool === 'array'){
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected as the array item(s).</div>`;
+      html += `<div class="mode-toggle"><button id="am_rect" class="${arrayMode==='rect'?'active':''}">Rectangular</button><button id="am_polar" class="${arrayMode==='polar'?'active':''}">Polar</button></div>`;
+      if (arrayMode==='rect'){
+        html += row('Rows', numInput('mo_rows', 2, 1));
+        html += row('Columns', numInput('mo_cols', 3, 1));
+        html += row('Row spacing', numInput('mo_rsp', 5));
+        html += row('Col spacing', numInput('mo_csp', 5));
+      } else {
+        html += row('Count', numInput('mo_count2', 6, 1));
+        html += row('Angle to fill (°)', numInput('mo_fill', 360, 1));
+        const c = selectionCentroid(ids);
+        html += row('Center X', numInput('mo_cx', c.x.toFixed(2)));
+        html += row('Center Y', numInput('mo_cy', c.y.toFixed(2)));
+      }
+      html += `<button class="formBtn" id="mo_apply">▦ Apply Array</button>`;
+      modifyBody.innerHTML = html;
+      document.getElementById('am_rect').onclick = () => { arrayMode='rect'; buildModifyForm(); };
+      document.getElementById('am_polar').onclick = () => { arrayMode='polar'; buildModifyForm(); };
+      document.getElementById('mo_apply').onclick = () => {
+        if (!ids.length){ flashHint('Nothing selected.'); return; }
+        const orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
+        snapshot();
+        const newIds = [];
+        if (arrayMode==='rect'){
+          const rows=Math.max(1,Math.round(gv('mo_rows'))), cols=Math.max(1,Math.round(gv('mo_cols')));
+          const rsp=gv('mo_rsp'), csp=gv('mo_csp');
+          for (let r=0;r<rows;r++) for (let c2=0;c2<cols;c2++){
+            if (r===0 && c2===0) continue;
+            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); translateEntity(cl,o,c2*csp,r*rsp); entities.push(cl); newIds.push(cl.id); });
+          }
+          log(`Rectangular array: ${rows}×${cols}.`, 'prompt');
+        } else {
+          const count=Math.max(2,Math.round(gv('mo_count2'))), fill=gv('mo_fill');
+          const center = {x:gv('mo_cx'), y:gv('mo_cy')};
+          const step = fill/count;
+          for (let k=1;k<count;k++){
+            const ang = step*k;
+            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); rotateEntity(cl,o,center,ang); entities.push(cl); newIds.push(cl.id); });
+          }
+          log(`Polar array: ${count} items over ${fill}°.`, 'prompt');
+        }
+        selectedIds = new Set(newIds); selectedId = null;
+        render(); renderList(); buildPropsForm();
+      };
+      return;
+    }
+
+    if (tool === 'trim' || tool === 'extend'){
+      const b = modifyBoundaryId!=null ? entities.find(x=>x.id===modifyBoundaryId) : null;
+      html += b ? `<div class="empty-note">Boundary: ${b.type} #${b.id}. Click a target LINE on canvas.</div>`
+                : `<div class="empty-note">Select exactly one entity to use as the ${tool==='trim'?'cutting edge':'boundary'}, then re-pick this tool.</div>`;
+      modifyBody.innerHTML = html;
+      return;
+    }
+
+    if (tool === 'fillet' || tool === 'chamfer'){
+      const lines = ids.map(id=>entities.find(x=>x.id===id)).filter(e=>e && e.type==='line');
+      if (lines.length !== 2){
+        html += `<div class="empty-note">Select exactly 2 LINE entities to ${tool}.</div>`;
+        modifyBody.innerHTML = html;
+        return;
+      }
+      html += tool==='fillet' ? row('Radius', numInput('mo_r', 2, 0.1)) : row('Distance', numInput('mo_r', 1, 0.1));
+      html += `<button class="formBtn" id="mo_apply">${tool==='fillet'?'◜ Apply Fillet':'◲ Apply Chamfer'}</button>`;
+      modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        const val = Math.max(0.0001, gv('mo_r'));
+        snapshot();
+        if (tool==='fillet') applyFillet(lines[0], lines[1], val);
+        else applyChamfer(lines[0], lines[1], val);
+        render(); renderList(); buildPropsForm();
+        log(`${tool==='fillet'?'Fillet':'Chamfer'} applied.`, 'prompt');
+      };
+      return;
+    }
+
+    if (tool === 'matchprop'){
+      const src = modifyBoundaryId!=null ? entities.find(x=>x.id===modifyBoundaryId) : null;
+      html += src ? `<div class="empty-note">Source: ${src.type} #${src.id}. Click target entities on canvas to match color/width/layer. Esc to finish.</div>`
+                  : `<div class="empty-note">Select exactly one SOURCE entity, then re-pick this tool.</div>`;
+      modifyBody.innerHTML = html;
+      return;
+    }
+
+    if (tool === 'explode'){
+      const explodable = ids.map(id=>entities.find(x=>x.id===id)).filter(e=>e && (e.type==='rect'||e.type==='polyline'));
+      html += `<div class="empty-note">${explodable.length} of ${ids.length} selected can be exploded (rectangles/polylines → lines).</div>`;
+      html += `<button class="formBtn" id="mo_apply">💥 Apply Explode</button>`;
+      modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        if (!explodable.length){ flashHint('Select rectangles or polylines to explode.'); return; }
+        snapshot();
+        const newIds = [];
+        explodable.forEach(e => {
+          const segs = explodeToSegments(e);
+          segs.forEach(s => { const l = { id:uid(), type:'line', x1:s.x1,y1:s.y1,x2:s.x2,y2:s.y2, color:e.color, width:e.width, layer:e.layer }; entities.push(l); newIds.push(l.id); });
+          entities = entities.filter(x=>x.id!==e.id);
+        });
+        selectedIds = new Set(newIds); selectedId = null;
+        render(); renderList(); buildPropsForm();
+        log(`Exploded ${explodable.length} entit${explodable.length===1?'y':'ies'} into ${newIds.length} lines.`, 'prompt');
+      };
+      return;
+    }
+
+    if (tool === 'hatch'){
+      const target = ids.length===1 ? entities.find(x=>x.id===ids[0]) : null;
+      const boundary = target ? buildHatchBoundary(target) : null;
+      html += boundary ? `<div class="empty-note">Boundary: ${target.type} #${target.id}.</div>` : `<div class="empty-note">Select ONE closed shape (circle, rect, or closed polyline).</div>`;
+      html += row('Spacing', numInput('mo_sp', 2, 0.1));
+      html += row('Angle (°)', numInput('mo_hang', 45, 1));
+      html += `<button class="formBtn" id="mo_apply" ${boundary?'':'disabled'}>▤ Apply Hatch</button>`;
+      modifyBody.innerHTML = html;
+      const btn = document.getElementById('mo_apply');
+      if (boundary) btn.onclick = () => {
+        const spacing = Math.max(0.05, gv('mo_sp')), angle = gv('mo_hang');
+        const lines = generateHatchLines(boundary, spacing, angle);
+        snapshot();
+        const h = { id: uid(), type:'hatch', boundary, lines, color: target.color, width: 1, layer: currentLayer };
+        entities.push(h);
+        selectEntity(h.id);
+        log(`Hatch created (spacing ${spacing}, angle ${angle}°).`, 'prompt');
+      };
+      return;
+    }
+
+    if (tool === 'block'){
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected. Click a base point on canvas to define the block.</div>`;
+      if (Object.keys(blocks).length) html += `<div class="empty-note">Existing blocks: ${Object.keys(blocks).join(', ')}</div>`;
+      modifyBody.innerHTML = html;
+      return;
+    }
+
+    if (tool === 'insert'){
+      const names = Object.keys(blocks);
+      if (!names.length){ modifyBody.innerHTML = `<div class="empty-note">No blocks defined yet. Use Block first to create one.</div>`; return; }
+      html += `<div class="form-row"><label>Block</label><select id="mo_blockpick">${names.map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div>`;
+      html += `<div class="empty-note">Click on canvas to place the selected block.</div>`;
+      modifyBody.innerHTML = html;
+      return;
+    }
+
+    modifyBody.innerHTML = '<div class="empty-note">Select entities, then pick a tool from the Modify row above.</div>';
+  }
+
+  function explodeToSegments(e){
+    if (e.type === 'rect'){
+      const x1=e.x1,y1=e.y1,x2=e.x2,y2=e.y2;
+      return [ {x1,y1,x2,y2:y1}, {x1:x2,y1,x2,y2}, {x1:x2,y1:y2,x2:x1,y2}, {x1,y1:y2,x2:x1,y2:y1} ];
+    }
+    if (e.type === 'polyline'){
+      const segs = [];
+      for (let i=0;i<e.points.length-1;i++) segs.push({x1:e.points[i].x,y1:e.points[i].y,x2:e.points[i+1].x,y2:e.points[i+1].y});
+      if (e.closed && e.points.length>1) segs.push({x1:e.points[e.points.length-1].x,y1:e.points[e.points.length-1].y,x2:e.points[0].x,y2:e.points[0].y});
+      return segs;
+    }
+    return [];
+  }
+
+  function applyFillet(l1, l2, radius){
+    const p = segSegIntersect({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
+    if (!p){ flashHint('Selected lines don\'t intersect (when extended).'); return; }
+    // Angle between the two lines (as directed from the intersection point toward
+    // whichever endpoint is nearer), used to convert a fillet radius into the
+    // tangent-point distance back from the intersection along each line.
+    const angBetween = Math.acos(Math.min(1, Math.max(-1,
+      ((l1.x2-l1.x1)*(l2.x2-l2.x1) + (l1.y2-l1.y1)*(l2.y2-l2.y1)) /
+      ((Math.hypot(l1.x2-l1.x1,l1.y2-l1.y1)||1) * (Math.hypot(l2.x2-l2.x1,l2.y2-l2.y1)||1))
+    )));
+    const halfAng = Math.max(0.001, Math.min(Math.PI/2-0.001, angBetween/2));
+    const tangentDist = radius / Math.tan(halfAng);
+    const trimTo = (l) => {
+      const dx=l.x2-l.x1, dy=l.y2-l.y1, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len;
+      const d1 = Math.hypot(l.x1-p.x, l.y1-p.y), d2 = Math.hypot(l.x2-p.x, l.y2-p.y);
+      const nearIsStart = d1 < d2;
+      const dist = Math.min(tangentDist, len-0.001);
+      return { nearIsStart, ux, uy, dist };
+    };
+    const t1 = trimTo(l1), t2 = trimTo(l2);
+    const pt1 = t1.nearIsStart ? { x: p.x - t1.ux*t1.dist, y: p.y - t1.uy*t1.dist } : { x: p.x + t1.ux*t1.dist, y: p.y + t1.uy*t1.dist };
+    const pt2 = t2.nearIsStart ? { x: p.x - t2.ux*t2.dist, y: p.y - t2.uy*t2.dist } : { x: p.x + t2.ux*t2.dist, y: p.y + t2.uy*t2.dist };
+    if (t1.nearIsStart) { l1.x1=pt1.x; l1.y1=pt1.y; } else { l1.x2=pt1.x; l1.y2=pt1.y; }
+    if (t2.nearIsStart) { l2.x1=pt2.x; l2.y1=pt2.y; } else { l2.x2=pt2.x; l2.y2=pt2.y; }
+    // fillet arc center: offset from p along the bisector of the two tangent points, at distance radius/sin(halfAngle)
+    const v1 = { x: pt1.x-p.x, y: pt1.y-p.y }, v2 = { x: pt2.x-p.x, y: pt2.y-p.y };
+    const len1 = Math.hypot(v1.x,v1.y)||1, len2 = Math.hypot(v2.x,v2.y)||1;
+    const bis = { x: v1.x/len1 + v2.x/len2, y: v1.y/len1 + v2.y/len2 };
+    const bisLen = Math.hypot(bis.x,bis.y) || 1;
+    const half = Math.acos(Math.min(1,Math.max(-1,(v1.x*v2.x+v1.y*v2.y)/(len1*len2))))/2;
+    const centerDist = radius / Math.max(0.05, Math.sin(half));
+    const center = { x: p.x + (bis.x/bisLen)*centerDist, y: p.y + (bis.y/bisLen)*centerDist };
+    let a1 = Math.atan2(pt1.y-center.y, pt1.x-center.x)*180/Math.PI; if (a1<0) a1+=360;
+    let a2 = Math.atan2(pt2.y-center.y, pt2.x-center.x)*180/Math.PI; if (a2<0) a2+=360;
+    entities.push({ id: uid(), type:'arc', cx:center.x, cy:center.y, r:radius, startAngle:a1, endAngle:a2, color:l1.color, width:l1.width, layer:l1.layer });
+  }
+
+  function applyChamfer(l1, l2, dist){
+    const p = segSegIntersect({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
+    if (!p){ flashHint('Selected lines don\'t intersect (when extended).'); return; }
+    const clip = (l) => {
+      const dx=l.x2-l.x1, dy=l.y2-l.y1, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len;
+      const d1 = Math.hypot(l.x1-p.x, l.y1-p.y), d2 = Math.hypot(l.x2-p.x, l.y2-p.y);
+      const nearIsStart = d1 < d2;
+      const cd = Math.min(dist, len-0.001);
+      const pt = nearIsStart ? { x:p.x-ux*cd, y:p.y-uy*cd } : { x:p.x+ux*cd, y:p.y+uy*cd };
+      if (nearIsStart) { l.x1=pt.x; l.y1=pt.y; } else { l.x2=pt.x; l.y2=pt.y; }
+      return pt;
+    };
+    const pt1 = clip(l1), pt2 = clip(l2);
+    entities.push({ id: uid(), type:'line', x1:pt1.x, y1:pt1.y, x2:pt2.x, y2:pt2.y, color:l1.color, width:l1.width, layer:l1.layer });
+  }
+
   // ---------- Properties panel (edit selected entity) ----------
   const propsBody = document.getElementById('propsBody');
   const propsTypeTag = document.getElementById('propsTypeTag');
@@ -1316,9 +2449,12 @@
       html += row('X', numInput('p_x', e.x));
       html += row('Y', numInput('p_y', e.y));
       html += row('Height', numInput('p_h', e.height));
+    } else if (e.type === 'hatch'){
+      html += `<div class="empty-note">Hatch boundary: ${e.boundary.kind}. Use Explode-style tools aren't available for hatch — delete and re-hatch to change spacing/angle.</div>`;
     }
 
     html += `<div class="divider-thin"></div>`;
+    html += `<div class="form-row"><label>Layer</label><select id="p_layer">${layers.map(l=>`<option value="${l.name}" ${l.name===(e.layer||'0')?'selected':''}>${l.name}</option>`).join('')}</select></div>`;
     html += `<div class="form-row"><label>Color</label><input type="color" id="p_color" value="${e.color}"></div>`;
     html += row('Line width', numInput('p_width', e.width, 0.5));
     html += `<button class="formBtn secondary" id="p_dup">⧉ Duplicate</button>`;
@@ -1386,6 +2522,7 @@
 
     bind('p_color', el => e.color = el.value);
     bind('p_width', el => e.width = Math.max(0.1, parseFloat(el.value)||0.1));
+    bind('p_layer', el => { e.layer = el.value; renderList(); });
 
     document.getElementById('p_dup').onclick = () => {
       snapshot();
@@ -1401,8 +2538,8 @@
     document.getElementById('p_del').onclick = () => {
       snapshot();
       entities = entities.filter(x => x.id !== e.id);
-      selectedId = null;
-      render(); renderList(); buildPropsForm();
+      selectedId = null; selectedIds.delete(e.id);
+      render(); renderList(); buildPropsForm(); buildModifyForm();
     };
   }
 
@@ -1441,7 +2578,7 @@
   document.getElementById('clearBtn').onclick = () => {
     if (!entities.length) return;
     if (confirm('Clear the entire drawing? This can be undone with Ctrl+Z.')){
-      snapshot(); entities = []; selectedId = null; render(); renderList(); buildPropsForm();
+      snapshot(); entities = []; selectedId = null; selectedIds = new Set(); render(); renderList(); buildPropsForm(); buildModifyForm();
     }
   };
   document.getElementById('zoomFit').onclick = zoomToFit;
@@ -1456,6 +2593,7 @@
       else if (e.type==='arc'){ consider(e.cx-e.r,e.cy-e.r); consider(e.cx+e.r,e.cy+e.r); }
       else if (e.type==='polyline'){ e.points.forEach(p=>consider(p.x,p.y)); }
       else if (e.type==='text'){ consider(e.x,e.y); consider(e.x+e.content.length*e.height*0.6, e.y+e.height); }
+      else if (e.type==='hatch'){ const b=e.boundary; if (b.kind==='circle'){ consider(b.cx-b.r,b.cy-b.r); consider(b.cx+b.r,b.cy+b.r); } else { b.points.forEach(p=>consider(p.x,p.y)); } }
     }
     const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
     const rect = wrap.getBoundingClientRect();
@@ -1472,7 +2610,7 @@
   // ---------- Persistent project storage ----------
   document.getElementById('saveProj').onclick = async () => {
     try {
-      await window.storage.set('cad-project', JSON.stringify({ entities, nextId }), false);
+      await window.storage.set('cad-project', JSON.stringify({ entities, nextId, layers, currentLayer, blocks }), false);
       flashHint('Project saved.');
     } catch(err){ flashHint('Save failed: ' + err.message); }
   };
@@ -1484,8 +2622,12 @@
       snapshot();
       entities = data.entities || [];
       nextId = data.nextId || (entities.reduce((m,e)=>Math.max(m,e.id),0)+1);
-      selectedId = null;
-      zoomToFit(); renderList(); buildPropsForm();
+      layers = data.layers && data.layers.length ? data.layers : [{ name:'0', color:'#4fd1c5', visible:true, locked:false }];
+      currentLayer = data.currentLayer && layers.some(l=>l.name===data.currentLayer) ? data.currentLayer : layers[0].name;
+      blocks = data.blocks || {};
+      selectedId = null; selectedIds = new Set();
+      renderLayers(); syncLayerSelect();
+      zoomToFit(); renderList(); buildPropsForm(); buildModifyForm();
       flashHint('Project loaded.');
     } catch(err){ flashHint('No saved project found.'); }
   };
@@ -1504,39 +2646,48 @@
     add(0,'ENDSEC');
 
     add(0,'SECTION'); add(2,'TABLES');
-    add(0,'TABLE'); add(2,'LAYER'); add(70,1);
-    add(0,'LAYER'); add(2,'0'); add(70,0); add(62,7); add(6,'CONTINUOUS');
+    add(0,'TABLE'); add(2,'LAYER'); add(70,layers.length);
+    for (const l of layers){
+      add(0,'LAYER'); add(2,l.name); add(70, l.locked?4:0); add(62, l.visible?7:-7); add(6,'CONTINUOUS');
+    }
     add(0,'ENDTAB');
     add(0,'ENDSEC');
 
     add(0,'SECTION'); add(2,'ENTITIES');
     for (const e of entities){
+      const lyr = e.layer || '0';
       if (e.type === 'line'){
-        add(0,'LINE'); add(8,'0');
+        add(0,'LINE'); add(8,lyr);
         add(10,e.x1); add(20,e.y1); add(30,0);
         add(11,e.x2); add(21,e.y2); add(31,0);
       } else if (e.type === 'rect'){
         const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2);
         const y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
-        add(0,'LWPOLYLINE'); add(8,'0'); add(90,4); add(70,1);
+        add(0,'LWPOLYLINE'); add(8,lyr); add(90,4); add(70,1);
         add(10,x1); add(20,y1);
         add(10,x2); add(20,y1);
         add(10,x2); add(20,y2);
         add(10,x1); add(20,y2);
       } else if (e.type === 'circle'){
-        add(0,'CIRCLE'); add(8,'0');
+        add(0,'CIRCLE'); add(8,lyr);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
       } else if (e.type === 'arc'){
-        add(0,'ARC'); add(8,'0');
+        add(0,'ARC'); add(8,lyr);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
         add(50,e.startAngle); add(51,e.endAngle);
       } else if (e.type === 'polyline'){
-        add(0,'LWPOLYLINE'); add(8,'0'); add(90,e.points.length); add(70, e.closed?1:0);
+        add(0,'LWPOLYLINE'); add(8,lyr); add(90,e.points.length); add(70, e.closed?1:0);
         for (const p of e.points){ add(10,p.x); add(20,p.y); }
       } else if (e.type === 'text'){
-        add(0,'TEXT'); add(8,'0');
+        add(0,'TEXT'); add(8,lyr);
         add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
         add(1, e.content);
+      } else if (e.type === 'hatch'){
+        // exported as its plain boundary outline + hatch lines (lightweight — not a true DXF HATCH entity)
+        const b = e.boundary;
+        if (b.kind === 'circle'){ add(0,'CIRCLE'); add(8,lyr); add(10,b.cx); add(20,b.cy); add(30,0); add(40,b.r); }
+        else { add(0,'LWPOLYLINE'); add(8,lyr); add(90,b.points.length); add(70,1); for (const p of b.points){ add(10,p.x); add(20,p.y); } }
+        for (const s of (e.lines||[])){ add(0,'LINE'); add(8,lyr); add(10,s.x1); add(20,s.y1); add(30,0); add(11,s.x2); add(21,s.y2); add(31,0); }
       }
     }
     add(0,'ENDSEC');
@@ -1600,140 +2751,6 @@
     nextId = entities.reduce((m,e)=>Math.max(m,e.id||0), 0) + 1;
   }
 
-  // ============================================================
-  // BARGE BALLAST <-> CAD bridge (JSON round-trip)
-  // Import: turns a "barge-project-export" JSON (produced by the
-  // index.html Barge Ballast app) into tagged CAD entities:
-  //   - hull outline  -> closed polyline,  meta.source = 'hull'
-  //   - each tank      -> rect + label text, meta.source = 'tank'
-  //   - each trailer axle -> circle,        meta.source = 'axle'
-  // The meta object carries the Excel row (and other identifiers)
-  // so a later "Export to Barge" can write positions back to the
-  // exact same Excel cells they came from. Entities without this
-  // meta tag (anything you draw freehand) are left out of that
-  // export — they're CAD-only annotations.
-  // ============================================================
-  const BARGE_SCHEMA_TYPE = 'barge-project-export';
-
-  function importBargeProject(data){
-    if (!data || typeof data !== 'object') throw new Error('Not a valid Barge Ballast export file.');
-    snapshot();
-    const added = [];
-
-    if (data.hull){
-      const xMin = Math.min(data.hull.xMin, data.hull.xMax);
-      const xMax = Math.max(data.hull.xMin, data.hull.xMax);
-      const yMin = Math.min(data.hull.yMin, data.hull.yMax);
-      const yMax = Math.max(data.hull.yMin, data.hull.yMax);
-      const w = xMax - xMin, h = yMax - yMin;
-      const bowTaper = w * 0.10, sternCut = w * 0.09, sternRound = h * 0.18;
-      // Same silhouette proportions as the barge app's drawHullOutline()
-      // (flat bow rail, sharp diagonal bow cut, rounded stern cut),
-      // approximated with straight segments for the CAD polyline.
-      const pts = [
-        { x: xMin, y: yMax },
-        { x: xMax, y: yMax },
-        { x: xMax - bowTaper, y: yMin },
-        { x: xMin + sternCut + sternRound, y: yMin },
-        { x: xMin + sternCut * 0.3, y: yMin + sternRound * 0.8 },
-      ];
-      added.push({ id: 0, type: 'polyline', points: pts, closed: true, color: '#5b9bd5', width: 2,
-        meta: { source: 'hull' } });
-    }
-
-    (data.tanks || []).forEach(t => {
-      const x1 = t.x - t.width / 2, x2 = t.x + t.width / 2;
-      const y1 = t.y - t.height / 2, y2 = t.y + t.height / 2;
-      added.push({ id: 0, type: 'rect', x1, y1, x2, y2, color: '#4fd1c5', width: 1.5,
-        meta: { source: 'tank', excelRow: t.excelRow, crestRow: t.crestRow, name: t.name, capacity: t.capacity } });
-      added.push({ id: 0, type: 'text', x: x1 + Math.min(0.3, t.width * 0.1), y: t.y,
-        content: t.name || ('Row ' + t.excelRow), height: Math.max(0.5, Math.min(t.height * 0.3, 2)),
-        color: '#4fd1c5', width: 1, meta: { source: 'tank-label', excelRow: t.excelRow } });
-    });
-
-    (data.trailerAxles || []).forEach(a => {
-      added.push({ id: 0, type: 'circle', cx: a.x, cy: a.y, r: 0.5, color: a.color || '#e0a458', width: 1.5,
-        meta: { source: 'axle', excelRow: a.excelRow, axleId: a.id, group: a.group, groupNumber: a.groupNumber, load: a.load, vcg: a.vcg } });
-    });
-
-    entities = entities.concat(added);
-    renumber();
-    zoomToFit(); renderList(); buildPropsForm();
-    return added.length;
-  }
-
-  // Export: walks current entities, pulls out anything tagged with
-  // meta.source (tank / axle / hull), and rebuilds the same schema
-  // with each item's CURRENT position/size — so moving a tank rect
-  // or an axle circle in the CAD editor is what changes the numbers
-  // that go back to Excel.
-  function exportBargeProject(){
-    const out = { type: BARGE_SCHEMA_TYPE, version: 1, exportedAt: new Date().toISOString(), tanks: [], trailerAxles: [] };
-
-    const hullEntity = entities.find(e => e.meta && e.meta.source === 'hull');
-    if (hullEntity && hullEntity.type === 'polyline' && hullEntity.points.length){
-      const xs = hullEntity.points.map(p => p.x), ys = hullEntity.points.map(p => p.y);
-      out.hull = { xMin: Math.min(...xs), xMax: Math.max(...xs), yMin: Math.min(...ys), yMax: Math.max(...ys) };
-    }
-
-    entities.filter(e => e.meta && e.meta.source === 'tank').forEach(e => {
-      const x1 = Math.min(e.x1, e.x2), x2 = Math.max(e.x1, e.x2);
-      const y1 = Math.min(e.y1, e.y2), y2 = Math.max(e.y1, e.y2);
-      out.tanks.push({
-        excelRow: e.meta.excelRow, crestRow: e.meta.crestRow, name: e.meta.name,
-        x: (x1 + x2) / 2, y: (y1 + y2) / 2, width: x2 - x1, height: y2 - y1,
-        capacity: e.meta.capacity
-      });
-    });
-
-    entities.filter(e => e.meta && e.meta.source === 'axle').forEach(e => {
-      out.trailerAxles.push({
-        excelRow: e.meta.excelRow, id: e.meta.axleId, x: e.cx, y: e.cy,
-        load: e.meta.load, vcg: e.meta.vcg, group: e.meta.group, groupNumber: e.meta.groupNumber, color: e.color
-      });
-    });
-
-    return out;
-  }
-
-  document.getElementById('importBargeBtn').onclick = () => document.getElementById('fileImportBarge').click();
-  document.getElementById('fileImportBarge').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        const count = importBargeProject(data);
-        flashHint(`Imported ${count} item(s) from Barge Ballast.`);
-        log('Command: (Barge import) ' + file.name, 'echo');
-        log(`Imported ${data.tanks ? data.tanks.length : 0} tank(s), ${data.trailerAxles ? data.trailerAxles.length : 0} axle(s)${data.hull ? ', hull outline' : ''}.`, 'prompt');
-      } catch(err){
-        flashHint('Import failed: ' + err.message);
-        log('Command: (Barge import) ' + file.name, 'echo');
-        log('Import failed: ' + err.message, 'err');
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  });
-
-  document.getElementById('exportBargeBtn').onclick = () => {
-    const data = exportBargeProject();
-    if (!data.tanks.length && !data.trailerAxles.length && !data.hull){
-      flashHint('Nothing tagged to export — import a Barge project first, or edit its tanks/axles.');
-      return;
-    }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'barge-project.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    flashHint(`Exported ${data.tanks.length} tank(s), ${data.trailerAxles.length} axle(s) for the Barge Ballast app.`);
-    log('Command: (Barge export) barge-project.json', 'echo');
-  };
-
   // Lightweight ASCII-DXF reader. Supports the common drawing entities
   // (LINE, CIRCLE, ARC, LWPOLYLINE, old-style POLYLINE/VERTEX, TEXT, MTEXT,
   // POINT, INSERT-as-marker). It intentionally does NOT support binary DXF,
@@ -1771,7 +2788,7 @@
     const skipped = {};
     const warnings = [];
     const markSkipped = (type) => { skipped[type] = (skipped[type]||0) + 1; };
-    const defaultStyle = { color:'#e0a458', width:1.5 };
+    const defaultStyle = { color:'#e0a458', width:1.5, layer:'0' };
     const supported = new Set(['LINE','CIRCLE','ARC','LWPOLYLINE','POLYLINE','VERTEX','SEQEND','TEXT','MTEXT','POINT','INSERT']);
 
     function readUntilNextEntity(startIdx){
@@ -1867,6 +2884,9 @@
   render();
   buildManualForm();
   buildPropsForm();
+  renderLayers();
+  syncLayerSelect();
+  buildModifyForm();
 })();
 </script>
 </body>
