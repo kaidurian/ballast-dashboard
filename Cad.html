@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>AutoCAD-Style Drafting — 2D CAD Editor</title>
 <style>
   :root{
@@ -252,6 +256,76 @@
   .layer-row .ldel { cursor: pointer; opacity: 0; color: var(--text-dim); flex-shrink:0; }
   .layer-row:hover .ldel { opacity: 0.7; }
   .layer-row .ldel:hover { color: var(--danger); opacity: 1; }
+
+  /* ---------- Mobile / touch responsiveness ---------- */
+  canvas { touch-action: none; } /* we handle all touch gestures ourselves */
+  #sidebar, #cmdLog { -webkit-overflow-scrolling: touch; }
+  #topbar, #modifybar, #statusbar { -webkit-overflow-scrolling: touch; }
+
+  #sidebarToggle { display: none; }
+  #sidebarBackdrop { display: none; }
+
+  @media (max-width: 860px) {
+    #topbar .brand { display: none; }
+    #topbar, #modifybar {
+      flex-wrap: nowrap; overflow-x: auto; padding: 6px 8px;
+    }
+    #topbar::-webkit-scrollbar, #modifybar::-webkit-scrollbar { height: 3px; }
+    button.tool, button.action { padding: 9px 12px; font-size: 13px; min-height: 38px; }
+    input[type=number], select, #cmdInput { font-size: 16px; } /* 16px avoids iOS auto-zoom on focus */
+    input[type=number] { width: 58px; padding: 7px 6px; }
+    input[type=color] { width: 32px; height: 32px; }
+    label.mini { display: none; } /* save horizontal space — inputs are still labeled via title */
+
+    #sidebarToggle {
+      display: flex; margin-left: auto;
+    }
+    #sidebar {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 86vw; max-width: 340px;
+      z-index: 60; transform: translateX(100%); transition: transform 0.22s ease-out;
+      box-shadow: -10px 0 30px rgba(0,0,0,0.6); padding-bottom: 90px;
+    }
+    #sidebar.open { transform: translateX(0); }
+    #sidebarBackdrop {
+      display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+      z-index: 55; opacity: 0; pointer-events: none; transition: opacity 0.22s ease-out;
+    }
+    #sidebarBackdrop.open { opacity: 1; pointer-events: auto; }
+
+    #hint { max-width: 68%; font-size: 10px; padding: 5px 8px; top: 6px; left: 6px; }
+    #coords { font-size: 10px; padding: 5px 7px; top: 6px; right: 6px; }
+    #ucsIcon { display: none; }
+
+    #cmdLog { height: 46px; font-size: 11px; }
+    #cmdInputRow { padding: 6px 10px 8px; }
+
+    #statusbar { overflow-x: auto; flex-wrap: nowrap; }
+    #statusbar .statCoords { min-width: 108px; font-size: 10px; flex-shrink: 0; }
+    button.statToggle { flex-shrink: 0; padding: 6px 8px; }
+  }
+
+  @media (max-width: 480px) {
+    #topbar, #modifybar { gap: 4px; padding: 5px 6px; }
+    button.tool, button.action { padding: 8px 9px; font-size: 12px; }
+    button.tool span, button.action span { display: none; }
+    #sidebar { width: 92vw; }
+  }
+
+  @media (pointer: coarse) {
+    #crosshairV, #crosshairH, #cursorBox { display: none !important; }
+  }
+  body.touch-precision #crosshairV, body.touch-precision #crosshairH, body.touch-precision #cursorBox { display: block !important; }
+  #tgTouchPrecision { display: none; }
+  @media (pointer: coarse) { #tgTouchPrecision { display: inline-flex; } }
+  #touchAnchor {
+    position: absolute; width: 26px; height: 26px; margin-left: -13px; margin-top: -13px;
+    border: 2px solid var(--amber); border-radius: 50%; background: rgba(224,164,88,0.15);
+    pointer-events: none; display: none; z-index: 6;
+  }
+  #touchAnchor::after {
+    content: ''; position: absolute; left: 50%; top: -22px; width: 1px; height: 20px;
+    background: var(--amber); transform: translateX(-50%);
+  }
 </style>
 </head>
 <body>
@@ -296,6 +370,7 @@
     <button class="action" id="exportDxf" title="Export as .dxf">⬇ Export DXF</button>
     <button class="action" id="importDxfBtn" title="Import a .dxf file">⬆ Import DXF</button>
     <input type="file" id="fileImport" accept=".dxf">
+    <button class="action" id="sidebarToggle" title="Show/hide the Layers, Entities, Properties &amp; Modify Options panel">☰ Panel</button>
   </div>
 
   <div id="modifybar">
@@ -308,8 +383,8 @@
     <button class="tool mtool" data-tool="offset" title="Offset — or type O/OFFSET, Enter — pick one entity, set distance in Modify Options, click a side">‖ Offset</button>
     <button class="tool mtool" data-tool="array" title="Array — or type AR/ARRAY, Enter — pick entities, set rows/cols or polar count in Modify Options">▦ Array</button>
     <div class="divider"></div>
-    <button class="tool mtool" data-tool="trim" title="Trim — or type TR/TRIM, Enter — pick one cutting edge, then click the piece to remove">✂ Trim</button>
-    <button class="tool mtool" data-tool="extend" title="Extend — or type EX/EXTEND, Enter — pick one boundary, then click the line to extend">⇥ Extend</button>
+    <button class="tool mtool" data-tool="trim" title="Trim — or type TR/TRIM, Enter — pick one cutting edge (any shape), then click the piece of a line/polyline/circle/arc to remove">✂ Trim</button>
+    <button class="tool mtool" data-tool="extend" title="Extend — or type EX/EXTEND, Enter — pick one boundary, then click an open end of a line/polyline/arc to stretch it">⇥ Extend</button>
     <button class="tool mtool" data-tool="fillet" title="Fillet — or type F/FILLET, Enter — pick exactly 2 lines, set radius, Apply">◜ Fillet</button>
     <button class="tool mtool" data-tool="chamfer" title="Chamfer — or type CHA/CHAMFER, Enter — pick exactly 2 lines, set distance, Apply">◲ Chamfer</button>
     <div class="divider"></div>
@@ -343,7 +418,9 @@
           <input type="text" id="textInput" placeholder="Text content" autofocus>
         </div>
         <div id="selBox"></div>
+        <div id="touchAnchor"></div>
       </div>
+      <div id="sidebarBackdrop"></div>
       <div id="sidebar">
         <h3>Layers</h3>
         <div id="layerList"></div>
@@ -375,7 +452,8 @@
           Del / Backspace — delete selected (all of them)<br>
           Ctrl+Z / Ctrl+Y — undo/redo<br>
           Wheel — zoom (unlimited) · Right-drag or Middle-drag — pan · Middle dblclick — zoom extents<br>
-          Press <b>Enter</b> on an empty command line to repeat the last command
+          Press <b>Enter</b> on an empty command line to repeat the last command<br>
+          <b>Touch:</b> one finger = mouse (draw/select/drag) · two fingers = pinch-zoom + pan · double-tap = finish polyline · <b>👆 Precision</b> (status bar) raises the cursor above your finger for exact placement
         </div>
       </div>
     </div>
@@ -397,6 +475,7 @@
       <button class="statToggle" id="tgOrtho" title="Ortho mode (F8) — constrain to horizontal/vertical">Ortho</button>
       <button class="statToggle" id="tgPolar" title="Polar tracking (F10) — snap angle to 15° increments">Polar</button>
       <button class="statToggle on" id="tgOsnap" title="Object snap — highlight endpoints/centers while drawing">Osnap</button>
+      <button class="statToggle" id="tgTouchPrecision" title="Precision Touch — raises the cursor above your finger so it isn't hidden while you tap/draw">👆 Precision</button>
       <div class="spacer"></div>
       <span class="zoomTag" id="statZoom">Zoom: 100%</span>
       <span class="zoomTag" id="statTool">Tool: SELECT</span>
@@ -904,6 +983,15 @@
   document.getElementById('addLayerBtn').onclick = addLayer;
   document.getElementById('addLayerBtn2').onclick = addLayer;
 
+  // ---------- Mobile sidebar drawer ----------
+  const sidebarEl = document.getElementById('sidebar');
+  const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+  function openSidebar(){ sidebarEl.classList.add('open'); sidebarBackdrop.classList.add('open'); }
+  function closeSidebar(){ sidebarEl.classList.remove('open'); sidebarBackdrop.classList.remove('open'); }
+  document.getElementById('sidebarToggle').onclick = () => sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
+  sidebarBackdrop.addEventListener('click', closeSidebar);
+  sidebarBackdrop.addEventListener('touchstart', (e) => { e.preventDefault(); closeSidebar(); }, {passive:false});
+
   // ---------- Tool switching ----------
   const toolButtons = document.querySelectorAll('button.tool');
   const hints = {
@@ -921,8 +1009,8 @@
     mirror: 'Mirror: select entities first. Click two points to define the mirror axis. Source is kept.',
     offset: 'Offset: select ONE entity, set distance in Modify Options, then click the side to offset toward.',
     array: 'Array: select entities first, set rows/cols or polar count in Modify Options, then Apply.',
-    trim: 'Trim: select ONE cutting edge first, then click the piece of a line you want removed.',
-    extend: 'Extend: select ONE boundary first, then click near the end of the line you want extended.',
+    trim: 'Trim: select ONE cutting edge first (line/rect/circle/arc/polyline), then click the piece of a line, polyline edge, circle, or arc you want removed.',
+    extend: 'Extend: select ONE boundary first, then click near an open end of a line, polyline, or arc to stretch it to the boundary (full circles have no open end).',
     fillet: 'Fillet: select exactly 2 lines, set a radius in Modify Options, then Apply.',
     chamfer: 'Chamfer: select exactly 2 lines, set a distance in Modify Options, then Apply.',
     matchprop: 'Match Properties: select the SOURCE entity first, then click target entities to copy its color/width/layer.',
@@ -1189,11 +1277,16 @@
       if (modifyBoundaryId == null){ flashHint('Select one cutting/boundary entity first, then ' + (tool==='trim'?'Trim.':'Extend.')); setTool('select'); return; }
       const boundary = entities.find(x => x.id === modifyBoundaryId);
       const target = hitTest(world);
-      if (!target || target.id === modifyBoundaryId || target.type !== 'line'){
-        flashHint('Click on a LINE entity near the end you want to ' + tool + '.'); return;
+      const validTypes = tool === 'trim' ? ['line','polyline','circle','arc'] : ['line','polyline','arc'];
+      if (!target || target.id === modifyBoundaryId || !validTypes.includes(target.type)){
+        const hint2 = tool==='trim' ? 'a LINE, POLYLINE edge, CIRCLE, or ARC' : 'a LINE, POLYLINE edge, or ARC (circles have no open end)';
+        flashHint('Click on ' + hint2 + ' to ' + tool + '. (Rectangles: Explode first.)'); return;
       }
-      const ok = tool === 'trim' ? trimLineAt(target, boundary, world) : extendLineAt(target, boundary, world);
-      if (ok){ snapshot_noop_already_applied(); render(); renderList(); log((tool==='trim'?'Trimmed.':'Extended.'), 'prompt'); }
+      const isCircular = target.type === 'circle' || target.type === 'arc';
+      const ok = tool === 'trim'
+        ? (isCircular ? trimCircularAt(target, boundary, world) : trimEntityAt(target, boundary, world))
+        : (isCircular ? extendArcAt(target, boundary, world) : extendEntityAt(target, boundary, world));
+      if (ok){ render(); renderList(); log((tool==='trim'?'Trimmed.':'Extended.'), 'prompt'); }
       else flashHint('No intersection found with the boundary in that direction.');
       return;
     }
@@ -1213,8 +1306,9 @@
     if (tool === 'block'){
       const ids = activeSelectionIds();
       if (!ids.length){ flashHint('Nothing selected. Select entities first, then Block.'); setTool('select'); return; }
-      const name = (prompt('Block name:', 'Block' + (Object.keys(blocks).length+1)) || '').trim();
-      if (!name){ setTool('select'); return; }
+      const nameField = document.getElementById('mo_blockname');
+      const name = ((nameField && nameField.value.trim()) || ('Block' + (Object.keys(blocks).length+1)));
+      if (blocks[name] && !confirm(`Block "${name}" already exists — overwrite it?`)) return;
       blocks[name] = ids.map(id => { const c = JSON.parse(JSON.stringify(entities.find(x=>x.id===id))); delete c.id; translateEntity(c, c, -world.x, -world.y); return c; });
       flashHint(`Block "${name}" defined (${ids.length} entities).`);
       log(`Block "${name}" created from ${ids.length} entities, base point ${world.x.toFixed(2)},${world.y.toFixed(2)}.`, 'prompt');
@@ -1226,16 +1320,21 @@
     if (tool === 'insert'){
       const name = document.getElementById('mo_blockpick')?.value;
       if (!name || !blocks[name]){ flashHint('Pick a block to insert in Modify Options first.'); return; }
-      snapshot();
-      const newIds = [];
-      blocks[name].forEach(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); translateEntity(c, c, world.x, world.y); entities.push(c); newIds.push(c.id); });
-      selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
-      render(); renderList(); buildPropsForm();
-      log(`Inserted block "${name}" at ${world.x.toFixed(2)},${world.y.toFixed(2)}.`, 'prompt');
+      insertBlockAt(name, world);
       return;
     }
   }
   let awaitingCmdText = null;
+
+  function insertBlockAt(name, at){
+    if (!name || !blocks[name]){ flashHint('Pick a block to insert in Modify Options first.'); return; }
+    snapshot();
+    const newIds = [];
+    blocks[name].forEach(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); translateEntity(c, c, at.x, at.y); entities.push(c); newIds.push(c.id); });
+    selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
+    render(); renderList(); buildPropsForm(); buildModifyForm();
+    log(`Inserted block "${name}" at ${at.x.toFixed ? at.x.toFixed(2) : at.x},${at.y.toFixed ? at.y.toFixed(2) : at.y}.`, 'prompt');
+  }
 
   function activeSelectionIds(){
     if (selectedIds.size) return [...selectedIds];
@@ -1248,9 +1347,7 @@
     log(msg, 'prompt');
     setTool('select');
   }
-  // Some in-place edits (trim/extend) call snapshot() themselves before mutating;
-  // this is just a readability marker at the call site.
-  function snapshot_noop_already_applied(){}
+  // trim/extend call snapshot() internally before mutating, right before the edit is applied.
 
   // ---- Geometry helpers shared by Modify tools ----
   function translateEntity(e, o, dx, dy){
@@ -1395,13 +1492,27 @@
     return null;
   }
 
-  // ---- Trim / Extend (line vs line, line vs circle) ----
-  function segSegIntersect(a,b,c,d){
+  // ---- Trim / Extend / Hatch (line vs line, line vs circle) ----
+  // True finite-segment intersection — both the (a,b) AND (c,d) parameters must
+  // land within [0,1], i.e. the crossing must be on the actual boundary edge, not
+  // its infinite extension. This is what Trim/Extend/Hatch boundaries need.
+  function lineLineIntersectRaw(a,b,c,d){
     const d1x=b.x-a.x, d1y=b.y-a.y, d2x=d.x-c.x, d2y=d.y-c.y;
     const denom = d1x*d2y - d1y*d2x;
     if (Math.abs(denom) < 1e-9) return null;
     const t = ((c.x-a.x)*d2y - (c.y-a.y)*d2x) / denom;
-    return { x: a.x + t*d1x, y: a.y + t*d1y, t };
+    const s = ((c.x-a.x)*d1y - (c.y-a.y)*d1x) / denom;
+    return { x: a.x + t*d1x, y: a.y + t*d1y, t, s };
+  }
+  function segSegIntersect(a,b,c,d){
+    const p = lineLineIntersectRaw(a,b,c,d);
+    if (!p || p.s < -1e-9 || p.s > 1+1e-9) return null; // must lie on the finite edge (c,d)
+    return p;
+  }
+  // Unbounded line-line intersection — Fillet/Chamfer legitimately need the
+  // "virtual" corner where two lines would meet even if they don't physically touch.
+  function lineLineIntersectInfinite(a,b,c,d){
+    return lineLineIntersectRaw(a,b,c,d);
   }
   function lineCircleIntersect(a,b,cx,cy,r){
     const dx=b.x-a.x, dy=b.y-a.y;
@@ -1413,14 +1524,35 @@
     const t1=(-B-sq)/(2*A), t2=(-B+sq)/(2*A);
     return [t1,t2].map(t => ({ x:a.x+t*dx, y:a.y+t*dy, t }));
   }
-  function boundaryIntersections(line, boundary){
-    const a = {x:line.x1,y:line.y1}, b = {x:line.x2,y:line.y2};
+  function angleNorm(a){ return ((a%360)+360)%360; }
+  function angleAt(cx,cy,x,y){ return angleNorm(Math.atan2(y-cy, x-cx)*180/Math.PI); }
+  // Arcs sweep counter-clockwise (increasing angle) from startAngle to endAngle.
+  function angleInArcRange(angle, start, end){
+    const sweep = angleNorm(end-start);
+    const rel = angleNorm(angle-start);
+    return rel <= sweep + 1e-6;
+  }
+  function circleCircleIntersect(cx1,cy1,r1,cx2,cy2,r2){
+    const dx=cx2-cx1, dy=cy2-cy1, d=Math.hypot(dx,dy);
+    if (d < 1e-9 || d > r1+r2+1e-9 || d < Math.abs(r1-r2)-1e-9) return [];
+    const a = (r1*r1-r2*r2+d*d)/(2*d);
+    const h2 = Math.max(0, r1*r1-a*a);
+    const h = Math.sqrt(h2);
+    const xm = cx1+a*dx/d, ym = cy1+a*dy/d;
+    const p1 = { x: xm+h*dy/d, y: ym-h*dx/d };
+    const p2 = { x: xm-h*dy/d, y: ym+h*dx/d };
+    return h < 1e-6 ? [p1] : [p1, p2];
+  }
+  function boundaryIntersections(seg, boundary){
+    const a = {x:seg.x1,y:seg.y1}, b = {x:seg.x2,y:seg.y2};
     if (boundary.type === 'line'){
       const p = segSegIntersect(a,b,{x:boundary.x1,y:boundary.y1},{x:boundary.x2,y:boundary.y2});
       return p ? [p] : [];
     }
     if (boundary.type === 'circle' || boundary.type === 'arc'){
-      return lineCircleIntersect(a,b,boundary.cx,boundary.cy,boundary.r);
+      let hits = lineCircleIntersect(a,b,boundary.cx,boundary.cy,boundary.r);
+      if (boundary.type === 'arc') hits = hits.filter(h => angleInArcRange(angleAt(boundary.cx,boundary.cy,h.x,h.y), boundary.startAngle, boundary.endAngle));
+      return hits;
     }
     if (boundary.type === 'rect'){
       const x1=Math.min(boundary.x1,boundary.x2), x2=Math.max(boundary.x1,boundary.x2);
@@ -1430,37 +1562,159 @@
       edges.forEach(([c,d]) => { const p = segSegIntersect(a,b,c,d); if (p) out.push(p); });
       return out;
     }
+    if (boundary.type === 'polyline'){
+      const pts = boundary.points, n = pts.length, out = [];
+      for (let i=0;i<n-1;i++){ const p = segSegIntersect(a,b,pts[i],pts[i+1]); if (p) out.push(p); }
+      if (boundary.closed && n>1){ const p = segSegIntersect(a,b,pts[n-1],pts[0]); if (p) out.push(p); }
+      return out;
+    }
     return [];
   }
-  function trimLineAt(target, boundary, clickWorld){
-    const hits = boundaryIntersections(target, boundary).filter(p => p.t > 1e-6 && p.t < 1-1e-6);
+
+  // Where a circle (cx,cy,r) crosses a boundary's finite edges — the mirror image
+  // of boundaryIntersections() above, used so circles/arcs can be Trim/Extend targets too.
+  function circleBoundaryIntersections(cx,cy,r, boundary){
+    if (boundary.type === 'line'){
+      return lineCircleIntersect({x:boundary.x1,y:boundary.y1},{x:boundary.x2,y:boundary.y2}, cx,cy,r).filter(h=>h.t>=-1e-6 && h.t<=1+1e-6);
+    }
+    if (boundary.type === 'circle' || boundary.type === 'arc'){
+      let hits = circleCircleIntersect(cx,cy,r, boundary.cx,boundary.cy,boundary.r);
+      if (boundary.type === 'arc') hits = hits.filter(h => angleInArcRange(angleAt(boundary.cx,boundary.cy,h.x,h.y), boundary.startAngle, boundary.endAngle));
+      return hits;
+    }
+    if (boundary.type === 'rect'){
+      const x1=Math.min(boundary.x1,boundary.x2), x2=Math.max(boundary.x1,boundary.x2);
+      const y1=Math.min(boundary.y1,boundary.y2), y2=Math.max(boundary.y1,boundary.y2);
+      const edges = [[{x:x1,y:y1},{x:x2,y:y1}],[{x:x2,y:y1},{x:x2,y:y2}],[{x:x2,y:y2},{x:x1,y:y2}],[{x:x1,y:y2},{x:x1,y:y1}]];
+      const out = [];
+      edges.forEach(([a2,b2]) => out.push(...lineCircleIntersect(a2,b2,cx,cy,r).filter(h=>h.t>=-1e-6 && h.t<=1+1e-6)));
+      return out;
+    }
+    if (boundary.type === 'polyline'){
+      const pts = boundary.points, n = pts.length, out = [];
+      for (let i=0;i<n-1;i++) out.push(...lineCircleIntersect(pts[i],pts[i+1],cx,cy,r).filter(h=>h.t>=-1e-6 && h.t<=1+1e-6));
+      if (boundary.closed && n>1) out.push(...lineCircleIntersect(pts[n-1],pts[0],cx,cy,r).filter(h=>h.t>=-1e-6 && h.t<=1+1e-6));
+      return out;
+    }
+    return [];
+  }
+
+  // Trim a circle or arc: find where it crosses the boundary, then keep the piece
+  // that does NOT contain the clicked point (mirrors how Trim works on a line).
+  // With exactly 2 crossings this is exact; with more than 2 it removes the piece
+  // immediately bracketing the click and keeps the rest as one arc spanning the
+  // remainder — correct for the common case, an approximation for busier boundaries.
+  function trimCircularAt(target, boundary, clickWorld){
+    let hits = circleBoundaryIntersections(target.cx, target.cy, target.r, boundary)
+      .map(h => angleAt(target.cx, target.cy, h.x, h.y));
+    if (target.type === 'arc') hits = hits.filter(a => angleInArcRange(a, target.startAngle, target.endAngle));
+    hits = [...new Set(hits.map(a=>Math.round(a*1e6)/1e6))];
+    if (hits.length < 2){ flashHint('Need at least 2 crossing points with the boundary to trim a circle/arc.'); return false; }
+    hits.sort((a,b)=>a-b);
+    const clickAngle = angleAt(target.cx, target.cy, clickWorld.x, clickWorld.y);
+    const base = target.type === 'arc' ? target.startAngle : 0;
+    // find the pair of (angularly sorted) crossings that bracket the click point
+    let lo = hits[hits.length-1], hi = hits[0];
+    for (let i=0;i<hits.length;i++){
+      const a0 = hits[i], a1 = hits[(i+1)%hits.length];
+      if (angleNorm(clickAngle-a0) <= angleNorm(a1-a0) + 1e-6){ lo = a0; hi = a1; break; }
+    }
+    snapshot();
+    target.type = 'arc';
+    target.startAngle = hi; target.endAngle = lo; // keep the OTHER side (hi around to lo), removing lo->hi
+    return true;
+  }
+  // Extend an arc's nearer end outward until it meets the boundary. (Full circles
+  // have no open end, so — like real AutoCAD — only arcs can be extended.)
+  function extendArcAt(target, boundary, clickWorld){
+    if (target.type !== 'arc'){ flashHint('A full circle has no open end to extend — trim it to an arc first.'); return false; }
+    const clickAngle = angleAt(target.cx, target.cy, clickWorld.x, clickWorld.y);
+    // whichever endpoint's angle is numerically closer to the click's angle is the one being extended
+    const distToStart = Math.min(angleNorm(clickAngle-target.startAngle), angleNorm(target.startAngle-clickAngle));
+    const distToEnd = Math.min(angleNorm(clickAngle-target.endAngle), angleNorm(target.endAngle-clickAngle));
+    const wantStart = distToStart < distToEnd;
+    const hits = circleBoundaryIntersections(target.cx, target.cy, target.r, boundary).map(h => angleAt(target.cx, target.cy, h.x, h.y));
     if (!hits.length) return false;
-    const clickT = ((clickWorld.x-target.x1)*(target.x2-target.x1)+(clickWorld.y-target.y1)*(target.y2-target.y1)) / (Math.pow(target.x2-target.x1,2)+Math.pow(target.y2-target.y1,2) || 1);
-    // choose the intersection nearest the clicked side to trim away
+    let best = null, bestGap = Infinity;
+    for (const h of hits){
+      if (wantStart){
+        // moving startAngle backward (decreasing) grows the arc — find nearest hit behind start, outside current sweep
+        const gap = angleNorm(target.startAngle - h);
+        if (gap > 1e-6 && gap < bestGap){ bestGap = gap; best = h; }
+      } else {
+        const gap = angleNorm(h - target.endAngle);
+        if (gap > 1e-6 && gap < bestGap){ bestGap = gap; best = h; }
+      }
+    }
+    if (best == null) return false;
+    snapshot();
+    if (wantStart) target.startAngle = best; else target.endAngle = best;
+    return true;
+  }
+
+  // A "segment view" over a line or polyline, so Trim/Extend can operate on either
+  // one uniformly — including the individual edges of an open polygon.
+  function getEntitySegments(e){
+    if (e.type === 'line') return [{ x1:e.x1,y1:e.y1,x2:e.x2,y2:e.y2, freeStart:true, freeEnd:true, apply:(pt,end)=>{ if(end==='start'){e.x1=pt.x;e.y1=pt.y;} else {e.x2=pt.x;e.y2=pt.y;} } }];
+    if (e.type === 'polyline'){
+      const n = e.points.length, segs = [];
+      for (let i=0;i<n-1;i++){
+        const isFirst = i===0, isLast = i===n-2 && !e.closed;
+        segs.push({ x1:e.points[i].x, y1:e.points[i].y, x2:e.points[i+1].x, y2:e.points[i+1].y,
+          freeStart: isFirst && !e.closed, freeEnd: isLast,
+          apply:(pt,end)=>{ if(end==='start') e.points[i]={x:pt.x,y:pt.y}; else e.points[i+1]={x:pt.x,y:pt.y}; } });
+      }
+      if (e.closed && n>1){
+        segs.push({ x1:e.points[n-1].x, y1:e.points[n-1].y, x2:e.points[0].x, y2:e.points[0].y, freeStart:false, freeEnd:false,
+          apply:(pt,end)=>{ if(end==='start') e.points[n-1]={x:pt.x,y:pt.y}; else e.points[0]={x:pt.x,y:pt.y}; } });
+      }
+      return segs;
+    }
+    return [];
+  }
+  function nearestSegment(segs, clickWorld){
+    let best = null, bestD = Infinity;
+    for (const s of segs){ const d = distToSeg(clickWorld, {x:s.x1,y:s.y1}, {x:s.x2,y:s.y2}); if (d<bestD){ bestD=d; best=s; } }
+    return best;
+  }
+  function trimEntityAt(target, boundary, clickWorld){
+    const segs = getEntitySegments(target);
+    if (!segs.length) return false;
+    const seg = nearestSegment(segs, clickWorld);
+    const hits = boundaryIntersections(seg, boundary).filter(p => p.t > 1e-6 && p.t < 1-1e-6);
+    if (!hits.length) return false;
+    const clickT = ((clickWorld.x-seg.x1)*(seg.x2-seg.x1)+(clickWorld.y-seg.y1)*(seg.y2-seg.y1)) / (Math.pow(seg.x2-seg.x1,2)+Math.pow(seg.y2-seg.y1,2) || 1);
     let best = hits[0], bestD = Math.abs(hits[0].t - clickT);
     for (const h of hits){ const d = Math.abs(h.t-clickT); if (d<bestD){ bestD=d; best=h; } }
     snapshot();
-    if (clickT > best.t){ target.x1 = best.x; target.y1 = best.y; }
-    else { target.x2 = best.x; target.y2 = best.y; }
+    if (clickT > best.t) seg.apply({x:best.x,y:best.y}, 'start');
+    else seg.apply({x:best.x,y:best.y}, 'end');
     return true;
   }
-  function extendLineAt(target, boundary, clickWorld){
-    const dNear = Math.hypot(clickWorld.x-target.x1, clickWorld.y-target.y1) < Math.hypot(clickWorld.x-target.x2, clickWorld.y-target.y2) ? 1 : 2;
-    // build a much longer virtual line in the direction being extended, then intersect
-    const dx = target.x2-target.x1, dy = target.y2-target.y1, len = Math.hypot(dx,dy) || 1;
-    const ux = dx/len, uy = dy/len;
+  function extendEntityAt(target, boundary, clickWorld){
+    const segs = getEntitySegments(target);
+    if (!segs.length) return false;
+    const seg = nearestSegment(segs, clickWorld);
+    const dStart = Math.hypot(clickWorld.x-seg.x1, clickWorld.y-seg.y1);
+    const dEnd = Math.hypot(clickWorld.x-seg.x2, clickWorld.y-seg.y2);
+    const wantStart = dStart < dEnd;
+    if (wantStart ? !seg.freeStart : !seg.freeEnd){
+      flashHint('That end is shared with another segment and can\'t be extended — click nearer an open end.');
+      return false;
+    }
+    const dx = seg.x2-seg.x1, dy = seg.y2-seg.y1, len = Math.hypot(dx,dy) || 1, ux = dx/len, uy = dy/len;
     const big = 1e6;
-    const virtual = dNear===1
-      ? { x1: target.x1-ux*big, y1: target.y1-uy*big, x2: target.x2, y2: target.y2 }
-      : { x1: target.x1, y1: target.y1, x2: target.x2+ux*big, y2: target.y2+uy*big };
+    const virtual = wantStart
+      ? { x1: seg.x1-ux*big, y1: seg.y1-uy*big, x2: seg.x2, y2: seg.y2 }
+      : { x1: seg.x1, y1: seg.y1, x2: seg.x2+ux*big, y2: seg.y2+uy*big };
     const hits = boundaryIntersections(virtual, boundary);
     if (!hits.length) return false;
+    const from = wantStart ? {x:seg.x1,y:seg.y1} : {x:seg.x2,y:seg.y2};
     let best = null, bestD = Infinity;
-    const from = dNear===1 ? {x:target.x1,y:target.y1} : {x:target.x2,y:target.y2};
     for (const h of hits){ const d = Math.hypot(h.x-from.x, h.y-from.y); if (d<bestD && d>1e-6){ bestD=d; best=h; } }
     if (!best) return false;
     snapshot();
-    if (dNear===1){ target.x1 = best.x; target.y1 = best.y; } else { target.x2 = best.x; target.y2 = best.y; }
+    seg.apply({x:best.x,y:best.y}, wantStart ? 'start' : 'end');
     return true;
   }
 
@@ -1475,18 +1729,29 @@
     return null;
   }
   function clipLineToPolygon(a, b, pts){
-    // sample the segment finely and keep only sub-segments whose midpoint is inside the polygon
-    const N = 40;
-    const segs = [];
-    let runStart = null;
-    for (let i=0;i<=N;i++){
-      const t = i/N;
-      const mx = a.x+(b.x-a.x)*t, my = a.y+(b.y-a.y)*t;
-      const inside = pointInPolygon({x:mx,y:my}, pts);
-      if (inside && runStart===null) runStart = {x:mx,y:my};
-      if (!inside && runStart!==null){ segs.push({x1:runStart.x,y1:runStart.y,x2:mx,y2:my}); runStart=null; }
+    // Exact clip: find every real crossing of (a,b) with the polygon's finite edges,
+    // sort those crossing points along the line, then keep whichever runs between
+    // them have their midpoint truly inside the polygon. This replaces an earlier
+    // sampling-based approximation that could let hatch lines poke past straight
+    // edges (e.g. a rectangle) when a crossing fell between sample points.
+    const n = pts.length;
+    const dx = b.x-a.x, dy = b.y-a.y;
+    const ts = [0, 1];
+    for (let i=0;i<n;i++){
+      const p1 = pts[i], p2 = pts[(i+1)%n];
+      const hit = segSegIntersect(a, b, p1, p2);
+      if (hit && hit.t > 1e-9 && hit.t < 1-1e-9) ts.push(hit.t);
     }
-    if (runStart!==null) segs.push({x1:runStart.x,y1:runStart.y,x2:b.x,y2:b.y});
+    ts.sort((x,y) => x-y);
+    const segs = [];
+    for (let i=0;i<ts.length-1;i++){
+      const t0 = ts[i], t1 = ts[i+1];
+      if (t1-t0 < 1e-9) continue;
+      const tm = (t0+t1)/2;
+      if (pointInPolygon({x:a.x+dx*tm, y:a.y+dy*tm}, pts)){
+        segs.push({ x1:a.x+dx*t0, y1:a.y+dy*t0, x2:a.x+dx*t1, y2:a.y+dy*t1 });
+      }
+    }
     return segs;
   }
   function generateHatchLines(boundary, spacing, angleDeg){
@@ -1522,6 +1787,7 @@
   const MIDDLE_DBLCLICK_MS = 350;
 
   canvas.addEventListener('mousedown', (e) => {
+    if (sidebarEl.classList.contains('open')) closeSidebar();
     const rect = wrap.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const world = resolveWorldPoint(sx, sy);
@@ -1719,6 +1985,102 @@
     view.offsetY -= (worldAfter.y - worldBefore.y) * view.scale;
     render();
   }, { passive:false });
+
+  // ---------- Touch support (phones / tablets) ----------
+  // One finger acts like the left mouse button (draw / select / drag) by replaying
+  // the exact same mousedown/mousemove/mouseup handlers through synthetic MouseEvents.
+  // Two fingers pinch-zoom and pan together, anchored to the pinch midpoint.
+  let touchGesture = null; // { dist, mid } while 2 fingers are down
+  let lastTapInfo = null;  // for double-tap-to-finish-polyline
+  let touchPrecision = false; // when on, the cursor is raised above the finger so it's not hidden
+  const TOUCH_OFFSET_Y = 46; // CSS px the cursor is raised above the actual touch point
+  const touchAnchorEl = document.getElementById('touchAnchor');
+  const tgTouchPrecisionBtn = document.getElementById('tgTouchPrecision');
+  tgTouchPrecisionBtn.onclick = () => {
+    touchPrecision = !touchPrecision;
+    tgTouchPrecisionBtn.classList.toggle('on', touchPrecision);
+    document.body.classList.toggle('touch-precision', touchPrecision);
+    if (!touchPrecision) touchAnchorEl.style.display = 'none';
+    flashHint(touchPrecision ? 'Precision Touch on — the cursor now floats above your finger.' : 'Precision Touch off — your finger is the cursor.');
+  };
+  function dispatchSynthMouse(type, clientX, clientY){
+    canvas.dispatchEvent(new MouseEvent(type, { clientX, clientY, bubbles:true, cancelable:true, button:0 }));
+  }
+  // Raises the effective touch point above the physical finger when Precision Touch
+  // is on, so the crosshair/reticle isn't hidden underneath your fingertip — a
+  // common technique in touch drawing apps for placing exact points.
+  function dispatchSynthMouseTouch(type, t, rect){
+    if (touchPrecision){
+      touchAnchorEl.style.left = (t.clientX - rect.left) + 'px';
+      touchAnchorEl.style.top = (t.clientY - rect.top) + 'px';
+      touchAnchorEl.style.display = 'block';
+      dispatchSynthMouse(type, t.clientX, t.clientY - TOUCH_OFFSET_Y);
+    } else {
+      dispatchSynthMouse(type, t.clientX, t.clientY);
+    }
+  }
+  function touchRelPoint(t, rect){ return { x: t.clientX - rect.left, y: t.clientY - rect.top }; }
+  function touchDist(touches){ return Math.hypot(touches[0].clientX-touches[1].clientX, touches[0].clientY-touches[1].clientY); }
+  function touchMidScreen(touches, rect){ return { x: (touchRelPoint(touches[0],rect).x + touchRelPoint(touches[1],rect).x)/2, y: (touchRelPoint(touches[0],rect).y + touchRelPoint(touches[1],rect).y)/2 }; }
+
+  canvas.addEventListener('touchstart', (e) => {
+    const rect = wrap.getBoundingClientRect();
+    if (e.touches.length === 1){
+      touchGesture = null;
+      const t = e.touches[0];
+      dispatchSynthMouseTouch('mousedown', t, rect);
+      // double-tap detection, mirrors dblclick-to-finish-polyline
+      const now = Date.now();
+      const p = touchRelPoint(t, rect);
+      if (lastTapInfo && now - lastTapInfo.time < 350 && Math.hypot(p.x-lastTapInfo.x, p.y-lastTapInfo.y) < 20){
+        if (tool === 'polyline' && polyPoints.length >= 2) finishPolyline();
+        lastTapInfo = null;
+      } else {
+        lastTapInfo = { time: now, x: p.x, y: p.y };
+      }
+    } else if (e.touches.length === 2){
+      dragging = null; selBoxStart = null; // a second finger cancels any single-finger drag/select-box in progress
+      touchAnchorEl.style.display = 'none';
+      touchGesture = { dist: touchDist(e.touches), mid: touchMidScreen(e.touches, rect) };
+    }
+    e.preventDefault();
+  }, { passive:false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    const rect = wrap.getBoundingClientRect();
+    if (e.touches.length === 1 && !touchGesture){
+      dispatchSynthMouseTouch('mousemove', e.touches[0], rect);
+    } else if (e.touches.length === 2){
+      const dist = touchDist(e.touches), mid = touchMidScreen(e.touches, rect);
+      if (touchGesture){
+        const worldAtOldMid = screenToWorld(touchGesture.mid.x, touchGesture.mid.y);
+        const factor = dist / (touchGesture.dist || dist);
+        view.scale = Math.max(1e-6, Math.min(1e9, view.scale * factor));
+        const worldAfter = screenToWorld(touchGesture.mid.x, touchGesture.mid.y);
+        view.offsetX += (worldAfter.x - worldAtOldMid.x) * view.scale;
+        view.offsetY -= (worldAfter.y - worldAtOldMid.y) * view.scale;
+        view.offsetX += (mid.x - touchGesture.mid.x);
+        view.offsetY += (mid.y - touchGesture.mid.y);
+        render();
+      }
+      touchGesture = { dist, mid };
+    }
+    e.preventDefault();
+  }, { passive:false });
+
+  canvas.addEventListener('touchend', (e) => {
+    if (e.touches.length === 0){
+      const t = e.changedTouches[0];
+      if (t) dispatchSynthMouseTouch('mouseup', t, wrap.getBoundingClientRect());
+      touchGesture = null;
+      touchAnchorEl.style.display = 'none';
+      crosshairV.style.display = 'none'; crosshairH.style.display = 'none'; cursorBox.style.display = 'none';
+    } else if (e.touches.length === 1){
+      touchGesture = null; // dropped from 2 fingers to 1 — next move resumes as a plain single-touch drag
+    }
+    e.preventDefault();
+  }, { passive:false });
+  canvas.addEventListener('touchcancel', () => { touchGesture = null; dragging = null; selBoxStart = null; touchAnchorEl.style.display = 'none'; }, { passive:true });
 
   // ---------- Text input popup ----------
   const textPrompt = document.getElementById('textPrompt');
@@ -2232,7 +2594,7 @@
 
     if (tool === 'trim' || tool === 'extend'){
       const b = modifyBoundaryId!=null ? entities.find(x=>x.id===modifyBoundaryId) : null;
-      html += b ? `<div class="empty-note">Boundary: ${b.type} #${b.id}. Click a target LINE on canvas.</div>`
+      html += b ? `<div class="empty-note">Boundary: ${b.type} #${b.id}. Click a target LINE, POLYLINE edge, CIRCLE, or ARC on canvas.</div>`
                 : `<div class="empty-note">Select exactly one entity to use as the ${tool==='trim'?'cutting edge':'boundary'}, then re-pick this tool.</div>`;
       modifyBody.innerHTML = html;
       return;
@@ -2310,9 +2672,27 @@
     }
 
     if (tool === 'block'){
-      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected. Click a base point on canvas to define the block.</div>`;
+      const c = selectionCentroid(ids);
+      const defaultName = 'Block' + (Object.keys(blocks).length+1);
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected.</div>`;
+      html += `<div class="form-row"><label>Name</label><input type="text" id="mo_blockname" value="${defaultName}" placeholder="Block name"></div>`;
+      html += row('Base X', numInput('mo_bpx', c.x.toFixed(2)));
+      html += row('Base Y', numInput('mo_bpy', c.y.toFixed(2)));
+      html += `<button class="formBtn" id="mo_apply">⬒ Create Block</button>`;
+      html += `<div class="empty-note">Tip: you can also just tap the canvas — that sets the base point and creates the block immediately using the name above.</div>`;
       if (Object.keys(blocks).length) html += `<div class="empty-note">Existing blocks: ${Object.keys(blocks).join(', ')}</div>`;
       modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        if (!ids.length){ flashHint('Nothing selected.'); return; }
+        const name = (document.getElementById('mo_blockname').value.trim()) || defaultName;
+        const base = { x: gv('mo_bpx'), y: gv('mo_bpy') };
+        if (blocks[name] && !confirm(`Block "${name}" already exists — overwrite it?`)) return;
+        blocks[name] = ids.map(id => { const cl = JSON.parse(JSON.stringify(entities.find(x=>x.id===id))); delete cl.id; translateEntity(cl, cl, -base.x, -base.y); return cl; });
+        log(`Block "${name}" created from ${ids.length} entities, base point ${base.x},${base.y}.`, 'prompt');
+        flashHint(`Block "${name}" defined.`);
+        buildModifyForm();
+        setTool('select');
+      };
       return;
     }
 
@@ -2320,8 +2700,16 @@
       const names = Object.keys(blocks);
       if (!names.length){ modifyBody.innerHTML = `<div class="empty-note">No blocks defined yet. Use Block first to create one.</div>`; return; }
       html += `<div class="form-row"><label>Block</label><select id="mo_blockpick">${names.map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div>`;
-      html += `<div class="empty-note">Click on canvas to place the selected block.</div>`;
+      html += row('At X', numInput('mo_ipx', 0));
+      html += row('At Y', numInput('mo_ipy', 0));
+      html += `<button class="formBtn" id="mo_apply">⬓ Insert Block</button>`;
+      html += `<div class="empty-note">Or tap the canvas to place it exactly where you tap.</div>`;
       modifyBody.innerHTML = html;
+      document.getElementById('mo_apply').onclick = () => {
+        const name = document.getElementById('mo_blockpick').value;
+        const at = { x: gv('mo_ipx'), y: gv('mo_ipy') };
+        insertBlockAt(name, at);
+      };
       return;
     }
 
@@ -2343,7 +2731,7 @@
   }
 
   function applyFillet(l1, l2, radius){
-    const p = segSegIntersect({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
+    const p = lineLineIntersectInfinite({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
     if (!p){ flashHint('Selected lines don\'t intersect (when extended).'); return; }
     // Angle between the two lines (as directed from the intersection point toward
     // whichever endpoint is nearer), used to convert a fillet radius into the
@@ -2380,7 +2768,7 @@
   }
 
   function applyChamfer(l1, l2, dist){
-    const p = segSegIntersect({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
+    const p = lineLineIntersectInfinite({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
     if (!p){ flashHint('Selected lines don\'t intersect (when extended).'); return; }
     const clip = (l) => {
       const dx=l.x2-l.x1, dy=l.y2-l.y1, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len;
@@ -2878,6 +3266,7 @@
 
   // ---------- Init ----------
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 300));
   resize();
   view.offsetX = wrap.clientWidth/2;
   view.offsetY = wrap.clientHeight/2;
