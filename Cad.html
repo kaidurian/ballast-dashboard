@@ -1,0 +1,1873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AutoCAD-Style Drafting — 2D CAD Editor</title>
+<style>
+  :root{
+    --bg: #000000;
+    --panel: #2b2b2b;
+    --panel-2: #383838;
+    --panel-border: #4a4a4a;
+    --grid-minor: #1a1a1a;
+    --grid-major: #262626;
+    --axis-x: #c0392b;
+    --axis-y: #2e7d32;
+    --axis: #4a4a4a;
+    --cyan: #4fd1c5;
+    --amber: #e0a458;
+    --acad-blue: #5b9bd5;
+    --text: #d8d8d8;
+    --text-dim: #9a9a9a;
+    --danger: #e0685f;
+    --statusbar: #232323;
+    --statusbar-on: #3a5a72;
+    --cmdline: #1c1c1c;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: var(--mono); overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* Top bar (classic AutoCAD toolbar strip) */
+  #topbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; background: linear-gradient(var(--panel-2), var(--panel));
+    border-bottom: 1px solid #111;
+    box-shadow: 0 1px 0 #555 inset;
+    flex-wrap: wrap;
+  }
+  #topbar .brand {
+    font-weight: 700; letter-spacing: 0.08em; color: var(--acad-blue);
+    font-size: 12px; margin-right: 14px; text-transform: uppercase;
+  }
+  .divider { width: 1px; height: 22px; background: var(--panel-border); margin: 0 6px; }
+
+  button.tool, button.action {
+    background: var(--panel-2); border: 1px solid #1a1a1a;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset;
+    color: var(--text-dim); padding: 6px 10px; font-size: 12px;
+    font-family: var(--mono); border-radius: 2px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  button.tool:hover, button.action:hover { border-color: var(--acad-blue); color: var(--text); }
+  button.tool.active { background: var(--statusbar-on); border-color: var(--acad-blue); color: #fff; }
+  button.action.danger:hover { border-color: var(--danger); color: var(--danger); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.tool:disabled:hover, button.action:disabled:hover { border-color: var(--panel-border); color: var(--text-dim); }
+
+  input[type=color] {
+    width: 26px; height: 26px; border: 1px solid var(--panel-border); background: none;
+    padding: 0; border-radius: 3px; cursor: pointer;
+  }
+  input[type=number], select {
+    background: #0a0f14; border: 1px solid var(--panel-border); color: var(--text);
+    font-family: var(--mono); font-size: 12px; padding: 5px 6px; border-radius: 3px; width: 64px;
+  }
+  select { width: auto; }
+  label.mini { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-right: 3px;}
+
+  /* Main area */
+  #main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #workArea { flex: 1; display: flex; min-height: 0; }
+  #canvasWrap { flex: 1; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; cursor: none; background: var(--bg); }
+
+  /* Full-span crosshair cursor, classic AutoCAD style */
+  #crosshairV, #crosshairH {
+    position: absolute; background: #d8d8d8; pointer-events: none; opacity: 0.85; z-index: 5; display: none;
+  }
+  #crosshairV { top: 0; bottom: 0; width: 1px; }
+  #crosshairH { left: 0; right: 0; height: 1px; }
+  #cursorBox {
+    position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
+    border: 1px solid #d8d8d8; pointer-events: none; z-index: 5; display: none;
+  }
+
+  /* UCS icon, bottom-left of viewport */
+  #ucsIcon { position: absolute; left: 14px; bottom: 14px; pointer-events: none; z-index: 4; }
+
+  #hint {
+    position: absolute; left: 12px; top: 10px;
+    font-size: 11px; color: var(--text-dim); background: rgba(30,30,30,0.85);
+    padding: 6px 10px; border: 1px solid var(--panel-border); border-radius: 3px;
+    pointer-events: none; max-width: 55%; z-index: 6;
+  }
+  #coords {
+    position: absolute; right: 12px; top: 10px;
+    font-size: 11px; color: var(--acad-blue); background: rgba(30,30,30,0.85);
+    padding: 6px 10px; border: 1px solid var(--panel-border); border-radius: 3px;
+    pointer-events: none; z-index: 6;
+  }
+
+  /* Command line — docked below the drawing area, classic AutoCAD text window */
+  #cmdline {
+    background: var(--cmdline); border-top: 1px solid #000; border-bottom: 1px solid #000;
+    flex-shrink: 0; font-size: 12px;
+  }
+  #cmdLog {
+    height: 64px; overflow-y: auto; padding: 4px 10px; color: #c9c9c9;
+    line-height: 1.5; white-space: pre-wrap;
+  }
+  #cmdLog .echo { color: #7fb2e5; }
+  #cmdLog .prompt { color: #d8d8d8; }
+  #cmdLog .err { color: #e0685f; }
+  #cmdInputRow { display: flex; align-items: center; padding: 3px 10px 6px; gap: 6px; }
+  #cmdInputRow .cmdLabel { color: var(--text-dim); flex-shrink: 0; }
+  #cmdInput {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #ffffff; font-family: var(--mono); font-size: 12px; padding: 3px 0;
+  }
+
+  /* Status bar — classic AutoCAD bottom strip with toggle buttons */
+  #statusbar {
+    display: flex; align-items: center; gap: 4px; padding: 4px 10px;
+    background: var(--statusbar); border-top: 1px solid #111; flex-shrink: 0; font-size: 10.5px;
+  }
+  #statusbar .statCoords {
+    color: var(--acad-blue); padding: 3px 10px; border: 1px solid var(--panel-border);
+    border-radius: 2px; min-width: 150px; background: #181818;
+  }
+  #statusbar .spacer { flex: 1; }
+  button.statToggle {
+    background: transparent; border: 1px solid transparent; color: var(--text-dim);
+    padding: 4px 8px; font-size: 10px; font-family: var(--mono); border-radius: 2px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  button.statToggle:hover { border-color: var(--panel-border); color: var(--text); }
+  button.statToggle.on { background: var(--statusbar-on); color: #fff; border-color: var(--acad-blue); }
+  #statusbar .zoomTag { color: var(--text-dim); padding: 3px 8px; }
+
+  /* Side panel */
+  #sidebar {
+    width: 220px; background: var(--panel); border-left: 1px solid var(--panel-border);
+    padding: 14px; overflow-y: auto; font-size: 12px;
+  }
+  #sidebar h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-dim); margin: 0 0 8px; border-bottom: 1px solid var(--panel-border); padding-bottom: 6px;
+  }
+  .field { margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+  .entity-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 6px; border-radius: 3px; cursor: pointer; color: var(--text-dim);
+  }
+  .entity-row:hover { background: rgba(255,255,255,0.03); }
+  .entity-row.selected { background: rgba(79,209,197,0.12); color: var(--cyan); }
+  .entity-row .swatch { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .entity-row .lbl { flex: 1; margin: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entity-row .del { color: var(--text-dim); opacity: 0; }
+  .entity-row:hover .del { opacity: 1; }
+  .entity-row .del:hover { color: var(--danger); }
+  #entityList { max-height: 220px; overflow-y: auto; margin-bottom: 16px; }
+  #entityList:empty::after { content: 'No entities yet.'; color: var(--text-dim); font-style: italic; }
+
+  input#fileImport { display: none; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; }
+
+  .empty-note { color: var(--text-dim); font-style: italic; font-size: 11px; line-height:1.5; }
+  .form-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 7px;
+  }
+  .form-row label { color: var(--text-dim); font-size: 11px; flex: 1; }
+  .form-row input[type=number], .form-row input[type=text] {
+    width: 84px; flex-shrink: 0;
+  }
+  .form-row.checkline { justify-content: flex-start; }
+  .form-row.checkline input { margin-right: 6px; width: auto; }
+  .form-row.checkline label { flex: none; }
+  button.formBtn {
+    width: 100%; margin-top: 4px; margin-bottom: 4px;
+    background: rgba(79,209,197,0.1); border: 1px solid var(--cyan); color: var(--cyan);
+    padding: 7px; font-size: 11px; font-family: var(--mono); border-radius: 3px; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  button.formBtn:hover { background: rgba(79,209,197,0.2); }
+  button.formBtn.secondary {
+    background: transparent; border-color: var(--panel-border); color: var(--text-dim);
+  }
+  button.formBtn.dangerBtn { border-color: var(--danger); color: var(--danger); background: transparent; }
+  .divider-thin { height: 1px; background: var(--panel-border); margin: 10px 0; }
+  .point-row {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px;
+  }
+  .point-row span { color: var(--text-dim); width: 16px; }
+  .point-row input { width: 56px; }
+  .point-row .rm { color: var(--text-dim); cursor: pointer; margin-left: auto; }
+  .point-row .rm:hover { color: var(--danger); }
+  .mode-toggle { display: flex; gap: 6px; margin-bottom: 8px; }
+  .mode-toggle button {
+    flex: 1; background: transparent; border: 1px solid var(--panel-border); color: var(--text-dim);
+    font-size: 10px; padding: 5px; border-radius: 3px; cursor: pointer; font-family: var(--mono);
+  }
+  .mode-toggle button.active { border-color: var(--amber); color: var(--amber); }
+
+  #textPrompt {
+    position: absolute; background: var(--panel); border: 1px solid var(--cyan);
+    border-radius: 4px; padding: 8px; display: none; z-index: 10;
+  }
+  #textPrompt input {
+    width: 160px; background: #0a0f14; border: 1px solid var(--panel-border);
+    color: var(--text); font-family: var(--mono); padding: 5px; border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="brand">Drafting Table — AutoCAD-Style</div>
+
+    <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
+    <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
+    <button class="tool" data-tool="rect" title="Rectangle — or type REC, Enter">▭ Rect</button>
+    <button class="tool" data-tool="circle" title="Circle — or type C, Enter">◯ Circle</button>
+    <button class="tool" data-tool="arc" title="Arc — or type A, Enter — 3 clicks: center, radius/start, end">◠ Arc</button>
+    <button class="tool" data-tool="polyline" title="Polyline — or type PL, Enter — click points, Enter/dblclick to finish">⟍ Poly</button>
+    <button class="tool" data-tool="text" title="Text — or type T, Enter">A Text</button>
+
+    <div class="divider"></div>
+    <label class="mini">Color</label>
+    <input type="color" id="colorPicker" value="#4fd1c5">
+    <label class="mini">Width</label>
+    <input type="number" id="lineWidth" value="1.5" min="0.5" max="8" step="0.5">
+    <label class="mini">Snap</label>
+    <select id="snapGrid">
+      <option value="0">Off</option>
+      <option value="1" selected>1</option>
+      <option value="5">5</option>
+      <option value="10">10</option>
+    </select>
+
+    <div class="divider"></div>
+    <button class="action" id="undoBtn" title="Undo (Ctrl+Z)">↶ Undo</button>
+    <button class="action" id="redoBtn" title="Redo (Ctrl+Y)">↷ Redo</button>
+    <button class="action danger" id="clearBtn" title="Clear all">🗑 Clear</button>
+
+    <div class="divider"></div>
+    <button class="action" id="zoomFit" title="Zoom to fit">⤢ Fit</button>
+    <button class="action" id="saveProj" title="Save project (persists in this artifact)">💾 Save</button>
+    <button class="action" id="loadProj" title="Load saved project">📂 Load</button>
+
+    <div class="divider"></div>
+    <button class="action" id="exportDxf" title="Export as .dxf">⬇ Export DXF</button>
+    <button class="action" id="importDxfBtn" title="Import a .dxf file">⬆ Import DXF</button>
+    <input type="file" id="fileImport" accept=".dxf">
+
+    <div class="divider"></div>
+    <button class="action" id="importBargeBtn" title="Import tanks, trailer axles &amp; hull outline from a Barge Ballast export (.json)">⬆ Import from Barge</button>
+    <button class="action" id="exportBargeBtn" title="Export tanks, trailer axles &amp; hull outline back to a Barge Ballast project (.json)">⬇ Export to Barge</button>
+    <input type="file" id="fileImportBarge" accept=".json">
+  </div>
+
+  <div id="main">
+    <div id="workArea">
+      <div id="canvasWrap">
+        <canvas id="cv"></canvas>
+        <div id="crosshairV"></div>
+        <div id="crosshairH"></div>
+        <div id="cursorBox"></div>
+        <svg id="ucsIcon" width="46" height="46" viewBox="0 0 46 46">
+          <line x1="6" y1="40" x2="6" y2="10" stroke="#3a9d4f" stroke-width="2"/>
+          <polygon points="6,4 2,12 10,12" fill="#3a9d4f"/>
+          <line x1="6" y1="40" x2="36" y2="40" stroke="#c0392b" stroke-width="2"/>
+          <polygon points="42,40 34,36 34,44" fill="#c0392b"/>
+          <text x="10" y="12" fill="#3a9d4f" font-size="9" font-family="monospace">Y</text>
+          <text x="32" y="38" fill="#c0392b" font-size="9" font-family="monospace">X</text>
+        </svg>
+        <div id="hint">Select tool active. Click an entity to select and drag to move.</div>
+        <div id="coords">x: 0.00  y: 0.00</div>
+        <div id="textPrompt">
+          <input type="text" id="textInput" placeholder="Text content" autofocus>
+        </div>
+      </div>
+      <div id="sidebar">
+        <h3>Entities</h3>
+        <div id="entityList"></div>
+
+        <h3>Properties <span id="propsTypeTag"></span></h3>
+        <div id="propsBody"><div class="empty-note">No entity selected. Click an entity to edit its exact values.</div></div>
+
+        <h3>Create by Dimensions</h3>
+        <div id="manualBody"></div>
+
+        <h3>Drawing Info</h3>
+        <div class="field"><span>Count</span><span id="infoCount">0</span></div>
+        <div class="field"><span>Zoom</span><span id="infoZoom">100%</span></div>
+        <div class="field"><span>Units</span><span>mm (unitless)</span></div>
+        <h3>Keys</h3>
+        <div style="color:var(--text-dim); line-height:1.8; font-size:11px;">
+          Just start typing (anywhere) to enter a command — e.g. <b>L</b>, <b>C</b>, <b>REC</b>, <b>A</b>, <b>PL</b>, <b>T</b>, then <b>Enter</b><br>
+          Esc — cancel draw<br>
+          Enter (with nothing typed) / dblclick — finish polyline<br>
+          Del / Backspace — delete selected<br>
+          Ctrl+Z / Ctrl+Y — undo/redo<br>
+          Wheel — zoom (unlimited) · Right-drag or Middle-drag — pan · Middle dblclick — zoom extents<br>
+          Press <b>Enter</b> on an empty command line to repeat the last command
+        </div>
+      </div>
+    </div>
+
+    <!-- Command line (classic AutoCAD text window) -->
+    <div id="cmdline">
+      <div id="cmdLog"></div>
+      <div id="cmdInputRow">
+        <span class="cmdLabel">Command:</span>
+        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Start typing anywhere on the page — e.g. LINE, CIRCLE, REC, ARC, PLINE, TEXT, MOVE, ERASE, UNDO, ZOOM, HELP — then press Enter">
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="statusbar">
+      <span class="statCoords" id="statCoords">0.00, 0.00, 0.00</span>
+      <button class="statToggle on" id="tgSnap" title="Snap to grid (F9)">Snap</button>
+      <button class="statToggle on" id="tgGrid" title="Show grid (F7)">Grid</button>
+      <button class="statToggle" id="tgOrtho" title="Ortho mode (F8) — constrain to horizontal/vertical">Ortho</button>
+      <button class="statToggle" id="tgPolar" title="Polar tracking (F10) — snap angle to 15° increments">Polar</button>
+      <button class="statToggle on" id="tgOsnap" title="Object snap — highlight endpoints/centers while drawing">Osnap</button>
+      <div class="spacer"></div>
+      <span class="zoomTag" id="statZoom">Zoom: 100%</span>
+      <span class="zoomTag" id="statTool">Tool: SELECT</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('cv');
+  const ctx = canvas.getContext('2d');
+  const wrap = document.getElementById('canvasWrap');
+  const hint = document.getElementById('hint');
+  const coordsEl = document.getElementById('coords');
+  const entityListEl = document.getElementById('entityList');
+  const infoCount = document.getElementById('infoCount');
+  const infoZoom = document.getElementById('infoZoom');
+
+  // ---------- State ----------
+  let entities = [];      // {id, type, ..., color, width}
+  let selectedId = null;
+  let tool = 'select';
+  let history = [];       // undo stack (snapshots)
+  let future = [];        // redo stack
+  let nextId = 1;
+
+  let view = { offsetX: 0, offsetY: 0, scale: 20 }; // scale = px per unit
+  let drawing = null;     // in-progress entity while drawing
+  let dragging = null;    // {id, startWorld, origEntitySnapshot}
+  let panStart = null;
+  let mouseWorld = { x: 0, y: 0 };
+
+  // Status-bar modes (classic AutoCAD toggles)
+  let modeSnap = true, modeGrid = true, modeOrtho = false, modePolar = false, modeOsnap = true;
+
+  function applyOrtho(from, world){
+    if (!modeOrtho || !from) return world;
+    const dx = Math.abs(world.x - from.x), dy = Math.abs(world.y - from.y);
+    return dx > dy ? { x: world.x, y: from.y } : { x: from.x, y: world.y };
+  }
+  function applyPolar(cx, cy, world){
+    if (!modePolar) return world;
+    const r = Math.hypot(world.x-cx, world.y-cy);
+    let ang = Math.atan2(world.y-cy, world.x-cx) * 180/Math.PI;
+    ang = Math.round(ang/15)*15;
+    const rad = ang*Math.PI/180;
+    return { x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad) };
+  }
+
+  const colorPicker = document.getElementById('colorPicker');
+  const lineWidthInput = document.getElementById('lineWidth');
+  const snapSelect = document.getElementById('snapGrid');
+
+  const crosshairV = document.getElementById('crosshairV');
+  const crosshairH = document.getElementById('crosshairH');
+  const cursorBox = document.getElementById('cursorBox');
+  const statCoords = document.getElementById('statCoords');
+  const statZoomEl = document.getElementById('statZoom');
+  const statToolEl = document.getElementById('statTool');
+  const cmdLogEl = document.getElementById('cmdLog');
+  const cmdInputEl = document.getElementById('cmdInput');
+
+  function uid(){ return nextId++; }
+
+  function snapshot(){
+    history.push(JSON.stringify(entities));
+    if (history.length > 100) history.shift();
+    future = [];
+  }
+  function undo(){
+    if (!history.length) return;
+    future.push(JSON.stringify(entities));
+    entities = JSON.parse(history.pop());
+    selectedId = null;
+    render(); renderList(); buildPropsForm();
+  }
+  function redo(){
+    if (!future.length) return;
+    history.push(JSON.stringify(entities));
+    entities = JSON.parse(future.pop());
+    selectedId = null;
+    render(); renderList(); buildPropsForm();
+  }
+
+  // ---------- Coordinate transforms ----------
+  function resize(){
+    const rect = wrap.getBoundingClientRect();
+    canvas.width = rect.width * devicePixelRatio;
+    canvas.height = rect.height * devicePixelRatio;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    render();
+  }
+  function worldToScreen(x, y){
+    return {
+      x: (x * view.scale + view.offsetX) * devicePixelRatio,
+      y: (-y * view.scale + view.offsetY) * devicePixelRatio
+    };
+  }
+  function screenToWorld(sx, sy){
+    return {
+      x: (sx - view.offsetX) / view.scale,
+      y: -(sy - view.offsetY) / view.scale
+    };
+  }
+  function getSnap(){ return modeSnap ? (parseFloat(snapSelect.value) || 0) : 0; }
+  function snapPt(p){
+    const s = getSnap();
+    if (!s) return p;
+    return { x: Math.round(p.x / s) * s, y: Math.round(p.y / s) * s };
+  }
+
+  // ---------- Rendering ----------
+  function render(){
+    const rect = wrap.getBoundingClientRect();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+    drawGrid(rect);
+    for (const e of entities) drawEntity(e, e.id === selectedId);
+    if (drawing) drawEntity(drawing, false, true);
+    infoCount.textContent = entities.length;
+    infoZoom.textContent = Math.round(view.scale / 20 * 100) + '%';
+    if (statZoomEl) statZoomEl.textContent = 'Zoom: ' + Math.round(view.scale / 20 * 100) + '%';
+  }
+
+  function drawGrid(rect){
+    if (!modeGrid) return;
+    const cssW = rect.width, cssH = rect.height;
+    // grid line spacing in world units, choose so on-screen spacing ~ 40-80px
+    let step = 1;
+    while (step * view.scale < 40) step *= 5;
+    while (step * view.scale > 200) step /= 5;
+
+    ctx.lineWidth = 1;
+    const topLeft = screenToWorld(0, 0);
+    const bottomRight = screenToWorld(cssW, cssH);
+
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-minor');
+    ctx.beginPath();
+    let startX = Math.floor(topLeft.x / step) * step;
+    for (let x = startX; x <= bottomRight.x; x += step) {
+      const s = worldToScreen(x, 0);
+      ctx.moveTo(s.x/devicePixelRatio, 0); ctx.lineTo(s.x/devicePixelRatio, cssH);
+    }
+    let startY = Math.floor(bottomRight.y / step) * step;
+    for (let y = startY; y <= topLeft.y; y += step) {
+      const s = worldToScreen(0, y);
+      ctx.moveTo(0, s.y/devicePixelRatio); ctx.lineTo(cssW, s.y/devicePixelRatio);
+    }
+    ctx.stroke();
+
+    // axes
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--axis');
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const originS = worldToScreen(0,0);
+    ctx.moveTo(originS.x/devicePixelRatio, 0); ctx.lineTo(originS.x/devicePixelRatio, cssH);
+    ctx.moveTo(0, originS.y/devicePixelRatio); ctx.lineTo(cssW, originS.y/devicePixelRatio);
+    ctx.stroke();
+  }
+
+  function setStroke(e){
+    ctx.strokeStyle = e.color || '#4fd1c5';
+    ctx.lineWidth = (e.width || 1.5);
+    ctx.fillStyle = e.color || '#4fd1c5';
+  }
+
+  function drawEntity(e, selected, ghost){
+    ctx.save();
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.translate(-0 ,0);
+    setStroke(e);
+    if (ghost) ctx.setLineDash([6,4]);
+    if (selected){ ctx.shadowColor = '#4fd1c5'; ctx.shadowBlur = 6; }
+
+    const toS = (x,y) => { const p = worldToScreen(x,y); return {x:p.x/devicePixelRatio, y:p.y/devicePixelRatio}; };
+
+    switch(e.type){
+      case 'line': {
+        const a = toS(e.x1,e.y1), b = toS(e.x2,e.y2);
+        ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+        break;
+      }
+      case 'rect': {
+        const a = toS(e.x1,e.y1), b = toS(e.x2,e.y2);
+        ctx.strokeRect(Math.min(a.x,b.x), Math.min(a.y,b.y), Math.abs(b.x-a.x), Math.abs(b.y-a.y));
+        break;
+      }
+      case 'circle': {
+        const c = toS(e.cx,e.cy);
+        ctx.beginPath(); ctx.arc(c.x,c.y, e.r*view.scale, 0, Math.PI*2); ctx.stroke();
+        break;
+      }
+      case 'arc': {
+        const c = toS(e.cx,e.cy);
+        // screen y flipped -> flip angle sign
+        ctx.beginPath();
+        ctx.arc(c.x,c.y, e.r*view.scale, -e.startAngle*Math.PI/180, -e.endAngle*Math.PI/180, true);
+        ctx.stroke();
+        break;
+      }
+      case 'polyline': {
+        if (e.points.length < 1) break;
+        ctx.beginPath();
+        const p0 = toS(e.points[0].x, e.points[0].y);
+        ctx.moveTo(p0.x, p0.y);
+        for (let i=1;i<e.points.length;i++){
+          const p = toS(e.points[i].x, e.points[i].y);
+          ctx.lineTo(p.x,p.y);
+        }
+        if (e.closed) ctx.closePath();
+        ctx.stroke();
+        break;
+      }
+      case 'text': {
+        const p = toS(e.x, e.y);
+        ctx.font = `${(e.height||3)*view.scale}px 'SFMono-Regular', monospace`;
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(e.content, p.x, p.y);
+        break;
+      }
+    }
+    if (selected){
+      ctx.shadowBlur = 0;
+      drawHandles(e, toS);
+    }
+    ctx.restore();
+  }
+
+  function drawHandles(e, toS){
+    ctx.fillStyle = '#e0a458';
+    const pts = getHandlePoints(e);
+    for (const p of pts){
+      const s = toS(p.x, p.y);
+      ctx.fillRect(s.x-3, s.y-3, 6, 6);
+    }
+  }
+  function getHandlePoints(e){
+    switch(e.type){
+      case 'line': return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2}];
+      case 'rect': return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2}];
+      case 'circle': return [{x:e.cx,y:e.cy}];
+      case 'arc': return [{x:e.cx,y:e.cy}];
+      case 'polyline': return e.points;
+      case 'text': return [{x:e.x,y:e.y}];
+      default: return [];
+    }
+  }
+
+  // ---------- Hit testing ----------
+  function distToSeg(p, a, b){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const len2 = dx*dx+dy*dy;
+    let t = len2 ? ((p.x-a.x)*dx+(p.y-a.y)*dy)/len2 : 0;
+    t = Math.max(0, Math.min(1,t));
+    const cx = a.x+t*dx, cy = a.y+t*dy;
+    return Math.hypot(p.x-cx, p.y-cy);
+  }
+  function hitTest(world){
+    const tol = (modeOsnap ? 9 : 6) / view.scale;
+    for (let i = entities.length-1; i>=0; i--){
+      const e = entities[i];
+      if (e.type === 'line'){
+        if (distToSeg(world, {x:e.x1,y:e.y1}, {x:e.x2,y:e.y2}) < tol) return e;
+      } else if (e.type === 'rect'){
+        const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2);
+        const y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
+        const corners = [[{x:x1,y:y1},{x:x2,y:y1}],[{x:x2,y:y1},{x:x2,y:y2}],[{x:x2,y:y2},{x:x1,y:y2}],[{x:x1,y:y2},{x:x1,y:y1}]];
+        if (corners.some(([a,b]) => distToSeg(world,a,b) < tol)) return e;
+      } else if (e.type === 'circle'){
+        if (Math.abs(Math.hypot(world.x-e.cx, world.y-e.cy) - e.r) < tol) return e;
+      } else if (e.type === 'arc'){
+        const d = Math.hypot(world.x-e.cx, world.y-e.cy);
+        if (Math.abs(d - e.r) < tol){
+          let ang = Math.atan2(world.y-e.cy, world.x-e.cx) * 180/Math.PI;
+          if (ang < 0) ang += 360;
+          let s=e.startAngle, en=e.endAngle;
+          if (en < s) en += 360;
+          if ((ang>=s && ang<=en) || (ang+360>=s && ang+360<=en)) return e;
+        }
+      } else if (e.type === 'polyline'){
+        for (let j=0;j<e.points.length-1;j++){
+          if (distToSeg(world, e.points[j], e.points[j+1]) < tol) return e;
+        }
+        if (e.closed && e.points.length>1){
+          if (distToSeg(world, e.points[e.points.length-1], e.points[0]) < tol) return e;
+        }
+      } else if (e.type === 'text'){
+        if (Math.hypot(world.x-e.x, world.y-e.y) < (e.height||3)) return e;
+      }
+    }
+    return null;
+  }
+
+  // ---------- Entity list panel ----------
+  function renderList(){
+    entityListEl.innerHTML = '';
+    for (const e of entities){
+      const row = document.createElement('div');
+      row.className = 'entity-row' + (e.id===selectedId ? ' selected':'');
+      row.innerHTML = `<span class="swatch" style="background:${e.color}"></span>
+        <span class="lbl">${e.type} #${e.id}</span>
+        <span class="del" title="Delete">✕</span>`;
+      row.querySelector('.lbl').onclick = () => selectEntity(e.id);
+      row.querySelector('.swatch').onclick = () => selectEntity(e.id);
+      row.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); snapshot(); entities = entities.filter(x=>x.id!==e.id); if(selectedId===e.id) selectedId=null; render(); renderList(); buildPropsForm(); };
+      entityListEl.appendChild(row);
+    }
+  }
+
+  // ---------- Tool switching ----------
+  const toolButtons = document.querySelectorAll('button.tool');
+  const hints = {
+    select: 'Select tool. Click an entity to select and drag to move. Del to delete.',
+    line: 'Line: click start point, then click end point.',
+    rect: 'Rectangle: click one corner, then the opposite corner.',
+    circle: 'Circle: click center, then click to set radius.',
+    arc: 'Arc: click center, click for radius + start angle, click again for end angle.',
+    polyline: 'Polyline: click points. Press Enter or double-click to finish, Esc to cancel.',
+    text: 'Text: click a location, then type your text and press Enter.'
+  };
+  function setTool(t){
+    tool = t;
+    drawing = null; polyPoints = [];
+    lineStart = null; rectStart = null; circleCenter = null; arcStage = 0; arcTemp = {};
+    toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+    hint.textContent = hints[t] || '';
+    if (statToolEl) statToolEl.textContent = 'Tool: ' + t.toUpperCase();
+    render();
+    buildManualForm();
+  }
+
+  function selectEntity(id){
+    selectedId = id;
+    render(); renderList(); buildPropsForm();
+  }
+  toolButtons.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+  window.addEventListener('keydown', (e) => {
+    const ae = document.activeElement;
+    const tag = ae ? ae.tagName : '';
+    const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ae && ae.isContentEditable);
+
+    // If focus is already in ANY field (command line, property panel, manual-dimension
+    // panel, text prompt, color/select controls, etc.) let that field handle its own keys.
+    if (inEditable) return;
+
+    if (e.key === 'Escape') { cancelDrawing(); log('*Cancel*', 'prompt'); return; }
+
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selectedId != null) {
+        snapshot();
+        entities = entities.filter(x=>x.id!==selectedId);
+        selectedId = null; render(); renderList(); buildPropsForm();
+      }
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      if (tool === 'polyline' && polyPoints.length >= 2) finishPolyline();
+      return;
+    }
+
+    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); undo(); return; }
+    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
+
+    // Type-anywhere: any plain printable key, pressed while nothing is focused
+    // (over the canvas, sidebar, toolbar — anywhere in the dashboard), is routed
+    // straight into the command line, AutoCAD-style. Finish with Enter to run it.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && /[a-zA-Z0-9@,._-]/.test(e.key)) {
+      e.preventDefault();
+      cmdInputEl.focus();
+      cmdInputEl.value += e.key;
+      const len = cmdInputEl.value.length;
+      cmdInputEl.setSelectionRange(len, len);
+    }
+  });
+
+  // ---------- Drawing interaction ----------
+  let polyPoints = [];
+  let arcStage = 0; // 0=need center,1=need radius/start,2=need end
+  let arcTemp = {};
+  let lineStart = null;
+  let rectStart = null;
+  let circleCenter = null;
+
+  function currentStyle(){
+    return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5 };
+  }
+
+  function finishPolyline(){
+    if (polyPoints.length >= 2){
+      snapshot();
+      entities.push({ id: uid(), type:'polyline', points: polyPoints.slice(), closed:false, ...currentStyle() });
+    }
+    polyPoints = []; drawing = null;
+    render(); renderList();
+  }
+
+  // Core point-input logic, shared by canvas clicks and command-line coordinate entry.
+  function placePoint(world, screenPt){
+    if (tool === 'select'){
+      const hitE = hitTest(world);
+      selectEntity(hitE ? hitE.id : null);
+      if (hitE){
+        dragging = { id: hitE.id, startWorld: world, orig: JSON.parse(JSON.stringify(hitE)) };
+      }
+      return;
+    }
+
+    if (tool === 'line'){
+      if (!lineStart){ lineStart = applyOrtho(null, world); cmdPrompt('Specify next point:'); }
+      else {
+        const w2 = applyOrtho(lineStart, world);
+        snapshot();
+        entities.push({ id: uid(), type:'line', x1:lineStart.x, y1:lineStart.y, x2:w2.x, y2:w2.y, ...currentStyle() });
+        lineStart = null; drawing = null; render(); renderList();
+        cmdDone();
+      }
+      return;
+    }
+    if (tool === 'rect'){
+      if (!rectStart){ rectStart = world; cmdPrompt('Specify opposite corner:'); }
+      else {
+        snapshot();
+        entities.push({ id: uid(), type:'rect', x1:rectStart.x, y1:rectStart.y, x2:world.x, y2:world.y, ...currentStyle() });
+        rectStart = null; drawing = null; render(); renderList();
+        cmdDone();
+      }
+      return;
+    }
+    if (tool === 'circle'){
+      if (!circleCenter){ circleCenter = world; cmdPrompt('Specify radius:'); }
+      else {
+        const r = Math.hypot(world.x-circleCenter.x, world.y-circleCenter.y);
+        snapshot();
+        entities.push({ id: uid(), type:'circle', cx:circleCenter.x, cy:circleCenter.y, r: r||1, ...currentStyle() });
+        circleCenter = null; drawing = null; render(); renderList();
+        cmdDone();
+      }
+      return;
+    }
+    if (tool === 'arc'){
+      if (arcStage === 0){
+        arcTemp.cx = world.x; arcTemp.cy = world.y; arcStage = 1;
+        cmdPrompt('Specify radius / start point:');
+      } else if (arcStage === 1){
+        const r = Math.hypot(world.x-arcTemp.cx, world.y-arcTemp.cy);
+        let ang = Math.atan2(world.y-arcTemp.cy, world.x-arcTemp.cx) * 180/Math.PI;
+        if (ang<0) ang += 360;
+        arcTemp.r = r || 1; arcTemp.startAngle = ang; arcStage = 2;
+        cmdPrompt('Specify end angle:');
+      } else if (arcStage === 2){
+        let ang = Math.atan2(world.y-arcTemp.cy, world.x-arcTemp.cx) * 180/Math.PI;
+        if (ang<0) ang += 360;
+        snapshot();
+        entities.push({ id: uid(), type:'arc', cx:arcTemp.cx, cy:arcTemp.cy, r:arcTemp.r, startAngle:arcTemp.startAngle, endAngle:ang, ...currentStyle() });
+        arcStage = 0; arcTemp = {}; drawing = null; render(); renderList();
+        cmdDone();
+      }
+      return;
+    }
+    if (tool === 'polyline'){
+      polyPoints.push(world);
+      cmdPrompt('Specify next point or [Undo/Enter to finish]:');
+      return;
+    }
+    if (tool === 'text'){
+      if (screenPt) showTextPrompt(screenPt.x, screenPt.y, world);
+      else { awaitingCmdText = world; cmdPrompt('Enter text:'); }
+      return;
+    }
+  }
+  let awaitingCmdText = null;
+
+  let lastMiddleClickTime = 0;
+  const MIDDLE_DBLCLICK_MS = 350;
+
+  canvas.addEventListener('mousedown', (e) => {
+    const rect = wrap.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const world = snapPt(screenToWorld(sx, sy));
+
+    if (e.button === 1) { // middle button = pan (hold) / double-click = zoom extents
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastMiddleClickTime < MIDDLE_DBLCLICK_MS){
+        lastMiddleClickTime = 0;
+        panStart = null;
+        zoomToFit();
+        return;
+      }
+      lastMiddleClickTime = now;
+      panStart = { sx: e.clientX, sy: e.clientY, ox: view.offsetX, oy: view.offsetY };
+      return;
+    }
+    if (e.button === 2) { // right button = pan
+      panStart = { sx: e.clientX, sy: e.clientY, ox: view.offsetX, oy: view.offsetY };
+      return;
+    }
+    if (e.button !== 0) return;
+    placePoint(world, {x:sx, y:sy});
+  });
+
+  // Stop the browser's native middle-click auto-scroll / paste behavior
+  canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+  canvas.addEventListener('mouseup', (e) => { if (e.button === 1) e.preventDefault(); });
+
+  canvas.addEventListener('dblclick', () => {
+    if (tool === 'polyline') finishPolyline();
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = wrap.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const world = snapPt(screenToWorld(sx, sy));
+    mouseWorld = world;
+    coordsEl.textContent = `x: ${world.x.toFixed(2)}  y: ${world.y.toFixed(2)}`;
+
+    if (panStart){
+      view.offsetX = panStart.ox + (e.clientX - panStart.sx);
+      view.offsetY = panStart.oy + (e.clientY - panStart.sy);
+      render();
+      return;
+    }
+
+    if (dragging){
+      const dx = world.x - dragging.startWorld.x;
+      const dy = world.y - dragging.startWorld.y;
+      const e2 = entities.find(x=>x.id===dragging.id);
+      const o = dragging.orig;
+      if (!e2) return;
+      if (e2.type === 'line' || e2.type==='rect'){
+        e2.x1 = o.x1+dx; e2.y1=o.y1+dy; e2.x2=o.x2+dx; e2.y2=o.y2+dy;
+      } else if (e2.type === 'circle' || e2.type==='arc'){
+        e2.cx = o.cx+dx; e2.cy = o.cy+dy;
+      } else if (e2.type === 'polyline'){
+        e2.points = o.points.map(p => ({x:p.x+dx, y:p.y+dy}));
+      } else if (e2.type === 'text'){
+        e2.x = o.x+dx; e2.y = o.y+dy;
+      }
+      render();
+      return;
+    }
+
+    // live preview of in-progress draw
+    if (tool==='line' && lineStart) { const w2 = applyOrtho(lineStart, world); drawing = { type:'line', x1:lineStart.x,y1:lineStart.y,x2:w2.x,y2:w2.y, ...currentStyle() }; }
+    else if (tool==='rect' && rectStart) drawing = { type:'rect', x1:rectStart.x,y1:rectStart.y,x2:world.x,y2:world.y, ...currentStyle() };
+    else if (tool==='circle' && circleCenter) drawing = { type:'circle', cx:circleCenter.x,cy:circleCenter.y, r:Math.hypot(world.x-circleCenter.x, world.y-circleCenter.y), ...currentStyle() };
+    else if (tool==='arc' && arcStage===1) drawing = { type:'circle', cx:arcTemp.cx, cy:arcTemp.cy, r:Math.hypot(world.x-arcTemp.cx, world.y-arcTemp.cy), ...currentStyle() };
+    else if (tool==='arc' && arcStage===2) {
+      const w2 = applyPolar(arcTemp.cx, arcTemp.cy, world);
+      let ang = Math.atan2(w2.y-arcTemp.cy, w2.x-arcTemp.cx) * 180/Math.PI; if (ang<0) ang+=360;
+      drawing = { type:'arc', cx:arcTemp.cx, cy:arcTemp.cy, r:arcTemp.r, startAngle:arcTemp.startAngle, endAngle:ang, ...currentStyle() };
+    }
+    else if (tool==='polyline' && polyPoints.length) drawing = { type:'polyline', points:[...polyPoints, world], closed:false, ...currentStyle() };
+    else drawing = null;
+
+    // crosshair + status-bar coordinate readout
+    crosshairV.style.left = sx + 'px';
+    crosshairH.style.top = sy + 'px';
+    cursorBox.style.left = sx + 'px';
+    cursorBox.style.top = sy + 'px';
+    statCoords.textContent = `${world.x.toFixed(2)}, ${world.y.toFixed(2)}, 0.00`;
+
+    render();
+  });
+  canvas.addEventListener('mouseenter', () => {
+    crosshairV.style.display = 'block'; crosshairH.style.display = 'block'; cursorBox.style.display = 'block';
+  });
+  canvas.addEventListener('mouseleave', () => {
+    crosshairV.style.display = 'none'; crosshairH.style.display = 'none'; cursorBox.style.display = 'none';
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (dragging){ snapshot_after_drag(); buildPropsForm(); }
+    dragging = null;
+    panStart = null;
+  });
+  function snapshot_after_drag(){
+    // push the pre-drag state we captured at drag start
+    history.push(JSON.stringify(entities.map(x => x.id===dragging.id ? dragging.orig : x)));
+    if (history.length>100) history.shift();
+    future = [];
+  }
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = wrap.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const worldBefore = screenToWorld(sx, sy);
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    view.scale = Math.max(1e-6, Math.min(1e9, view.scale * factor));
+    const worldAfter = screenToWorld(sx, sy);
+    view.offsetX += (worldAfter.x - worldBefore.x) * view.scale;
+    view.offsetY -= (worldAfter.y - worldBefore.y) * view.scale;
+    render();
+  }, { passive:false });
+
+  // ---------- Text input popup ----------
+  const textPrompt = document.getElementById('textPrompt');
+  const textInput = document.getElementById('textInput');
+  let pendingTextWorld = null;
+  function showTextPrompt(sx, sy, world){
+    pendingTextWorld = world;
+    textPrompt.style.left = sx + 'px';
+    textPrompt.style.top = sy + 'px';
+    textPrompt.style.display = 'block';
+    textInput.value = '';
+    textInput.focus();
+  }
+  textInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter'){
+      const content = textInput.value.trim();
+      if (content && pendingTextWorld){
+        snapshot();
+        entities.push({ id: uid(), type:'text', x:pendingTextWorld.x, y:pendingTextWorld.y, content, height: 3, ...currentStyle() });
+        render(); renderList();
+      }
+      textPrompt.style.display = 'none';
+    } else if (e.key === 'Escape'){
+      textPrompt.style.display = 'none';
+    }
+  });
+  textInput.addEventListener('blur', () => { textPrompt.style.display = 'none'; });
+
+  // ---------- Status bar toggles ----------
+  function syncToggles(){
+    document.getElementById('tgSnap').classList.toggle('on', modeSnap);
+    document.getElementById('tgGrid').classList.toggle('on', modeGrid);
+    document.getElementById('tgOrtho').classList.toggle('on', modeOrtho);
+    document.getElementById('tgPolar').classList.toggle('on', modePolar);
+    document.getElementById('tgOsnap').classList.toggle('on', modeOsnap);
+  }
+  document.getElementById('tgSnap').onclick = () => { modeSnap = !modeSnap; syncToggles(); };
+  document.getElementById('tgGrid').onclick = () => { modeGrid = !modeGrid; syncToggles(); render(); };
+  document.getElementById('tgOrtho').onclick = () => { modeOrtho = !modeOrtho; syncToggles(); };
+  document.getElementById('tgPolar').onclick = () => { modePolar = !modePolar; syncToggles(); };
+  document.getElementById('tgOsnap').onclick = () => { modeOsnap = !modeOsnap; syncToggles(); };
+
+  // ---------- Command line ----------
+  const cmdMap = {
+    LINE:'line', L:'line',
+    RECTANG:'rect', REC:'rect', RECTANGLE:'rect', R:'rect',
+    CIRCLE:'circle', C:'circle',
+    ARC:'arc', A:'arc',
+    PLINE:'polyline', PL:'polyline', POLYLINE:'polyline',
+    TEXT:'text', T:'text', DT:'text',
+    SELECT:'select', V:'select'
+  };
+  let lastCommand = '';
+
+  function log(text, cls){
+    const div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = text;
+    cmdLogEl.appendChild(div);
+    cmdLogEl.scrollTop = cmdLogEl.scrollHeight;
+  }
+  function cmdPrompt(text){ log(text, 'prompt'); hint.textContent = text; }
+  function cmdDone(){ log('Command:', 'prompt'); hint.textContent = hints[tool] || ''; }
+
+  function currentAnchor(){
+    if (tool==='line' && lineStart) return lineStart;
+    if (tool==='rect' && rectStart) return rectStart;
+    if (tool==='circle' && circleCenter) return circleCenter;
+    if (tool==='arc' && arcStage>=1) return { x: arcTemp.cx, y: arcTemp.cy };
+    if (tool==='polyline' && polyPoints.length) return polyPoints[polyPoints.length-1];
+    return null;
+  }
+  function parseCoordInput(str){
+    str = str.trim();
+    const anchor = currentAnchor();
+    if (str[0] === '@'){
+      const parts = str.slice(1).split(',');
+      if (parts.length===2 && anchor){
+        const dx = parseFloat(parts[0]), dy = parseFloat(parts[1]);
+        if (!isNaN(dx) && !isNaN(dy)) return { x: anchor.x+dx, y: anchor.y+dy };
+      }
+      return null;
+    }
+    const parts = str.split(',');
+    if (parts.length===2){
+      const x = parseFloat(parts[0]), y = parseFloat(parts[1]);
+      if (!isNaN(x) && !isNaN(y)) return { x, y };
+    }
+    const num = parseFloat(str);
+    if (!isNaN(num) && anchor && parts.length===1){
+      const ang = Math.atan2(mouseWorld.y-anchor.y, mouseWorld.x-anchor.x);
+      return { x: anchor.x + num*Math.cos(ang), y: anchor.y + num*Math.sin(ang) };
+    }
+    return null;
+  }
+  function cancelDrawing(){
+    lineStart = null; rectStart = null; circleCenter = null;
+    arcStage = 0; arcTemp = {}; polyPoints = []; drawing = null;
+    render();
+  }
+
+  function processCommand(raw){
+    const trimmed = raw.trim();
+    if (awaitingCmdText){
+      const content = trimmed || 'Text';
+      snapshot();
+      entities.push({ id: uid(), type:'text', x:awaitingCmdText.x, y:awaitingCmdText.y, content, height:3, ...currentStyle() });
+      awaitingCmdText = null;
+      render(); renderList(); cmdDone();
+      return;
+    }
+    if (!trimmed){
+      if (lastCommand) processCommand(lastCommand);
+      return;
+    }
+    const anchor = currentAnchor();
+    if (anchor || (tool==='polyline' && polyPoints.length)){
+      if (/^u(ndo)?$/i.test(trimmed)){
+        cancelDrawing(); log('*Point entry cancelled*', 'prompt'); return;
+      }
+      if (tool==='polyline' && /^(enter|done|f|fin|finish)$/i.test(trimmed)){
+        finishPolyline(); cmdDone(); return;
+      }
+      const pt = parseCoordInput(trimmed);
+      if (pt){ placePoint(snapPt(pt)); return; }
+    }
+
+    const upper = trimmed.toUpperCase();
+    const firstWord = upper.split(/\s+/)[0];
+    lastCommand = trimmed;
+
+    if (cmdMap[firstWord]){
+      setTool(cmdMap[firstWord]);
+      log(hints[cmdMap[firstWord]] || 'Select tool active.', 'prompt');
+      return;
+    }
+    switch(firstWord){
+      case 'UNDO': case 'U': undo(); log('Undo.', 'prompt'); break;
+      case 'REDO': redo(); log('Redo.', 'prompt'); break;
+      case 'ERASE': case 'E':
+        if (selectedId != null){
+          snapshot(); entities = entities.filter(x=>x.id!==selectedId); selectedId=null;
+          render(); renderList(); buildPropsForm();
+          log('1 entity erased.', 'prompt');
+        } else log('Nothing selected. Use SELECT, click an entity, then ERASE.', 'err');
+        break;
+      case 'ZOOM': case 'Z': {
+        const arg = upper.split(/\s+/)[1];
+        if (!arg || ['E','EXTENTS','A','ALL'].includes(arg)){ zoomToFit(); log('Zoomed to extents.', 'prompt'); }
+        else { const f = parseFloat(arg); if (!isNaN(f)){ view.scale = Math.max(0.5, Math.min(400, view.scale*f)); render(); log('Zoom factor ' + f + ' applied.', 'prompt'); } else log('Unrecognized ZOOM option.', 'err'); }
+        break;
+      }
+      case 'SAVE': document.getElementById('saveProj').click(); break;
+      case 'OPEN': case 'LOAD': document.getElementById('loadProj').click(); break;
+      case 'ORTHO': modeOrtho = !modeOrtho; syncToggles(); log('ORTHO ' + (modeOrtho?'on':'off') + '.', 'prompt'); break;
+      case 'SNAP': modeSnap = !modeSnap; syncToggles(); log('SNAP ' + (modeSnap?'on':'off') + '.', 'prompt'); break;
+      case 'GRID': modeGrid = !modeGrid; syncToggles(); render(); log('GRID ' + (modeGrid?'on':'off') + '.', 'prompt'); break;
+      case 'POLAR': modePolar = !modePolar; syncToggles(); log('POLAR ' + (modePolar?'on':'off') + '.', 'prompt'); break;
+      case 'OSNAP': modeOsnap = !modeOsnap; syncToggles(); log('OSNAP ' + (modeOsnap?'on':'off') + '.', 'prompt'); break;
+      case 'MOVE': case 'M': log('Switch to SELECT, click an entity, and drag it to move.', 'prompt'); break;
+      case 'CLEAR': document.getElementById('clearBtn').click(); break;
+      case 'HELP': case '?':
+        log('Commands: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V) ERASE(E) MOVE UNDO(U) REDO ZOOM(Z) [E]xtents SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
+        log('While drawing, type coordinates as "10,5" (absolute), "@2,0" (relative), or a plain number for distance.', 'prompt');
+        break;
+      default:
+        log('Unknown command "' + trimmed + '". Type HELP for a list of commands.', 'err');
+    }
+  }
+
+  cmdInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter'){
+      const val = cmdInputEl.value;
+      log('Command: ' + val, 'echo');
+      cmdInputEl.value = '';
+      processCommand(val);
+    } else if (e.key === 'Escape'){
+      cancelDrawing();
+      cmdInputEl.value = '';
+      log('*Cancel*', 'prompt');
+    }
+    e.stopPropagation();
+  });
+  log('AutoCAD-style drafting session started. Type HELP and press Enter for a list of commands.', 'prompt');
+  syncToggles();
+
+  // ---------- Create by Dimensions (manual entry) ----------
+  const manualBody = document.getElementById('manualBody');
+  let manualPolyPoints = [];   // temp points for building a polyline manually
+  let lineManualMode = 'coords'; // 'coords' | 'lenang'
+
+  function numInput(id, value, step){
+    return `<input type="number" id="${id}" value="${value}" step="${step||0.1}">`;
+  }
+  function row(labelText, inputHtml){
+    return `<div class="form-row"><label>${labelText}</label>${inputHtml}</div>`;
+  }
+  function gv(id){ return parseFloat(document.getElementById(id).value) || 0; }
+
+  function buildManualForm(){
+    manualBody.innerHTML = '';
+    if (tool === 'select'){
+      manualBody.innerHTML = '<div class="empty-note">Pick a drawing tool above (Line, Rect, Circle, Arc, Poly, Text) to add a shape by typing exact numbers instead of clicking.</div>';
+      return;
+    }
+    const c = currentStyle();
+    let html = '';
+
+    if (tool === 'line'){
+      html += `<div class="mode-toggle">
+        <button id="lmCoords" class="${lineManualMode==='coords'?'active':''}">By endpoints</button>
+        <button id="lmLenAng" class="${lineManualMode==='lenang'?'active':''}">Length + angle</button>
+      </div>`;
+      html += row('Start X', numInput('m_x1', 0));
+      html += row('Start Y', numInput('m_y1', 0));
+      if (lineManualMode === 'coords'){
+        html += row('End X', numInput('m_x2', 5));
+        html += row('End Y', numInput('m_y2', 0));
+      } else {
+        html += row('Length', numInput('m_len', 5, 0.1));
+        html += row('Angle (°)', numInput('m_ang', 0, 1));
+      }
+      html += `<button class="formBtn" id="m_add">+ Add Line</button>`;
+    } else if (tool === 'rect'){
+      html += row('Corner X', numInput('m_x1', 0));
+      html += row('Corner Y', numInput('m_y1', 0));
+      html += row('Width', numInput('m_w', 10, 0.1));
+      html += row('Height', numInput('m_h', 6, 0.1));
+      html += `<button class="formBtn" id="m_add">+ Add Rectangle</button>`;
+    } else if (tool === 'circle'){
+      html += row('Center X', numInput('m_cx', 0));
+      html += row('Center Y', numInput('m_cy', 0));
+      html += row('Radius', numInput('m_r', 5, 0.1));
+      html += `<button class="formBtn" id="m_add">+ Add Circle</button>`;
+    } else if (tool === 'arc'){
+      html += row('Center X', numInput('m_cx', 0));
+      html += row('Center Y', numInput('m_cy', 0));
+      html += row('Radius', numInput('m_r', 5, 0.1));
+      html += row('Start (°)', numInput('m_sa', 0, 1));
+      html += row('End (°)', numInput('m_ea', 90, 1));
+      html += `<button class="formBtn" id="m_add">+ Add Arc</button>`;
+    } else if (tool === 'polyline'){
+      html += row('Point X', numInput('m_px', 0));
+      html += row('Point Y', numInput('m_py', 0));
+      html += `<button class="formBtn secondary" id="m_addpt">+ Add Point</button>`;
+      html += `<div id="m_ptlist"></div>`;
+      html += `<div class="form-row checkline"><input type="checkbox" id="m_closed"><label for="m_closed">Closed shape</label></div>`;
+      html += `<button class="formBtn" id="m_add">+ Create Polyline</button>`;
+      html += `<button class="formBtn secondary" id="m_clearpts">Clear Points</button>`;
+    } else if (tool === 'text'){
+      html += row('X', numInput('m_x', 0));
+      html += row('Y', numInput('m_y', 0));
+      html += row('Height', numInput('m_h', 3, 0.5));
+      html += `<div class="form-row"><label>Content</label><input type="text" id="m_content" value="Label"></div>`;
+      html += `<button class="formBtn" id="m_add">+ Add Text</button>`;
+    }
+    manualBody.innerHTML = html;
+
+    if (tool === 'line'){
+      document.getElementById('lmCoords').onclick = () => { lineManualMode='coords'; buildManualForm(); };
+      document.getElementById('lmLenAng').onclick = () => { lineManualMode='lenang'; buildManualForm(); };
+      document.getElementById('m_add').onclick = () => {
+        const x1=gv('m_x1'), y1=gv('m_y1');
+        let x2, y2;
+        if (lineManualMode==='coords'){ x2=gv('m_x2'); y2=gv('m_y2'); }
+        else { const len=gv('m_len'), ang=gv('m_ang')*Math.PI/180; x2=x1+len*Math.cos(ang); y2=y1+len*Math.sin(ang); }
+        snapshot();
+        entities.push({ id: uid(), type:'line', x1,y1,x2,y2, ...c });
+        render(); renderList(); zoomToFitIfEmpty();
+      };
+    } else if (tool === 'rect'){
+      document.getElementById('m_add').onclick = () => {
+        const x1=gv('m_x1'), y1=gv('m_y1'), w=gv('m_w'), h=gv('m_h');
+        snapshot();
+        entities.push({ id: uid(), type:'rect', x1,y1, x2:x1+w, y2:y1+h, ...c });
+        render(); renderList(); zoomToFitIfEmpty();
+      };
+    } else if (tool === 'circle'){
+      document.getElementById('m_add').onclick = () => {
+        const cx=gv('m_cx'), cy=gv('m_cy'), r=Math.max(0.01, gv('m_r'));
+        snapshot();
+        entities.push({ id: uid(), type:'circle', cx,cy,r, ...c });
+        render(); renderList(); zoomToFitIfEmpty();
+      };
+    } else if (tool === 'arc'){
+      document.getElementById('m_add').onclick = () => {
+        const cx=gv('m_cx'), cy=gv('m_cy'), r=Math.max(0.01, gv('m_r'));
+        const startAngle=gv('m_sa'), endAngle=gv('m_ea');
+        snapshot();
+        entities.push({ id: uid(), type:'arc', cx,cy,r,startAngle,endAngle, ...c });
+        render(); renderList(); zoomToFitIfEmpty();
+      };
+    } else if (tool === 'polyline'){
+      renderManualPtList();
+      document.getElementById('m_addpt').onclick = () => {
+        manualPolyPoints.push({ x: gv('m_px'), y: gv('m_py') });
+        renderManualPtList();
+      };
+      document.getElementById('m_clearpts').onclick = () => { manualPolyPoints = []; renderManualPtList(); };
+      document.getElementById('m_add').onclick = () => {
+        if (manualPolyPoints.length < 2){ flashHint('Add at least 2 points first.'); return; }
+        snapshot();
+        entities.push({ id: uid(), type:'polyline', points: manualPolyPoints.slice(), closed: document.getElementById('m_closed').checked, ...c });
+        manualPolyPoints = [];
+        render(); renderList(); buildManualForm(); zoomToFitIfEmpty();
+      };
+    } else if (tool === 'text'){
+      document.getElementById('m_add').onclick = () => {
+        const x=gv('m_x'), y=gv('m_y'), height=Math.max(0.1, gv('m_h'));
+        const content = document.getElementById('m_content').value || 'Text';
+        snapshot();
+        entities.push({ id: uid(), type:'text', x,y,content,height, ...c });
+        render(); renderList(); zoomToFitIfEmpty();
+      };
+    }
+  }
+  function renderManualPtList(){
+    const el = document.getElementById('m_ptlist');
+    if (!el) return;
+    el.innerHTML = manualPolyPoints.map((p,i) =>
+      `<div class="point-row"><span>${i+1}</span>x:${p.x.toFixed(2)} y:${p.y.toFixed(2)}<span class="rm" data-i="${i}">✕</span></div>`
+    ).join('');
+    el.querySelectorAll('.rm').forEach(elm => elm.onclick = () => {
+      manualPolyPoints.splice(parseInt(elm.dataset.i,10),1);
+      renderManualPtList();
+    });
+  }
+  function zoomToFitIfEmpty(){
+    // if nothing was visible before (fresh canvas), frame the new shape
+    if (entities.length === 1) zoomToFit();
+  }
+
+  // ---------- Properties panel (edit selected entity) ----------
+  const propsBody = document.getElementById('propsBody');
+  const propsTypeTag = document.getElementById('propsTypeTag');
+  let propsSnapshotTaken = false;
+
+  function ensurePropsSnapshot(){
+    if (!propsSnapshotTaken){ snapshot(); propsSnapshotTaken = true; }
+  }
+
+  function buildPropsForm(){
+    propsSnapshotTaken = false;
+    const e = entities.find(x => x.id === selectedId);
+    if (!e){
+      propsTypeTag.textContent = '';
+      propsBody.innerHTML = '<div class="empty-note">No entity selected. Click an entity to edit its exact values.</div>';
+      return;
+    }
+    propsTypeTag.textContent = `— ${e.type} #${e.id}`;
+    let html = '';
+
+    if (e.type === 'line'){
+      html += row('Start X', numInput('p_x1', e.x1));
+      html += row('Start Y', numInput('p_y1', e.y1));
+      html += row('End X', numInput('p_x2', e.x2));
+      html += row('End Y', numInput('p_y2', e.y2));
+      const len = Math.hypot(e.x2-e.x1, e.y2-e.y1);
+      let ang = Math.atan2(e.y2-e.y1, e.x2-e.x1) * 180/Math.PI;
+      if (ang < 0) ang += 360;
+      html += row('Length', numInput('p_len', len.toFixed(3), 0.01));
+      html += row('Angle (°)', numInput('p_ang', ang.toFixed(2), 1));
+    } else if (e.type === 'rect'){
+      html += row('Corner X', numInput('p_x1', e.x1));
+      html += row('Corner Y', numInput('p_y1', e.y1));
+      html += row('Width', numInput('p_w', (e.x2-e.x1)));
+      html += row('Height', numInput('p_h', (e.y2-e.y1)));
+    } else if (e.type === 'circle'){
+      html += row('Center X', numInput('p_cx', e.cx));
+      html += row('Center Y', numInput('p_cy', e.cy));
+      html += row('Radius', numInput('p_r', e.r));
+    } else if (e.type === 'arc'){
+      html += row('Center X', numInput('p_cx', e.cx));
+      html += row('Center Y', numInput('p_cy', e.cy));
+      html += row('Radius', numInput('p_r', e.r));
+      html += row('Start (°)', numInput('p_sa', e.startAngle, 1));
+      html += row('End (°)', numInput('p_ea', e.endAngle, 1));
+    } else if (e.type === 'polyline'){
+      html += `<div id="p_ptlist"></div>`;
+      html += `<button class="formBtn secondary" id="p_addpt">+ Add Point</button>`;
+      html += `<div class="form-row checkline"><input type="checkbox" id="p_closed" ${e.closed?'checked':''}><label for="p_closed">Closed shape</label></div>`;
+    } else if (e.type === 'text'){
+      html += `<div class="form-row"><label>Content</label><input type="text" id="p_content" value="${e.content.replace(/"/g,'&quot;')}"></div>`;
+      html += row('X', numInput('p_x', e.x));
+      html += row('Y', numInput('p_y', e.y));
+      html += row('Height', numInput('p_h', e.height));
+    }
+
+    html += `<div class="divider-thin"></div>`;
+    html += `<div class="form-row"><label>Color</label><input type="color" id="p_color" value="${e.color}"></div>`;
+    html += row('Line width', numInput('p_width', e.width, 0.5));
+    html += `<button class="formBtn secondary" id="p_dup">⧉ Duplicate</button>`;
+    html += `<button class="formBtn dangerBtn" id="p_del">✕ Delete Entity</button>`;
+
+    propsBody.innerHTML = html;
+    bindPropsInputs(e);
+  }
+
+  function bindPropsInputs(e){
+    const bind = (id, apply) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', () => { ensurePropsSnapshot(); apply(el); render(); renderList(); });
+    };
+
+    if (e.type === 'line'){
+      bind('p_x1', el => e.x1 = parseFloat(el.value)||0);
+      bind('p_y1', el => e.y1 = parseFloat(el.value)||0);
+      bind('p_x2', el => e.x2 = parseFloat(el.value)||0);
+      bind('p_y2', el => e.y2 = parseFloat(el.value)||0);
+      bind('p_len', el => {
+        const newLen = Math.max(0, parseFloat(el.value)||0);
+        const ang = Math.atan2(e.y2-e.y1, e.x2-e.x1);
+        e.x2 = e.x1 + newLen*Math.cos(ang);
+        e.y2 = e.y1 + newLen*Math.sin(ang);
+      });
+      bind('p_ang', el => {
+        const len = Math.hypot(e.x2-e.x1, e.y2-e.y1);
+        const rad = (parseFloat(el.value)||0) * Math.PI/180;
+        e.x2 = e.x1 + len*Math.cos(rad);
+        e.y2 = e.y1 + len*Math.sin(rad);
+      });
+    } else if (e.type === 'rect'){
+      bind('p_x1', el => { const w=e.x2-e.x1; e.x1=parseFloat(el.value)||0; e.x2=e.x1+w; });
+      bind('p_y1', el => { const h=e.y2-e.y1; e.y1=parseFloat(el.value)||0; e.y2=e.y1+h; });
+      bind('p_w', el => e.x2 = e.x1 + (parseFloat(el.value)||0));
+      bind('p_h', el => e.y2 = e.y1 + (parseFloat(el.value)||0));
+    } else if (e.type === 'circle'){
+      bind('p_cx', el => e.cx = parseFloat(el.value)||0);
+      bind('p_cy', el => e.cy = parseFloat(el.value)||0);
+      bind('p_r', el => e.r = Math.max(0.01, parseFloat(el.value)||0.01));
+    } else if (e.type === 'arc'){
+      bind('p_cx', el => e.cx = parseFloat(el.value)||0);
+      bind('p_cy', el => e.cy = parseFloat(el.value)||0);
+      bind('p_r', el => e.r = Math.max(0.01, parseFloat(el.value)||0.01));
+      bind('p_sa', el => e.startAngle = parseFloat(el.value)||0);
+      bind('p_ea', el => e.endAngle = parseFloat(el.value)||0);
+    } else if (e.type === 'polyline'){
+      renderPropsPtList(e);
+      document.getElementById('p_addpt').onclick = () => {
+        ensurePropsSnapshot();
+        const last = e.points[e.points.length-1] || {x:0,y:0};
+        e.points.push({ x: last.x+1, y: last.y });
+        renderPropsPtList(e); render();
+      };
+      const closedEl = document.getElementById('p_closed');
+      closedEl.addEventListener('change', () => { ensurePropsSnapshot(); e.closed = closedEl.checked; render(); });
+    } else if (e.type === 'text'){
+      bind('p_content', el => e.content = el.value);
+      bind('p_x', el => e.x = parseFloat(el.value)||0);
+      bind('p_y', el => e.y = parseFloat(el.value)||0);
+      bind('p_h', el => e.height = Math.max(0.1, parseFloat(el.value)||0.1));
+    }
+
+    bind('p_color', el => e.color = el.value);
+    bind('p_width', el => e.width = Math.max(0.1, parseFloat(el.value)||0.1));
+
+    document.getElementById('p_dup').onclick = () => {
+      snapshot();
+      const copy = JSON.parse(JSON.stringify(e));
+      copy.id = uid();
+      if ('x1' in copy) { copy.x1 += 1; copy.x2 += 1; copy.y1 += 1; copy.y2 += 1; }
+      if ('cx' in copy) { copy.cx += 1; copy.cy += 1; }
+      if ('x' in copy && copy.type==='text') { copy.x += 1; copy.y += 1; }
+      if (copy.points) copy.points = copy.points.map(p => ({x:p.x+1, y:p.y+1}));
+      entities.push(copy);
+      selectEntity(copy.id);
+    };
+    document.getElementById('p_del').onclick = () => {
+      snapshot();
+      entities = entities.filter(x => x.id !== e.id);
+      selectedId = null;
+      render(); renderList(); buildPropsForm();
+    };
+  }
+
+  function renderPropsPtList(e){
+    const el = document.getElementById('p_ptlist');
+    if (!el) return;
+    el.innerHTML = e.points.map((p,i) => `
+      <div class="point-row">
+        <span>${i+1}</span>
+        <input type="number" step="0.1" value="${p.x}" data-i="${i}" data-axis="x">
+        <input type="number" step="0.1" value="${p.y}" data-i="${i}" data-axis="y">
+        <span class="rm" data-rm="${i}">✕</span>
+      </div>`).join('');
+    el.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        ensurePropsSnapshot();
+        const i = parseInt(inp.dataset.i,10), axis = inp.dataset.axis;
+        e.points[i][axis] = parseFloat(inp.value) || 0;
+        render();
+      });
+    });
+    el.querySelectorAll('.rm').forEach(elm => {
+      elm.onclick = () => {
+        ensurePropsSnapshot();
+        const i = parseInt(elm.dataset.rm,10);
+        if (e.points.length <= 2){ flashHint('A polyline needs at least 2 points.'); return; }
+        e.points.splice(i,1);
+        renderPropsPtList(e); render();
+      };
+    });
+  }
+
+  // ---------- Toolbar actions ----------
+  document.getElementById('undoBtn').onclick = undo;
+  document.getElementById('redoBtn').onclick = redo;
+  document.getElementById('clearBtn').onclick = () => {
+    if (!entities.length) return;
+    if (confirm('Clear the entire drawing? This can be undone with Ctrl+Z.')){
+      snapshot(); entities = []; selectedId = null; render(); renderList(); buildPropsForm();
+    }
+  };
+  document.getElementById('zoomFit').onclick = zoomToFit;
+
+  function zoomToFit(){
+    if (!entities.length){ view = {offsetX: wrap.clientWidth/2, offsetY: wrap.clientHeight/2, scale:20}; render(); return; }
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    const consider = (x,y) => { minX=Math.min(minX,x); minY=Math.min(minY,y); maxX=Math.max(maxX,x); maxY=Math.max(maxY,y); };
+    for (const e of entities){
+      if (e.type==='line'||e.type==='rect'){ consider(e.x1,e.y1); consider(e.x2,e.y2); }
+      else if (e.type==='circle'){ consider(e.cx-e.r,e.cy-e.r); consider(e.cx+e.r,e.cy+e.r); }
+      else if (e.type==='arc'){ consider(e.cx-e.r,e.cy-e.r); consider(e.cx+e.r,e.cy+e.r); }
+      else if (e.type==='polyline'){ e.points.forEach(p=>consider(p.x,p.y)); }
+      else if (e.type==='text'){ consider(e.x,e.y); consider(e.x+e.content.length*e.height*0.6, e.y+e.height); }
+    }
+    const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
+    const rect = wrap.getBoundingClientRect();
+    const pad = 0.85;
+    let scale = Math.min((rect.width*pad)/w, (rect.height*pad)/h);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    view.scale = Math.max(1e-6, Math.min(1e9, scale));
+    const cx = (minX+maxX)/2, cy=(minY+maxY)/2;
+    view.offsetX = rect.width/2 - cx*view.scale;
+    view.offsetY = rect.height/2 + cy*view.scale;
+    render();
+  }
+
+  // ---------- Persistent project storage ----------
+  document.getElementById('saveProj').onclick = async () => {
+    try {
+      await window.storage.set('cad-project', JSON.stringify({ entities, nextId }), false);
+      flashHint('Project saved.');
+    } catch(err){ flashHint('Save failed: ' + err.message); }
+  };
+  document.getElementById('loadProj').onclick = async () => {
+    try {
+      const res = await window.storage.get('cad-project', false);
+      if (!res){ flashHint('No saved project found.'); return; }
+      const data = JSON.parse(res.value);
+      snapshot();
+      entities = data.entities || [];
+      nextId = data.nextId || (entities.reduce((m,e)=>Math.max(m,e.id),0)+1);
+      selectedId = null;
+      zoomToFit(); renderList(); buildPropsForm();
+      flashHint('Project loaded.');
+    } catch(err){ flashHint('No saved project found.'); }
+  };
+  function flashHint(msg){
+    const prev = hint.textContent;
+    hint.textContent = msg;
+    setTimeout(() => { hint.textContent = hints[tool] || prev; }, 1800);
+  }
+
+  // ---------- DXF export ----------
+  function toDxf(){
+    const lines = [];
+    const add = (code, val) => { lines.push(String(code), String(val)); };
+    add(0,'SECTION'); add(2,'HEADER');
+    add(9,'$ACADVER'); add(1,'AC1009');
+    add(0,'ENDSEC');
+
+    add(0,'SECTION'); add(2,'TABLES');
+    add(0,'TABLE'); add(2,'LAYER'); add(70,1);
+    add(0,'LAYER'); add(2,'0'); add(70,0); add(62,7); add(6,'CONTINUOUS');
+    add(0,'ENDTAB');
+    add(0,'ENDSEC');
+
+    add(0,'SECTION'); add(2,'ENTITIES');
+    for (const e of entities){
+      if (e.type === 'line'){
+        add(0,'LINE'); add(8,'0');
+        add(10,e.x1); add(20,e.y1); add(30,0);
+        add(11,e.x2); add(21,e.y2); add(31,0);
+      } else if (e.type === 'rect'){
+        const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2);
+        const y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
+        add(0,'LWPOLYLINE'); add(8,'0'); add(90,4); add(70,1);
+        add(10,x1); add(20,y1);
+        add(10,x2); add(20,y1);
+        add(10,x2); add(20,y2);
+        add(10,x1); add(20,y2);
+      } else if (e.type === 'circle'){
+        add(0,'CIRCLE'); add(8,'0');
+        add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
+      } else if (e.type === 'arc'){
+        add(0,'ARC'); add(8,'0');
+        add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
+        add(50,e.startAngle); add(51,e.endAngle);
+      } else if (e.type === 'polyline'){
+        add(0,'LWPOLYLINE'); add(8,'0'); add(90,e.points.length); add(70, e.closed?1:0);
+        for (const p of e.points){ add(10,p.x); add(20,p.y); }
+      } else if (e.type === 'text'){
+        add(0,'TEXT'); add(8,'0');
+        add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
+        add(1, e.content);
+      }
+    }
+    add(0,'ENDSEC');
+    add(0,'EOF');
+    return lines.join('\n');
+  }
+
+  document.getElementById('exportDxf').onclick = () => {
+    const dxf = toDxf();
+    const blob = new Blob([dxf], { type: 'application/dxf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'drawing.dxf';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // ---------- DXF import ----------
+  document.getElementById('importDxfBtn').onclick = () => document.getElementById('fileImport').click();
+  document.getElementById('fileImport').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      log(`Note: "${file.name}" is ${(file.size/1024/1024).toFixed(1)} MB — large DXF files may take a moment to parse.`, 'prompt');
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const { entities: parsed, skipped, warnings } = parseDxf(reader.result);
+        snapshot();
+        entities = entities.concat(parsed);
+        renumber();
+        zoomToFit(); renderList();
+
+        const skippedTypes = Object.keys(skipped);
+        let msg = `Imported ${parsed.length} entities.`;
+        flashHint(msg);
+        log('Command: (DXF import) ' + file.name, 'echo');
+        log(msg, 'prompt');
+        if (skippedTypes.length){
+          const detail = skippedTypes.map(t => `${t} x${skipped[t]}`).join(', ');
+          log(`Skipped (unsupported in this lightweight importer): ${detail}`, 'err');
+        }
+        if (warnings.length){
+          warnings.forEach(w => log(w, 'err'));
+        }
+        if (parsed.length === 0 && skippedTypes.length === 0){
+          log('No entities found. Is this really an ASCII DXF, and does it contain an ENTITIES section?', 'err');
+        }
+      } catch(err){
+        flashHint('Import failed: ' + err.message);
+        log('Command: (DXF import) ' + file.name, 'echo');
+        log('Import failed: ' + err.message, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+  function renumber(){
+    for (const e of entities) if (!e.id) e.id = uid();
+    nextId = entities.reduce((m,e)=>Math.max(m,e.id||0), 0) + 1;
+  }
+
+  // ============================================================
+  // BARGE BALLAST <-> CAD bridge (JSON round-trip)
+  // Import: turns a "barge-project-export" JSON (produced by the
+  // index.html Barge Ballast app) into tagged CAD entities:
+  //   - hull outline  -> closed polyline,  meta.source = 'hull'
+  //   - each tank      -> rect + label text, meta.source = 'tank'
+  //   - each trailer axle -> circle,        meta.source = 'axle'
+  // The meta object carries the Excel row (and other identifiers)
+  // so a later "Export to Barge" can write positions back to the
+  // exact same Excel cells they came from. Entities without this
+  // meta tag (anything you draw freehand) are left out of that
+  // export — they're CAD-only annotations.
+  // ============================================================
+  const BARGE_SCHEMA_TYPE = 'barge-project-export';
+
+  function importBargeProject(data){
+    if (!data || typeof data !== 'object') throw new Error('Not a valid Barge Ballast export file.');
+    snapshot();
+    const added = [];
+
+    if (data.hull){
+      const xMin = Math.min(data.hull.xMin, data.hull.xMax);
+      const xMax = Math.max(data.hull.xMin, data.hull.xMax);
+      const yMin = Math.min(data.hull.yMin, data.hull.yMax);
+      const yMax = Math.max(data.hull.yMin, data.hull.yMax);
+      const w = xMax - xMin, h = yMax - yMin;
+      const bowTaper = w * 0.10, sternCut = w * 0.09, sternRound = h * 0.18;
+      // Same silhouette proportions as the barge app's drawHullOutline()
+      // (flat bow rail, sharp diagonal bow cut, rounded stern cut),
+      // approximated with straight segments for the CAD polyline.
+      const pts = [
+        { x: xMin, y: yMax },
+        { x: xMax, y: yMax },
+        { x: xMax - bowTaper, y: yMin },
+        { x: xMin + sternCut + sternRound, y: yMin },
+        { x: xMin + sternCut * 0.3, y: yMin + sternRound * 0.8 },
+      ];
+      added.push({ id: 0, type: 'polyline', points: pts, closed: true, color: '#5b9bd5', width: 2,
+        meta: { source: 'hull' } });
+    }
+
+    (data.tanks || []).forEach(t => {
+      const x1 = t.x - t.width / 2, x2 = t.x + t.width / 2;
+      const y1 = t.y - t.height / 2, y2 = t.y + t.height / 2;
+      added.push({ id: 0, type: 'rect', x1, y1, x2, y2, color: '#4fd1c5', width: 1.5,
+        meta: { source: 'tank', excelRow: t.excelRow, crestRow: t.crestRow, name: t.name, capacity: t.capacity } });
+      added.push({ id: 0, type: 'text', x: x1 + Math.min(0.3, t.width * 0.1), y: t.y,
+        content: t.name || ('Row ' + t.excelRow), height: Math.max(0.5, Math.min(t.height * 0.3, 2)),
+        color: '#4fd1c5', width: 1, meta: { source: 'tank-label', excelRow: t.excelRow } });
+    });
+
+    (data.trailerAxles || []).forEach(a => {
+      added.push({ id: 0, type: 'circle', cx: a.x, cy: a.y, r: 0.5, color: a.color || '#e0a458', width: 1.5,
+        meta: { source: 'axle', excelRow: a.excelRow, axleId: a.id, group: a.group, groupNumber: a.groupNumber, load: a.load, vcg: a.vcg } });
+    });
+
+    entities = entities.concat(added);
+    renumber();
+    zoomToFit(); renderList(); buildPropsForm();
+    return added.length;
+  }
+
+  // Export: walks current entities, pulls out anything tagged with
+  // meta.source (tank / axle / hull), and rebuilds the same schema
+  // with each item's CURRENT position/size — so moving a tank rect
+  // or an axle circle in the CAD editor is what changes the numbers
+  // that go back to Excel.
+  function exportBargeProject(){
+    const out = { type: BARGE_SCHEMA_TYPE, version: 1, exportedAt: new Date().toISOString(), tanks: [], trailerAxles: [] };
+
+    const hullEntity = entities.find(e => e.meta && e.meta.source === 'hull');
+    if (hullEntity && hullEntity.type === 'polyline' && hullEntity.points.length){
+      const xs = hullEntity.points.map(p => p.x), ys = hullEntity.points.map(p => p.y);
+      out.hull = { xMin: Math.min(...xs), xMax: Math.max(...xs), yMin: Math.min(...ys), yMax: Math.max(...ys) };
+    }
+
+    entities.filter(e => e.meta && e.meta.source === 'tank').forEach(e => {
+      const x1 = Math.min(e.x1, e.x2), x2 = Math.max(e.x1, e.x2);
+      const y1 = Math.min(e.y1, e.y2), y2 = Math.max(e.y1, e.y2);
+      out.tanks.push({
+        excelRow: e.meta.excelRow, crestRow: e.meta.crestRow, name: e.meta.name,
+        x: (x1 + x2) / 2, y: (y1 + y2) / 2, width: x2 - x1, height: y2 - y1,
+        capacity: e.meta.capacity
+      });
+    });
+
+    entities.filter(e => e.meta && e.meta.source === 'axle').forEach(e => {
+      out.trailerAxles.push({
+        excelRow: e.meta.excelRow, id: e.meta.axleId, x: e.cx, y: e.cy,
+        load: e.meta.load, vcg: e.meta.vcg, group: e.meta.group, groupNumber: e.meta.groupNumber, color: e.color
+      });
+    });
+
+    return out;
+  }
+
+  document.getElementById('importBargeBtn').onclick = () => document.getElementById('fileImportBarge').click();
+  document.getElementById('fileImportBarge').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const count = importBargeProject(data);
+        flashHint(`Imported ${count} item(s) from Barge Ballast.`);
+        log('Command: (Barge import) ' + file.name, 'echo');
+        log(`Imported ${data.tanks ? data.tanks.length : 0} tank(s), ${data.trailerAxles ? data.trailerAxles.length : 0} axle(s)${data.hull ? ', hull outline' : ''}.`, 'prompt');
+      } catch(err){
+        flashHint('Import failed: ' + err.message);
+        log('Command: (Barge import) ' + file.name, 'echo');
+        log('Import failed: ' + err.message, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  document.getElementById('exportBargeBtn').onclick = () => {
+    const data = exportBargeProject();
+    if (!data.tanks.length && !data.trailerAxles.length && !data.hull){
+      flashHint('Nothing tagged to export — import a Barge project first, or edit its tanks/axles.');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'barge-project.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    flashHint(`Exported ${data.tanks.length} tank(s), ${data.trailerAxles.length} axle(s) for the Barge Ballast app.`);
+    log('Command: (Barge export) barge-project.json', 'echo');
+  };
+
+  // Lightweight ASCII-DXF reader. Supports the common drawing entities
+  // (LINE, CIRCLE, ARC, LWPOLYLINE, old-style POLYLINE/VERTEX, TEXT, MTEXT,
+  // POINT, INSERT-as-marker). It intentionally does NOT support binary DXF,
+  // 3D solids, HATCH fills, DIMENSION objects, SPLINE curves, or fully
+  // resolving BLOCK definitions — those are reported back as "skipped" so
+  // it's clear what didn't come through, rather than failing silently.
+  function parseDxf(text){
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+
+    const head = text.slice(0, 24);
+    if (head.indexOf('AutoCAD Binary DXF') !== -1 || /^\x00\x00/.test(head)) {
+      throw new Error('This is a Binary DXF file, which this importer can\'t read. In AutoCAD use "Save As" and choose an ASCII DXF option (e.g. "AutoCAD 2018 DXF", not "Binary"), then import that file.');
+    }
+
+    const raw = text.split(/\r\n|\r|\n/);
+    const pairs = [];
+    for (let i=0;i<raw.length-1;i+=2){
+      const code = parseInt(raw[i].trim(),10);
+      const val = raw[i+1] !== undefined ? raw[i+1].trim() : '';
+      pairs.push([code, val]);
+    }
+    if (!pairs.length || isNaN(pairs[0][0])){
+      throw new Error('File doesn\'t look like ASCII DXF group-code pairs (expected a numeric code on the first line).');
+    }
+
+    // find ENTITIES section
+    let i = 0;
+    while (i < pairs.length && !(pairs[i][0]===2 && pairs[i][1]==='ENTITIES')) i++;
+    if (i >= pairs.length){
+      throw new Error('No ENTITIES section found in this file.');
+    }
+    i++;
+
+    const out = [];
+    const skipped = {};
+    const warnings = [];
+    const markSkipped = (type) => { skipped[type] = (skipped[type]||0) + 1; };
+    const defaultStyle = { color:'#e0a458', width:1.5 };
+    const supported = new Set(['LINE','CIRCLE','ARC','LWPOLYLINE','POLYLINE','VERTEX','SEQEND','TEXT','MTEXT','POINT','INSERT']);
+
+    function readUntilNextEntity(startIdx){
+      const props = {};
+      let j = startIdx;
+      while (j < pairs.length){
+        const [code, val] = pairs[j];
+        if (code === 0) break;
+        if (code === 10){ if(!('xs' in props)) props.xs=[]; props.xs.push(parseFloat(val)); }
+        else if (code === 20){ if(!('ys' in props)) props.ys=[]; props.ys.push(parseFloat(val)); }
+        else if (code === 11) props.x2 = parseFloat(val);
+        else if (code === 21) props.y2 = parseFloat(val);
+        else if (code === 40) props.r = parseFloat(val);
+        else if (code === 50) props.startAngle = parseFloat(val);
+        else if (code === 51) props.endAngle = parseFloat(val);
+        else if (code === 70) props.flag = parseInt(val,10) || 0;
+        else if (code === 2) props.name = val;
+        else if (code === 1) props.text = (props.text||'') + val;
+        else if (code === 3) props.text = (props.text||'') + val; // MTEXT continuation chunks
+        j++;
+      }
+      return { props, nextIdx: j };
+    }
+
+    while (i < pairs.length){
+      const [code, val] = pairs[i];
+      if (code === 0 && val === 'ENDSEC') break;
+      if (code !== 0){ i++; continue; }
+
+      const type = val;
+      let { props, nextIdx } = readUntilNextEntity(i+1);
+
+      try {
+        if (type === 'LINE' && props.xs && props.ys){
+          out.push({ id:0, type:'line', x1:props.xs[0], y1:props.ys[0], x2:props.x2, y2:props.y2, ...defaultStyle });
+        } else if (type === 'CIRCLE' && props.xs){
+          out.push({ id:0, type:'circle', cx:props.xs[0], cy:props.ys[0], r:props.r||1, ...defaultStyle });
+        } else if (type === 'ARC' && props.xs){
+          out.push({ id:0, type:'arc', cx:props.xs[0], cy:props.ys[0], r:props.r||1, startAngle:props.startAngle||0, endAngle:props.endAngle||90, ...defaultStyle });
+        } else if (type === 'LWPOLYLINE' && props.xs){
+          const pts = props.xs.map((x,idx)=>({x, y:props.ys[idx]}));
+          out.push({ id:0, type:'polyline', points:pts, closed: !!((props.flag||0) & 1), ...defaultStyle });
+        } else if (type === 'POLYLINE'){
+          // Old-style polyline: geometry lives in sibling VERTEX entities that follow,
+          // terminated by SEQEND — walk those here instead of treating them as top-level.
+          const closed = !!((props.flag||0) & 1);
+          const pts = [];
+          let k = nextIdx;
+          while (k < pairs.length){
+            const [c2, v2] = pairs[k];
+            if (c2 === 0 && v2 === 'VERTEX'){
+              const r2 = readUntilNextEntity(k+1);
+              if (r2.props.xs && r2.props.ys) pts.push({ x:r2.props.xs[0], y:r2.props.ys[0] });
+              k = r2.nextIdx;
+            } else if (c2 === 0 && v2 === 'SEQEND'){
+              const r2 = readUntilNextEntity(k+1);
+              k = r2.nextIdx;
+              break;
+            } else if (c2 === 0){
+              break;
+            } else { k++; }
+          }
+          if (pts.length >= 2) out.push({ id:0, type:'polyline', points:pts, closed, ...defaultStyle });
+          else markSkipped('POLYLINE (empty)');
+          nextIdx = k;
+        } else if (type === 'TEXT' && props.xs){
+          out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content: props.text||'', height: props.r||3, ...defaultStyle });
+        } else if (type === 'MTEXT' && props.xs){
+          const content = (props.text||'').replace(/\\P/g,' ').replace(/\{|\}/g,'').replace(/\\[A-Za-z][^;]*;/g,'');
+          out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content: content||'(mtext)', height: props.r||3, ...defaultStyle });
+        } else if (type === 'POINT' && props.xs){
+          out.push({ id:0, type:'circle', cx:props.xs[0], cy:props.ys[0], r:0.08, ...defaultStyle });
+        } else if (type === 'INSERT' && props.xs){
+          // Block reference: geometry isn't resolved, but drop a labeled marker so it's visible.
+          out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content:`[${props.name||'BLOCK'}]`, height: 2.5, color:'#6f9bd1', width:1.5 });
+        } else if (!supported.has(type)){
+          markSkipped(type);
+        }
+      } catch(entErr){
+        markSkipped(type + ' (parse error)');
+      }
+
+      i = nextIdx;
+    }
+    return { entities: out, skipped, warnings };
+  }
+
+  // ---------- Init ----------
+  window.addEventListener('resize', resize);
+  resize();
+  view.offsetX = wrap.clientWidth/2;
+  view.offsetY = wrap.clientHeight/2;
+  render();
+  buildManualForm();
+  buildPropsForm();
+})();
+</script>
+</body>
+</html>
