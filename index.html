@@ -594,6 +594,17 @@
             letter-spacing: 0.5px;
         }
 
+            #bargeSelector {
+                background: var(--input-bg);
+                color: var(--text-main);
+                border: 1px solid var(--panel-border);
+                border-radius: 4px;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: bold;
+                cursor: pointer;
+            }
+
             .toggle-container input {
                 margin-right: 4px;
                 accent-color: var(--accent-blue);
@@ -1309,6 +1320,12 @@
     <header>
         <h1>⚓ Barge Ballast-24-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
+            <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
+                <span>⚓ Barge</span>
+                <select id="bargeSelector" onchange="selectBargeSheet(this.value)">
+                    <option value="CREST_301">CREST_301</option>
+                </select>
+            </div>
             <div class="theme-toggle-container">
                 <span>Day</span>
                 <label class="switch"><input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()"><span class="slider"></span></label>
@@ -1546,7 +1563,13 @@
         //    CREST_301 (the geometry source), and any unmatched
         //    name/weight/capacity falls back to a generic placeholder.
         // ============================================================
-        const CREST_SHEET_NAME = "CREST_301";
+        // Was a fixed constant when there was only one barge (CREST_301).
+        // Now mutable: the workbook has one geometry/GHS sheet PER BARGE
+        // (11 of them, named after the barge itself), while Load_Editor
+        // and BALLASTPLAN(mT) stay as the single shared calculation
+        // sheets for whichever barge is currently selected. See
+        // selectBargeSheet() / populateBargeSelector() below.
+        let CREST_SHEET_NAME = "CREST_301";
         const CREST_START_ROW = 30;     // first geometry row
         const CREST_MAX_ROWS = 200;     // generous over-read, trimmed at first blank row
         const CREST_COL_RANGE = "Q:T";  // Q=x_start, R=x_end, S=y_start, T=y_end
@@ -1644,6 +1667,76 @@
             BARGE_X_MAX = Math.max(...TANK_CONFIG.map(t => t.x_end));
             BARGE_Y_MIN = Math.min(...TANK_CONFIG.map(t => t.y_start));
             BARGE_Y_MAX = Math.max(...TANK_CONFIG.map(t => t.y_end));
+        }
+
+        // ============================================================
+        // 1a. MULTI-BARGE SUPPORT
+        //     The workbook now has 11 per-barge GHS/geometry sheets (one
+        //     per barge, sheet name = barge name — same Q:T/P1:P9 layout
+        //     CREST_301 always had). Load_Editor and BALLASTPLAN(mT)
+        //     remain the single shared "calculation center" sheets used
+        //     for whichever barge is currently selected, so switching
+        //     barges only ever needs to repoint CREST_SHEET_NAME /
+        //     TARGET_SHEET_NAME — nothing else in the read/write logic
+        //     changes.
+        // ============================================================
+
+        // Sheets that are never barge geometry sheets, so they're
+        // filtered out of the barge dropdown even though they live in
+        // the same workbook.
+        const NON_BARGE_SHEET_NAMES = ["Load_Editor", "BALLASTPLAN(mT)"];
+
+        const BARGE_SELECTOR_STORAGE_KEY = "bargeBallast_selectedBargeSheet";
+
+        // Reads the full list of worksheet names from the live workbook
+        // and fills #bargeSelector with every sheet that isn't one of the
+        // known shared/non-barge sheets. Keeps whatever is currently
+        // selected (or the last one saved in localStorage) selected if it
+        // still exists; otherwise falls back to the first sheet found.
+        async function populateBargeSelector() {
+            const select = document.getElementById('bargeSelector');
+            if (!select || !isOfficeInitialized) return;
+            try {
+                await Excel.run(async (context) => {
+                    const sheets = context.workbook.worksheets;
+                    sheets.load("items/name");
+                    await context.sync();
+
+                    const bargeNames = sheets.items
+                        .map(s => s.name)
+                        .filter(name => !NON_BARGE_SHEET_NAMES.includes(name));
+
+                    if (bargeNames.length === 0) return;
+
+                    const saved = localStorage.getItem(BARGE_SELECTOR_STORAGE_KEY);
+                    const preferred = [CREST_SHEET_NAME, saved].find(n => bargeNames.includes(n));
+                    const active = preferred || bargeNames[0];
+
+                    select.innerHTML = bargeNames
+                        .map(name => `<option value="${escapeHtml(name)}"${name === active ? ' selected' : ''}>${escapeHtml(name)}</option>`)
+                        .join('');
+
+                    if (active !== CREST_SHEET_NAME) {
+                        CREST_SHEET_NAME = active;
+                        TARGET_SHEET_NAME = active;
+                    }
+                });
+            } catch (e) {
+                console.warn("Could not populate barge selector", e);
+            }
+        }
+
+        // Called when the user picks a different barge from the
+        // dropdown. Repoints the geometry/target sheet and re-pulls
+        // everything from Excel so the whole dashboard (tanks, extents,
+        // trim/heel targets, corner labels) rebuilds for the new barge.
+        async function selectBargeSheet(name) {
+            if (!name || name === CREST_SHEET_NAME) return;
+            CREST_SHEET_NAME = name;
+            TARGET_SHEET_NAME = name;
+            localStorage.setItem(BARGE_SELECTOR_STORAGE_KEY, name);
+            logAutoBallast(`⚓ Switched active barge to "${name}".`);
+            await pullExcelTankData();
         }
 
         // Total barge length = sum of each DISTINCT COLUMN's width, counted
@@ -1753,7 +1846,10 @@
         // P4:P9=deck-to-quay (AFT-PS, PS, FWD-PS, AFT-SB, SB, FWD-SB).
         // Pump capacity comes from BALLASTPLAN(mT)!C153.
         // ============================================================
-        const TARGET_SHEET_NAME = "CREST_301";
+        // Always kept equal to CREST_SHEET_NAME (same per-barge sheet
+        // holds both the tank geometry AND the P1:P9 target condition) —
+        // see selectBargeSheet().
+        let TARGET_SHEET_NAME = "CREST_301";
         const DECK_KEYS = ['AFT_PS', 'PS', 'FWD_PS', 'AFT_SB', 'SB', 'FWD_SB'];
         const DECK_LABELS_DISPLAY = ['AFT-PS', 'PS', 'FWD-PS', 'AFT-SB', 'SB', 'FWD-SB'];
 
@@ -4407,7 +4503,10 @@
                     isOfficeInitialized = true;
                     dataMode = "excel";
                     document.getElementById('connectionStatus').innerHTML = 'Status: <span style="color: var(--accent-green);">● Excel connected</span>';
-                    pullExcelTankData();
+                    // Discover the 11 barge sheets and restore whichever
+                    // one was last selected BEFORE the first data pull, so
+                    // that pull loads the right barge on startup.
+                    populateBargeSelector().then(() => pullExcelTankData());
                     registerExcelAutoTrack();
                 } else {
                     startFirebaseMode();
