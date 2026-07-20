@@ -381,46 +381,85 @@
             left: 2px;
             z-index: 17;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 2px;
+            gap: 1px;
             pointer-events: none;
         }
 
-        .tank-flow-arrow {
-            font-size: 10px;
-            line-height: 1;
-            font-weight: 700;
-            border-radius: 50%;
-            width: 13px;
-            height: 13px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            animation: tankFlowPulse 1.3s ease-in-out infinite;
+        /* Real flow-pipe visual: a short vertical "pipe" containing 3
+           chevrons that stream in the actual direction of flow (down
+           into the tank for fill, up out of the tank for discharge).
+           Replaces the old static glyph-in-a-circle badge. Colour
+           coding (blue=fill, red=discharge, purple=mixed) unchanged so
+           existing state logic (getTankFlowState) needs no changes. */
+        .tank-flow-pipe {
+            position: relative;
+            width: 14px;
+            height: 20px;
+            overflow: hidden;
+            border-radius: 2px;
         }
 
-        .tank-flow-arrow.flow-fill {
-            background: #0284c7;
-            color: #e0f2fe;
-            box-shadow: 0 0 6px rgba(56,189,248,0.9);
+        .tank-flow-pipe.flow-fill { background: rgba(2,132,199,0.18); box-shadow: 0 0 5px rgba(56,189,248,0.75) inset; }
+        .tank-flow-pipe.flow-discharge { background: rgba(185,28,28,0.18); box-shadow: 0 0 5px rgba(239,68,68,0.75) inset; }
+        .tank-flow-pipe.flow-mixed { background: rgba(126,34,206,0.18); box-shadow: 0 0 5px rgba(168,85,247,0.75) inset; }
+
+        .tank-flow-chevron {
+            position: absolute;
+            left: 50%;
+            width: 7px;
+            height: 7px;
+            opacity: 0;
+        }
+        .flow-fill .tank-flow-chevron {
+            border-right: 2px solid #38bdf8;
+            border-bottom: 2px solid #38bdf8;
+            transform: translateX(-50%) rotate(45deg);
+            animation: chevronDown 1.15s linear infinite;
+        }
+        .flow-discharge .tank-flow-chevron {
+            border-right: 2px solid #f87171;
+            border-bottom: 2px solid #f87171;
+            transform: translateX(-50%) rotate(225deg);
+            animation: chevronUp 1.15s linear infinite;
+        }
+        .flow-mixed .tank-flow-chevron {
+            border-right: 2px solid #c084fc;
+            border-bottom: 2px solid #c084fc;
+            transform: translateX(-50%) rotate(45deg);
+            animation: chevronDown 1.15s linear infinite;
+        }
+        .tank-flow-chevron:nth-child(1) { animation-delay: 0s; }
+        .tank-flow-chevron:nth-child(2) { animation-delay: 0.38s; }
+        .tank-flow-chevron:nth-child(3) { animation-delay: 0.76s; }
+
+        @keyframes chevronDown {
+            0%   { top: -8px; opacity: 0; }
+            15%  { opacity: 1; }
+            80%  { opacity: 1; }
+            100% { top: 18px; opacity: 0; }
+        }
+        @keyframes chevronUp {
+            0%   { top: 18px; opacity: 0; }
+            15%  { opacity: 1; }
+            80%  { opacity: 1; }
+            100% { top: -8px; opacity: 0; }
         }
 
-        .tank-flow-arrow.flow-discharge {
-            background: #b91c1c;
-            color: #fee2e2;
-            box-shadow: 0 0 6px rgba(239,68,68,0.9);
+        /* Small state pill (FILL / DISCHARGE / MIXED) sitting above the
+           pipe — this is the "label" half of the arrow+label ask. */
+        .tank-flow-state {
+            font-size: 7px;
+            font-weight: 800;
+            letter-spacing: 0.4px;
+            text-align: center;
+            border-radius: 2px 2px 0 0;
+            padding: 0 2px;
         }
-
-        .tank-flow-arrow.flow-mixed {
-            background: #7e22ce;
-            color: #f5f3ff;
-            box-shadow: 0 0 6px rgba(168,85,247,0.9);
-        }
-
-        @keyframes tankFlowPulse {
-            0%, 100% { transform: scale(1); opacity: 0.85; }
-            50% { transform: scale(1.18); opacity: 1; }
-        }
+        .tank-flow-state.flow-fill { background: #0284c7; color: #e0f2fe; }
+        .tank-flow-state.flow-discharge { background: #b91c1c; color: #fee2e2; }
+        .tank-flow-state.flow-mixed { background: #7e22ce; color: #f5f3ff; }
 
         .tank-flow-label {
             font-size: 8px;
@@ -2800,15 +2839,20 @@
                 const tank = tankData.find(t => t.row === cfg.id);
                 const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
 
-                const arrowChar = state === 'discharge' ? '▲' : (state === 'mixed' ? '↕' : '▼');
                 const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
                 const stateLabel = state === 'discharge' ? 'Discharging' : (state === 'mixed' ? 'Filling & discharging' : 'Filling');
+                const stateWord = state === 'discharge' ? 'OUT' : (state === 'mixed' ? '↕' : 'IN');
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-flow-marker';
                 wrap.title = `${stateLabel} — ${weightMT.toFixed(1)} mT`;
                 wrap.innerHTML = `
-                    <span class="tank-flow-arrow ${arrowCls}">${arrowChar}</span>
+                    <span class="tank-flow-state ${arrowCls}">${stateWord}</span>
+                    <span class="tank-flow-pipe ${arrowCls}">
+                        <span class="tank-flow-chevron"></span>
+                        <span class="tank-flow-chevron"></span>
+                        <span class="tank-flow-chevron"></span>
+                    </span>
                     <span class="tank-flow-label">${weightMT.toFixed(1)} mT</span>
                 `;
                 card.appendChild(wrap);
@@ -4875,6 +4919,18 @@
             baseOpacity: 0.35,
             pulseAmplitude: 0.22
         };
+        // Real 3D flow ARROW sizing (cylinder shaft + cone head), all in
+        // metres. Built symmetric about its own pivot (see the arrow's
+        // construction in build3DScene) so a single 180° rotation flips
+        // it from "pointing up / out of the tank" (discharge) to
+        // "pointing down / into the tank" (fill) with no repositioning.
+        // FLOW_ARROW_LIFT_Y_3D is how high above the tank top the arrow's
+        // pivot floats — kept clear of the %-fill/pump labels below it.
+        const FLOW_ARROW_SHAFT_LEN_3D = 0.55;
+        const FLOW_ARROW_HEAD_LEN_3D = 0.35;
+        const FLOW_ARROW_TOTAL_LEN_3D = FLOW_ARROW_SHAFT_LEN_3D + FLOW_ARROW_HEAD_LEN_3D;
+        const FLOW_ARROW_LIFT_Y_3D = 1.1;
+        const FLOW_ARROW_BOB_AMPLITUDE_3D = 0.12; // metres of up/down travel added on top of the base lift, animated in updateTankFlowPulse3D()
         // Sea-level plane (the big flat "ocean" surface) styling — separate
         // from the per-tank ballast fill above.
         const SEA_PLANE_STYLE_3D = {
@@ -5410,7 +5466,36 @@
                 flowGlow.visible = false;
                 hull3dGroup.add(flowGlow);
 
-                tankMeshes3d.push({ cfgId: cfg.id, shell, ballast, flowGlow });
+                // Flow ARROW — a real 3D object (cylinder shaft + cone
+                // head), not just a text glyph, floating just above the
+                // tank. Built centered on its own pivot (tail at -y,
+                // head at +y) so a single 180° flip of the whole group
+                // (see update3DFillAndAttitude) is enough to point it
+                // down INTO the tank for fill or up OUT of the tank for
+                // discharge, without moving its anchor height. Colour +
+                // visibility mirror flowGlow (TANK_FLOW_GLOW_STYLE_3D).
+                const flowArrowMat = new THREE.MeshBasicMaterial({
+                    color: TANK_FLOW_GLOW_STYLE_3D.colorFill,
+                    transparent: true,
+                    opacity: 0.95
+                });
+                const arrowShaft = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.055, 0.055, FLOW_ARROW_SHAFT_LEN_3D, 8),
+                    flowArrowMat
+                );
+                arrowShaft.position.y = -(FLOW_ARROW_TOTAL_LEN_3D / 2) + (FLOW_ARROW_SHAFT_LEN_3D / 2);
+                const arrowHead = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.16, FLOW_ARROW_HEAD_LEN_3D, 10),
+                    flowArrowMat
+                );
+                arrowHead.position.y = (FLOW_ARROW_TOTAL_LEN_3D / 2) - (FLOW_ARROW_HEAD_LEN_3D / 2);
+                const flowArrow = new THREE.Group();
+                flowArrow.add(arrowShaft, arrowHead);
+                flowArrow.position.set(cfg.x, TANK_TOP_Y + FLOW_ARROW_LIFT_Y_3D, worldYToZ3D(cfg.y));
+                flowArrow.visible = false;
+                hull3dGroup.add(flowArrow);
+
+                tankMeshes3d.push({ cfgId: cfg.id, shell, ballast, flowGlow, flowArrow, flowArrowMat });
             });
 
             // Pump LABELS only (no post/cap marker graphic anymore) — see
@@ -5525,9 +5610,19 @@
             if (!tankMeshes3d.length) return;
             const t = performance.now() * 0.0025;
             const wave = Math.sin(t) * TANK_FLOW_GLOW_STYLE_3D.pulseAmplitude;
+            const bob = Math.sin(t * 1.6) * FLOW_ARROW_BOB_AMPLITUDE_3D;
             tankMeshes3d.forEach((tm) => {
                 if (tm.flowGlow && tm.flowGlow.visible) {
                     tm.flowGlow.material.opacity = Math.max(0.05, TANK_FLOW_GLOW_STYLE_3D.baseOpacity + wave);
+                }
+                if (tm.flowArrow && tm.flowArrow.visible) {
+                    // Bob the arrow gently in the SAME direction it's
+                    // pointing, so it visually "travels" along the flow
+                    // direction rather than just floating in place.
+                    // flowArrow.userData.dir is +1 (discharge, up) or -1
+                    // (fill, down), set in update3DFillAndAttitude().
+                    const dir = tm.flowArrow.userData.dir || 1;
+                    tm.flowArrow.position.y = TANK_TOP_Y + FLOW_ARROW_LIFT_Y_3D + bob * dir;
                 }
             });
         }
@@ -5559,6 +5654,27 @@
                         const glowColor = state === 'discharge' ? TANK_FLOW_GLOW_STYLE_3D.colorDischarge
                             : (state === 'mixed' ? TANK_FLOW_GLOW_STYLE_3D.colorMixed : TANK_FLOW_GLOW_STYLE_3D.colorFill);
                         tm.flowGlow.material.color.set(glowColor);
+                    }
+                }
+
+                if (tm.flowArrow) {
+                    const cfg = TANK_CONFIG.find(c => c.id === tm.cfgId);
+                    const state = cfg ? getTankFlowState(cfg) : 'off';
+                    const active = showTankFlow && state !== 'off';
+                    tm.flowArrow.visible = active;
+                    if (active) {
+                        // fill -> arrow points DOWN into the tank (flip
+                        // 180°, dir = -1); discharge -> points UP out of
+                        // the tank (default build orientation, dir = +1);
+                        // mixed -> leave pointing up but tinted purple
+                        // (an up/down double-arrow reads as visual noise
+                        // at this scale, colour alone communicates it).
+                        const flip = state === 'fill';
+                        tm.flowArrow.rotation.x = flip ? Math.PI : 0;
+                        tm.flowArrow.userData.dir = flip ? -1 : 1;
+                        const arrowColor = state === 'discharge' ? TANK_FLOW_GLOW_STYLE_3D.colorDischarge
+                            : (state === 'mixed' ? TANK_FLOW_GLOW_STYLE_3D.colorMixed : TANK_FLOW_GLOW_STYLE_3D.colorFill);
+                        tm.flowArrowMat.color.set(arrowColor);
                     }
                 }
             });
@@ -5753,10 +5869,16 @@
                     if (state === 'off') return;
                     const td = tankData.find(t => t.row === cfgId);
                     const weightMT = td ? (parseFloat(td.weight) || 0) : 0;
-                    const arrowChar = state === 'discharge' ? '▲' : (state === 'mixed' ? '↕' : '▼');
                     const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
-                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); display:flex; align-items:center; gap:2px; white-space:nowrap;">` +
-                        `<span class="tank-flow-arrow ${arrowCls}" style="position:static;">${arrowChar}</span>` +
+                    const stateWord = state === 'discharge' ? 'DISCHARGE' : (state === 'mixed' ? 'FILL/DISCHARGE' : 'FILL');
+                    // Note: the directional cue itself now lives IN the
+                    // 3D scene as a real arrow mesh (see flowArrow in
+                    // buildLabelAnchors3D... actually build3DScene, and
+                    // update3DFillAndAttitude for its orientation/colour).
+                    // This DOM tag is just the text readout floating next
+                    // to that mesh, same anchor point.
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); display:flex; align-items:center; gap:3px; white-space:nowrap;">` +
+                        `<span class="tank-flow-state ${arrowCls}" style="position:static; border-radius:3px; padding:1px 4px;">${stateWord}</span>` +
                         `<span class="tank-flow-label" style="position:static;">${weightMT.toFixed(1)} mT</span></div>`;
                 } else if (a.cls === 'cog') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#f5f3ff; background:rgba(168,85,247,0.85); padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:30;">${a.text}</div>`;
