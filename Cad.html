@@ -3486,16 +3486,18 @@
       if (code !== 0){ i++; continue; }
 
       const type = val;
+      let nextIdx = i + 1; // safe fallback so the loop always advances, even if parsing throws
 
       try {
         if (type === 'HATCH'){
           const r = parseHatch(i+1);
           if (r.entity) out.push({ id:0, ...r.entity });
-          i = r.nextIdx;
-          continue;
-        }
+          nextIdx = r.nextIdx;
+        } else {
 
-        let { props, nextIdx } = readUntilNextEntity(i+1);
+        let read = readUntilNextEntity(i+1);
+        let props = read.props;
+        nextIdx = read.nextIdx;
 
         if (type === 'POLYLINE'){
           // Old-style polyline: geometry lives in sibling VERTEX entities that follow,
@@ -3548,6 +3550,8 @@
           const ent = simpleEntityFromProps(type, props);
           if (ent) out.push({ id:0, ...ent });
           else if (!supported.has(type)) markSkipped(type);
+        }
+
         }
       } catch(entErr){
         markSkipped(type + ' (parse error)');
