@@ -1318,7 +1318,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-24-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-50-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1860,7 +1860,13 @@
         let pumpCapacityMTPerHr = 250; // BALLASTPLAN(mT)!C153, default per §11
 
         // §13 recommended settings
-        const AB_BALLAST_INCREMENT_T = 5;
+        // Step-down schedule: optimizer starts coarse (fast convergence)
+        // then automatically refines to finer steps as it gets close,
+        // instead of stopping the moment 5t moves stop improving things.
+        // Edit this array to change the coarse->fine progression, e.g.
+        // [10, 5, 2, 1, 0.5] for a finer final resolution.
+        const AB_STEP_SIZES_T = [5, 2, 1];
+        let abStepIndex = 0; // index into AB_STEP_SIZES_T — current active step size
         const AB_MAX_ITERATIONS = 100;
         const AB_TRIM_TOLERANCE = 0.01;
         const AB_HEEL_TOLERANCE = 0.01;
@@ -3916,11 +3922,13 @@
                 }
                 if (!want) return;
 
-                if ((want === 'add' || want === 'both') && currentW + AB_BALLAST_INCREMENT_T <= bounds.max + 1e-6) {
-                    candidates.push({ id, delta: AB_BALLAST_INCREMENT_T, newWeight: currentW + AB_BALLAST_INCREMENT_T, original: currentW });
+                const stepT = AB_STEP_SIZES_T[abStepIndex] ?? AB_STEP_SIZES_T[AB_STEP_SIZES_T.length - 1];
+
+                if ((want === 'add' || want === 'both') && currentW + stepT <= bounds.max + 1e-6) {
+                    candidates.push({ id, delta: stepT, newWeight: currentW + stepT, original: currentW });
                 }
-                if ((want === 'remove' || want === 'both') && currentW - AB_BALLAST_INCREMENT_T >= bounds.min - 1e-6) {
-                    candidates.push({ id, delta: -AB_BALLAST_INCREMENT_T, newWeight: Math.max(bounds.min, currentW - AB_BALLAST_INCREMENT_T), original: currentW });
+                if ((want === 'remove' || want === 'both') && currentW - stepT >= bounds.min - 1e-6) {
+                    candidates.push({ id, delta: -stepT, newWeight: Math.max(bounds.min, currentW - stepT), original: currentW });
                 }
             });
             return candidates;
@@ -3965,6 +3973,8 @@
             }
             autoBallastRunning = true;
             autoBallastIteration = 0;
+            abStepIndex = 0; // start coarse (AB_STEP_SIZES_T[0]) every fresh run
+            logAutoBallast(`▶ Starting Auto Ballast — step size ${AB_STEP_SIZES_T[abStepIndex]}t.`);
             updateAutoBallastButtons();
 
             while (autoBallastRunning && autoBallastIteration < AB_MAX_ITERATIONS) {
@@ -3978,10 +3988,18 @@
 
                 const candidates = buildAutoBallastCandidates(focus);
                 if (!candidates.length) {
-                    logAutoBallast(`⚠ No candidate tanks available to correct ${focus}. Stopping.`);
+                    // No candidates at this step size (e.g. every tank is at
+                    // its reserve bound for a move this big) — try a finer
+                    // step before giving up entirely.
+                    if (abStepIndex < AB_STEP_SIZES_T.length - 1) {
+                        abStepIndex++;
+                        logAutoBallast(`↘ No candidate tanks at current step — refining to ${AB_STEP_SIZES_T[abStepIndex]}t.`);
+                        continue;
+                    }
+                    logAutoBallast(`⚠ No candidate tanks available to correct ${focus} even at the finest step (${AB_STEP_SIZES_T[abStepIndex]}t). Stopping.`);
                     break;
                 }
-                logAutoBallast(`Iter ${autoBallastIteration + 1}: testing ${candidates.length} candidate move(s) for ${focus}…`);
+                logAutoBallast(`Iter ${autoBallastIteration + 1}: testing ${candidates.length} candidate move(s) for ${focus} at ${AB_STEP_SIZES_T[abStepIndex]}t…`);
 
                 let best = null;
                 for (const cand of candidates) {
@@ -3995,9 +4013,18 @@
                     await abWriteTankWeight(cand.id, cand.original); // revert — keep only the winner
                 }
 
-                // §13: "Stop if no improvement" = TRUE
+                // §13 "stop if no improvement", made step-aware: at a coarse
+                // step size, a plateau usually just means the coarse step
+                // is now too big to land closer to zero — refine to the
+                // next smaller step and keep going. Only stop for real once
+                // the finest configured step also shows no improvement.
                 if (!best || best.errTotal >= err.total - 1e-6) {
-                    logAutoBallast('⚠ No improving move found — stopping (no-improvement rule).');
+                    if (abStepIndex < AB_STEP_SIZES_T.length - 1) {
+                        abStepIndex++;
+                        logAutoBallast(`↘ No improvement at ${AB_STEP_SIZES_T[abStepIndex - 1]}t — refining to ${AB_STEP_SIZES_T[abStepIndex]}t.`);
+                        continue;
+                    }
+                    logAutoBallast(`⚠ No improving move found at finest step (${AB_STEP_SIZES_T[abStepIndex]}t) — stopping (no-improvement rule).`);
                     break;
                 }
 
