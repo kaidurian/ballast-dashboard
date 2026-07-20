@@ -363,8 +363,8 @@
 
     <div class="divider"></div>
     <button class="action" id="zoomFit" title="Zoom to fit">⤢ Fit</button>
-    <button class="action" id="saveProj" title="Save project (persists in this artifact)">💾 Save</button>
-    <button class="action" id="loadProj" title="Load saved project">📂 Load</button>
+    <button class="action" id="saveProj" title="Save a named snapshot you can return to later (your work is also autosaved automatically — refreshing the page won't lose it)">💾 Save</button>
+    <button class="action" id="loadProj" title="Load your last named Save snapshot">📂 Load</button>
 
     <div class="divider"></div>
     <button class="action" id="exportDxf" title="Export as .dxf">⬇ Export DXF</button>
@@ -453,7 +453,8 @@
           Ctrl+Z / Ctrl+Y — undo/redo<br>
           Wheel — zoom (unlimited) · Right-drag or Middle-drag — pan · Middle dblclick — zoom extents<br>
           Press <b>Enter</b> on an empty command line to repeat the last command<br>
-          <b>Touch:</b> one finger = mouse (draw/select/drag) · two fingers = pinch-zoom + pan · double-tap = finish polyline · <b>👆 Precision</b> (status bar) raises the cursor above your finger for exact placement
+          <b>Touch:</b> one finger = mouse (draw/select/drag) · two fingers = pinch-zoom + pan · double-tap = finish polyline · <b>👆 Precision</b> (status bar) raises the cursor above your finger for exact placement<br>
+          Your work autosaves as you go, so refreshing the page won't lose it — <b>💾 Save</b> also lets you keep a separate named snapshot
         </div>
       </div>
     </div>
@@ -524,6 +525,18 @@
   // ---------- Blocks (BLOCK / INSERT) ----------
   let blocks = {}; // name -> [{...entity relative to base, no id}]
 
+  // ---------- Groups ----------
+  // Entities can carry a shared `groupId` (set when a Block is created from a
+  // selection, or when a Block is inserted) so clicking any one member selects
+  // the whole cluster together, like a lightweight AutoCAD GROUP.
+  let groupCounter = 1;
+  function newGroupId(){ return 'G' + (groupCounter++); }
+  function groupMembers(id){
+    const e = entities.find(x => x.id === id);
+    if (!e || !e.groupId) return [id];
+    return entities.filter(x => x.groupId === e.groupId).map(x => x.id);
+  }
+
   // ---------- Osnap ----------
   let currentOsnap = null; // {x,y,kind} last resolved snap point, for the marker + placePoint
 
@@ -565,6 +578,43 @@
     history.push(JSON.stringify(entities));
     if (history.length > 100) history.shift();
     future = [];
+    scheduleAutosave();
+  }
+
+  // ---------- Autosave (survives page refresh) ----------
+  // Separate from the manual Save/Load slot ('cad-project') so a refresh always
+  // recovers your latest work automatically, while manual Save/Load stays a
+  // deliberate named snapshot you control. Debounced so rapid edits (dragging,
+  // typing) don't hammer storage — it writes ~1.2s after things go quiet.
+  let autosaveTimer = null;
+  function scheduleAutosave(){
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(doAutosave, 1200);
+  }
+  async function doAutosave(){
+    try {
+      await window.storage.set('cad-autosave', JSON.stringify({
+        entities, nextId, layers, currentLayer, blocks, groupCounter, savedAt: Date.now()
+      }), false);
+    } catch(err){ /* autosave failures stay silent — Save/Load remains available manually */ }
+  }
+  async function restoreAutosave(){
+    try {
+      const res = await window.storage.get('cad-autosave', false);
+      if (!res) return;
+      const data = JSON.parse(res.value);
+      if (!data || !Array.isArray(data.entities) || !data.entities.length) return;
+      entities = data.entities;
+      nextId = data.nextId || (entities.reduce((m,e)=>Math.max(m,e.id||0),0)+1);
+      layers = data.layers && data.layers.length ? data.layers : layers;
+      currentLayer = data.currentLayer && layers.some(l=>l.name===data.currentLayer) ? data.currentLayer : layers[0].name;
+      blocks = data.blocks || {};
+      groupCounter = data.groupCounter || groupCounter;
+      renderLayers(); syncLayerSelect();
+      zoomToFit(); renderList(); buildPropsForm(); buildModifyForm();
+      const when = data.savedAt ? new Date(data.savedAt).toLocaleTimeString() : 'earlier';
+      log(`Restored your previous session (autosaved ${when}, ${entities.length} entities). Use Clear if you'd rather start fresh.`, 'prompt');
+    } catch(err){ /* nothing to restore, or storage unavailable — just start with an empty canvas */ }
   }
   function undo(){
     if (!history.length) return;
@@ -852,10 +902,11 @@
     const cx = a.x+t*dx, cy = a.y+t*dy;
     return Math.hypot(p.x-cx, p.y-cy);
   }
-  function hitTest(world){
+  function hitTest(world, excludeId){
     const tol = (modeOsnap ? 9 : 6) / view.scale;
     for (let i = entities.length-1; i>=0; i--){
       const e = entities[i];
+      if (excludeId != null && e.id === excludeId) continue;
       if (!layerVisible(e.layer) || layerLocked(e.layer)) continue;
       if (e.type === 'line'){
         if (distToSeg(world, {x:e.x1,y:e.y1}, {x:e.x2,y:e.y2}) < tol) return e;
@@ -946,10 +997,10 @@
         <input type="color" data-act="color" value="${l.color}" title="Layer color (organizational)">
         <span class="lname" data-act="pick" title="Set as current layer">${l.name}${l.name===currentLayer?' (current)':''}</span>
         <span class="ldel" data-act="del" title="Delete layer">✕</span>`;
-      row.querySelector('[data-act=pick]').onclick = () => { currentLayer = l.name; renderLayers(); syncLayerSelect(); };
-      row.querySelector('[data-act=vis]').onclick = (ev) => { ev.stopPropagation(); l.visible = !l.visible; renderLayers(); render(); renderList(); };
-      row.querySelector('[data-act=lock]').onclick = (ev) => { ev.stopPropagation(); l.locked = !l.locked; renderLayers(); };
-      row.querySelector('[data-act=color]').addEventListener('input', (ev) => { l.color = ev.target.value; renderLayers(); });
+      row.querySelector('[data-act=pick]').onclick = () => { currentLayer = l.name; renderLayers(); syncLayerSelect(); scheduleAutosave(); };
+      row.querySelector('[data-act=vis]').onclick = (ev) => { ev.stopPropagation(); l.visible = !l.visible; renderLayers(); render(); renderList(); scheduleAutosave(); };
+      row.querySelector('[data-act=lock]').onclick = (ev) => { ev.stopPropagation(); l.locked = !l.locked; renderLayers(); scheduleAutosave(); };
+      row.querySelector('[data-act=color]').addEventListener('input', (ev) => { l.color = ev.target.value; renderLayers(); scheduleAutosave(); });
       row.querySelector('[data-act=del]').onclick = (ev) => {
         ev.stopPropagation();
         if (l.name === '0'){ flashHint('Layer "0" cannot be deleted.'); return; }
@@ -967,7 +1018,7 @@
   function syncLayerSelect(){
     layerSelectEl.innerHTML = layers.map(l => `<option value="${l.name}" ${l.name===currentLayer?'selected':''}>${l.name}</option>`).join('');
   }
-  layerSelectEl.addEventListener('change', () => { currentLayer = layerSelectEl.value; renderLayers(); });
+  layerSelectEl.addEventListener('change', () => { currentLayer = layerSelectEl.value; renderLayers(); scheduleAutosave(); });
 
   function addLayer(){
     let base = 'Layer', n = 1;
@@ -978,7 +1029,7 @@
     const palette = ['#4fd1c5','#e0a458','#5b9bd5','#e0685f','#8bd17c','#c792ea','#f2c94c'];
     layers.push({ name, color: palette[layers.length % palette.length], visible:true, locked:false });
     currentLayer = name;
-    renderLayers(); syncLayerSelect();
+    renderLayers(); syncLayerSelect(); scheduleAutosave();
   }
   document.getElementById('addLayerBtn').onclick = addLayer;
   document.getElementById('addLayerBtn2').onclick = addLayer;
@@ -1197,7 +1248,7 @@
           finishModify(`Moved ${ids.length} entit${ids.length===1?'y':'ies'}.`);
         } else {
           const newIds = [];
-          modifyTemp.orig.forEach(o => { const c = JSON.parse(JSON.stringify(o)); c.id = uid(); translateEntity(c, o, dx, dy); entities.push(c); newIds.push(c.id); });
+          modifyTemp.orig.forEach(o => { const c = JSON.parse(JSON.stringify(o)); c.id = uid(); delete c.groupId; translateEntity(c, o, dx, dy); entities.push(c); newIds.push(c.id); });
           log(`Copied ${ids.length} entit${ids.length===1?'y':'ies'}.`, 'prompt');
           render(); renderList();
           // COPY supports multiple placements — stay active for another destination click
@@ -1251,7 +1302,7 @@
       } else {
         snapshot();
         const newIds = [];
-        ids.forEach(id => { const src = entities.find(x=>x.id===id); const c = mirrorEntityCopy(src, modifyTemp.p1, world); c.id = uid(); entities.push(c); newIds.push(c.id); });
+        ids.forEach(id => { const src = entities.find(x=>x.id===id); const c = mirrorEntityCopy(src, modifyTemp.p1, world); c.id = uid(); delete c.groupId; entities.push(c); newIds.push(c.id); });
         selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
         finishModify(`Mirrored ${ids.length} entit${ids.length===1?'y':'ies'} (source kept).`);
       }
@@ -1276,7 +1327,7 @@
     if (tool === 'trim' || tool === 'extend'){
       if (modifyBoundaryId == null){ flashHint('Select one cutting/boundary entity first, then ' + (tool==='trim'?'Trim.':'Extend.')); setTool('select'); return; }
       const boundary = entities.find(x => x.id === modifyBoundaryId);
-      const target = hitTest(world);
+      const target = hitTest(world, modifyBoundaryId);
       const validTypes = tool === 'trim' ? ['line','polyline','circle','arc'] : ['line','polyline','arc'];
       if (!target || target.id === modifyBoundaryId || !validTypes.includes(target.type)){
         const hint2 = tool==='trim' ? 'a LINE, POLYLINE edge, CIRCLE, or ARC' : 'a LINE, POLYLINE edge, or ARC (circles have no open end)';
@@ -1309,10 +1360,7 @@
       const nameField = document.getElementById('mo_blockname');
       const name = ((nameField && nameField.value.trim()) || ('Block' + (Object.keys(blocks).length+1)));
       if (blocks[name] && !confirm(`Block "${name}" already exists — overwrite it?`)) return;
-      blocks[name] = ids.map(id => { const c = JSON.parse(JSON.stringify(entities.find(x=>x.id===id))); delete c.id; translateEntity(c, c, -world.x, -world.y); return c; });
-      flashHint(`Block "${name}" defined (${ids.length} entities).`);
-      log(`Block "${name}" created from ${ids.length} entities, base point ${world.x.toFixed(2)},${world.y.toFixed(2)}.`, 'prompt');
-      buildModifyForm();
+      createBlockFromSelection(ids, name, world);
       setTool('select');
       return;
     }
@@ -1329,13 +1377,32 @@
   function insertBlockAt(name, at){
     if (!name || !blocks[name]){ flashHint('Pick a block to insert in Modify Options first.'); return; }
     snapshot();
+    const gid = newGroupId();
     const newIds = [];
-    blocks[name].forEach(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); translateEntity(c, c, at.x, at.y); entities.push(c); newIds.push(c.id); });
+    blocks[name].forEach(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); c.groupId = gid; translateEntity(c, c, at.x, at.y); entities.push(c); newIds.push(c.id); });
     selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
     render(); renderList(); buildPropsForm(); buildModifyForm();
-    log(`Inserted block "${name}" at ${at.x.toFixed ? at.x.toFixed(2) : at.x},${at.y.toFixed ? at.y.toFixed(2) : at.y}.`, 'prompt');
+    log(`Inserted block "${name}" at ${at.x.toFixed ? at.x.toFixed(2) : at.x},${at.y.toFixed ? at.y.toFixed(2) : at.y} (grouped).`, 'prompt');
   }
 
+  // Defines a reusable block from the given entities, AND groups those same
+  // source entities together in the drawing (so they keep acting as one unit).
+  function createBlockFromSelection(ids, name, basePt){
+    snapshot();
+    const gid = newGroupId();
+    blocks[name] = ids.map(id => {
+      const src = entities.find(x=>x.id===id);
+      src.groupId = gid; // group the ORIGINAL entities too
+      const c = JSON.parse(JSON.stringify(src));
+      delete c.id; delete c.groupId; // the stored definition itself stays ungrouped; grouping happens fresh per-insert
+      translateEntity(c, c, -basePt.x, -basePt.y);
+      return c;
+    });
+    selectedIds = new Set(ids); selectedId = ids.length===1?ids[0]:null;
+    flashHint(`Block "${name}" defined (${ids.length} entities, grouped).`);
+    log(`Block "${name}" created from ${ids.length} entities, base point ${basePt.x.toFixed(2)},${basePt.y.toFixed(2)}. Source entities are now grouped.`, 'prompt');
+    render(); renderList(); buildPropsForm(); buildModifyForm();
+  }
   function activeSelectionIds(){
     if (selectedIds.size) return [...selectedIds];
     if (selectedId != null) return [selectedId];
@@ -1599,29 +1666,60 @@
     return [];
   }
 
-  // Trim a circle or arc: find where it crosses the boundary, then keep the piece
-  // that does NOT contain the clicked point (mirrors how Trim works on a line).
-  // With exactly 2 crossings this is exact; with more than 2 it removes the piece
-  // immediately bracketing the click and keeps the rest as one arc spanning the
-  // remainder — correct for the common case, an approximation for busier boundaries.
+  // Trim a circle or arc against a boundary. Cut points are found, the segment the
+  // click landed in is removed, and whatever remains becomes one arc (reusing the
+  // target) or — if the boundary crossed twice inside the remaining span — two
+  // separate arcs (the target plus one new entity). This never re-derives the whole
+  // shape from scratch, so earlier trims on the same arc are always preserved.
   function trimCircularAt(target, boundary, clickWorld){
-    let hits = circleBoundaryIntersections(target.cx, target.cy, target.r, boundary)
-      .map(h => angleAt(target.cx, target.cy, h.x, h.y));
-    if (target.type === 'arc') hits = hits.filter(a => angleInArcRange(a, target.startAngle, target.endAngle));
-    hits = [...new Set(hits.map(a=>Math.round(a*1e6)/1e6))];
-    if (hits.length < 2){ flashHint('Need at least 2 crossing points with the boundary to trim a circle/arc.'); return false; }
-    hits.sort((a,b)=>a-b);
     const clickAngle = angleAt(target.cx, target.cy, clickWorld.x, clickWorld.y);
-    const base = target.type === 'arc' ? target.startAngle : 0;
-    // find the pair of (angularly sorted) crossings that bracket the click point
-    let lo = hits[hits.length-1], hi = hits[0];
-    for (let i=0;i<hits.length;i++){
-      const a0 = hits[i], a1 = hits[(i+1)%hits.length];
-      if (angleNorm(clickAngle-a0) <= angleNorm(a1-a0) + 1e-6){ lo = a0; hi = a1; break; }
+    let rawHits = circleBoundaryIntersections(target.cx, target.cy, target.r, boundary)
+      .map(h => angleAt(target.cx, target.cy, h.x, h.y));
+    rawHits = [...new Set(rawHits.map(a => Math.round(a*1e6)/1e6))];
+    const makePiece = (startAngle, endAngle) => ({ id: uid(), type:'arc', cx:target.cx, cy:target.cy, r:target.r, startAngle, endAngle, color:target.color, width:target.width, layer:target.layer });
+
+    if (target.type === 'circle'){
+      if (rawHits.length < 2){ flashHint('Need at least 2 crossing points with the boundary to trim a full circle.'); return false; }
+      rawHits.sort((a,b)=>a-b);
+      const n = rawHits.length;
+      let cutIndex = 0;
+      for (let i=0;i<n;i++){
+        const a0 = rawHits[i], a1 = rawHits[(i+1)%n];
+        if (angleNorm(clickAngle-a0) <= angleNorm(a1-a0) + 1e-6){ cutIndex = i; break; }
+      }
+      snapshot();
+      const pieces = [];
+      for (let k=1;k<n;k++){ const idx = (cutIndex+k) % n; pieces.push([rawHits[idx], rawHits[(idx+1)%n]]); }
+      target.type = 'arc';
+      target.startAngle = pieces[0][0]; target.endAngle = pieces[0][1];
+      for (let k=1;k<pieces.length;k++) entities.push(makePiece(pieces[k][0], pieces[k][1]));
+      return true;
     }
+
+    // Existing arc: the cut points are the arc's own two ends plus any interior crossings.
+    const sweep = angleNorm(target.endAngle - target.startAngle);
+    if (sweep < 1e-6) return false;
+    const toT = a => angleNorm(a - target.startAngle) / sweep;
+    const interior = rawHits.filter(a => { const t = toT(a); return t > 1e-6 && t < 1-1e-6; });
+    if (!interior.length){ flashHint('That boundary doesn\'t cross this arc.'); return false; }
+    const cuts = [0, ...interior.map(toT).sort((a,b)=>a-b), 1];
+    const angleOfT = t => angleNorm(target.startAngle + t*sweep);
+    const tc = toT(clickAngle);
+    let segIndex = cuts.length-2;
+    for (let i=0;i<cuts.length-1;i++){ if (tc >= cuts[i]-1e-9 && tc <= cuts[i+1]+1e-9){ segIndex = i; break; } }
     snapshot();
-    target.type = 'arc';
-    target.startAngle = hi; target.endAngle = lo; // keep the OTHER side (hi around to lo), removing lo->hi
+    const leftExists = segIndex > 0, rightExists = segIndex < cuts.length-2;
+    if (leftExists && rightExists){
+      const rightPiece = makePiece(angleOfT(cuts[segIndex+1]), target.endAngle);
+      target.endAngle = angleOfT(cuts[segIndex]);
+      entities.push(rightPiece);
+    } else if (rightExists){
+      target.startAngle = angleOfT(cuts[segIndex+1]);
+    } else if (leftExists){
+      target.endAngle = angleOfT(cuts[segIndex]);
+    } else {
+      return false;
+    }
     return true;
   }
   // Extend an arc's nearer end outward until it meets the boundary. (Full circles
@@ -1814,24 +1912,25 @@
     if (tool === 'select'){
       const hitE = hitTest(world);
       if (hitE){
+        const members = groupMembers(hitE.id);
         if (e.shiftKey){
-          if (selectedIds.has(hitE.id)) selectedIds.delete(hitE.id); else selectedIds.add(hitE.id);
+          const allIn = members.every(id => selectedIds.has(id));
+          if (allIn) members.forEach(id => selectedIds.delete(id));
+          else members.forEach(id => selectedIds.add(id));
           selectedId = selectedIds.size === 1 ? [...selectedIds][0] : (selectedIds.has(hitE.id) ? hitE.id : null);
           render(); renderList(); buildPropsForm(); buildModifyForm();
         } else {
-          if (selectedIds.has(hitE.id) && selectedIds.size > 1){
-            selectedId = hitE.id;
-            render(); renderList(); buildPropsForm(); buildModifyForm();
-          } else {
-            selectedIds = new Set([hitE.id]);
-            selectEntity(hitE.id);
+          if (!(selectedIds.has(hitE.id) && selectedIds.size > 1)){
+            selectedIds = new Set(members);
           }
+          selectedId = hitE.id;
+          render(); renderList(); buildPropsForm(); buildModifyForm();
           const ids = [...selectedIds];
           dragging = { ids, startWorld: world, origMap: Object.fromEntries(ids.map(id => [id, JSON.parse(JSON.stringify(entities.find(x=>x.id===id)))])) };
         }
         return;
       }
-      // empty space: start a rubber-band window/crossing select (unless shift, which just clears nothing extra)
+      // empty space: start a rubber-band select (unless shift, which just clears nothing extra)
       if (!e.shiftKey) { selectedIds = new Set(); selectEntity(null); }
       selBoxStart = { sx, sy, wx: world.x, wy: world.y };
       return;
@@ -1861,7 +1960,7 @@
       box.style.display = 'block';
       box.style.left = x1+'px'; box.style.top = y1+'px';
       box.style.width = (x2-x1)+'px'; box.style.height = (y2-y1)+'px';
-      box.classList.toggle('crossing', sx < selBoxStart.sx); // dragging right-to-left = crossing select
+      // (both drag directions now select the same way — anything the box touches)
     }
     coordsEl.textContent = `x: ${world.x.toFixed(2)}  y: ${world.y.toFixed(2)}`;
 
@@ -1940,15 +2039,18 @@
       if (moved){
         const w1 = screenToWorld(Math.min(selBoxStart.sx,sx), Math.min(selBoxStart.sy,sy));
         const w2 = screenToWorld(Math.max(selBoxStart.sx,sx), Math.max(selBoxStart.sy,sy));
-        const crossing = sx < selBoxStart.sx; // right-to-left drag = crossing (touch), left-to-right = window (fully inside)
+        // Always select anything the box touches (not just fully-enclosed) — far more
+        // forgiving and predictable than AutoCAD's direction-dependent window/crossing rule.
         const picked = entities.filter(en => {
           if (!layerVisible(en.layer) || layerLocked(en.layer)) return false;
           const bb = entityBBox(en);
           if (!bb) return false;
-          if (crossing) return !(bb.maxX < w1.x || bb.minX > w2.x || bb.maxY < w1.y || bb.minY > w2.y);
-          return bb.minX >= w1.x && bb.maxX <= w2.x && bb.minY >= w1.y && bb.maxY <= w2.y;
+          return !(bb.maxX < w1.x || bb.minX > w2.x || bb.maxY < w1.y || bb.minY > w2.y);
         });
         picked.forEach(en => selectedIds.add(en.id));
+        // pulling in any group member also pulls in the rest of that group
+        const gids = new Set(picked.map(en=>en.groupId).filter(Boolean));
+        if (gids.size) entities.forEach(en => { if (en.groupId && gids.has(en.groupId)) selectedIds.add(en.id); });
         selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
         render(); renderList(); buildPropsForm(); buildModifyForm();
       }
@@ -2477,7 +2579,7 @@
           const count = Math.max(1, Math.round(parseFloat(document.getElementById('mo_count').value)||1));
           const newIds = [];
           for (let k=1;k<=count;k++){
-            orig.forEach(o => { const c=JSON.parse(JSON.stringify(o)); c.id=uid(); translateEntity(c,o,dx*k,dy*k); entities.push(c); newIds.push(c.id); });
+            orig.forEach(o => { const c=JSON.parse(JSON.stringify(o)); c.id=uid(); delete c.groupId; translateEntity(c,o,dx*k,dy*k); entities.push(c); newIds.push(c.id); });
           }
           selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
         }
@@ -2529,7 +2631,7 @@
         const p2 = {x:parseFloat(document.getElementById('mo_x2').value)||0, y:parseFloat(document.getElementById('mo_y2').value)||0};
         snapshot();
         const newIds = [];
-        ids.forEach(id => { const c = mirrorEntityCopy(entities.find(x=>x.id===id), p1, p2); c.id = uid(); entities.push(c); newIds.push(c.id); });
+        ids.forEach(id => { const c = mirrorEntityCopy(entities.find(x=>x.id===id), p1, p2); c.id = uid(); delete c.groupId; entities.push(c); newIds.push(c.id); });
         selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
         render(); renderList(); buildPropsForm();
         log(`Mirrored ${ids.length} entit${ids.length===1?'y':'ies'}.`, 'prompt');
@@ -2573,7 +2675,7 @@
           const rsp=gv('mo_rsp'), csp=gv('mo_csp');
           for (let r=0;r<rows;r++) for (let c2=0;c2<cols;c2++){
             if (r===0 && c2===0) continue;
-            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); translateEntity(cl,o,c2*csp,r*rsp); entities.push(cl); newIds.push(cl.id); });
+            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); delete cl.groupId; translateEntity(cl,o,c2*csp,r*rsp); entities.push(cl); newIds.push(cl.id); });
           }
           log(`Rectangular array: ${rows}×${cols}.`, 'prompt');
         } else {
@@ -2582,7 +2684,7 @@
           const step = fill/count;
           for (let k=1;k<count;k++){
             const ang = step*k;
-            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); rotateEntity(cl,o,center,ang); entities.push(cl); newIds.push(cl.id); });
+            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); delete cl.groupId; rotateEntity(cl,o,center,ang); entities.push(cl); newIds.push(cl.id); });
           }
           log(`Polar array: ${count} items over ${fill}°.`, 'prompt');
         }
@@ -2674,7 +2776,7 @@
     if (tool === 'block'){
       const c = selectionCentroid(ids);
       const defaultName = 'Block' + (Object.keys(blocks).length+1);
-      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected.</div>`;
+      html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected. Creating a block also groups these entities together.</div>`;
       html += `<div class="form-row"><label>Name</label><input type="text" id="mo_blockname" value="${defaultName}" placeholder="Block name"></div>`;
       html += row('Base X', numInput('mo_bpx', c.x.toFixed(2)));
       html += row('Base Y', numInput('mo_bpy', c.y.toFixed(2)));
@@ -2687,10 +2789,7 @@
         const name = (document.getElementById('mo_blockname').value.trim()) || defaultName;
         const base = { x: gv('mo_bpx'), y: gv('mo_bpy') };
         if (blocks[name] && !confirm(`Block "${name}" already exists — overwrite it?`)) return;
-        blocks[name] = ids.map(id => { const cl = JSON.parse(JSON.stringify(entities.find(x=>x.id===id))); delete cl.id; translateEntity(cl, cl, -base.x, -base.y); return cl; });
-        log(`Block "${name}" created from ${ids.length} entities, base point ${base.x},${base.y}.`, 'prompt');
-        flashHint(`Block "${name}" defined.`);
-        buildModifyForm();
+        createBlockFromSelection(ids, name, base);
         setTool('select');
       };
       return;
@@ -2711,6 +2810,36 @@
         insertBlockAt(name, at);
       };
       return;
+    }
+
+    if (tool === 'select' && ids.length){
+      const groupIdsHere = new Set(ids.map(id => entities.find(x=>x.id===id)?.groupId).filter(Boolean));
+      if (groupIdsHere.size){
+        html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected — includes ${groupIdsHere.size} group${groupIdsHere.size===1?'':'s'}.</div>`;
+        html += `<button class="formBtn secondary" id="mo_ungroup">⛓️‍💥 Ungroup</button>`;
+      } else if (ids.length > 1){
+        html += `<div class="empty-note">${ids.length} entities selected.</div>`;
+        html += `<button class="formBtn" id="mo_group">🔗 Group Selected</button>`;
+      }
+      if (html){
+        modifyBody.innerHTML = html;
+        const gBtn = document.getElementById('mo_group');
+        if (gBtn) gBtn.onclick = () => {
+          snapshot();
+          const gid = newGroupId();
+          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en) en.groupId = gid; });
+          log(`Grouped ${ids.length} entities.`, 'prompt');
+          buildModifyForm();
+        };
+        const uBtn = document.getElementById('mo_ungroup');
+        if (uBtn) uBtn.onclick = () => {
+          snapshot();
+          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en) delete en.groupId; });
+          log(`Ungrouped selection.`, 'prompt');
+          buildModifyForm();
+        };
+        return;
+      }
     }
 
     modifyBody.innerHTML = '<div class="empty-note">Select entities, then pick a tool from the Modify row above.</div>';
@@ -2856,7 +2985,7 @@
     const bind = (id, apply) => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.addEventListener('input', () => { ensurePropsSnapshot(); apply(el); render(); renderList(); });
+      el.addEventListener('input', () => { ensurePropsSnapshot(); apply(el); render(); renderList(); scheduleAutosave(); });
     };
 
     if (e.type === 'line'){
@@ -2916,6 +3045,7 @@
       snapshot();
       const copy = JSON.parse(JSON.stringify(e));
       copy.id = uid();
+      delete copy.groupId;
       if ('x1' in copy) { copy.x1 += 1; copy.x2 += 1; copy.y1 += 1; copy.y2 += 1; }
       if ('cx' in copy) { copy.cx += 1; copy.cy += 1; }
       if ('x' in copy && copy.type==='text') { copy.x += 1; copy.y += 1; }
@@ -3071,11 +3201,28 @@
         add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
         add(1, e.content);
       } else if (e.type === 'hatch'){
-        // exported as its plain boundary outline + hatch lines (lightweight — not a true DXF HATCH entity)
         const b = e.boundary;
-        if (b.kind === 'circle'){ add(0,'CIRCLE'); add(8,lyr); add(10,b.cx); add(20,b.cy); add(30,0); add(40,b.r); }
-        else { add(0,'LWPOLYLINE'); add(8,lyr); add(90,b.points.length); add(70,1); for (const p of b.points){ add(10,p.x); add(20,p.y); } }
-        for (const s of (e.lines||[])){ add(0,'LINE'); add(8,lyr); add(10,s.x1); add(20,s.y1); add(30,0); add(11,s.x2); add(21,s.y2); add(31,0); }
+        add(0,'HATCH'); add(8,lyr);
+        add(2,'ANSI31'); // pattern name (informational)
+        add(70,0);       // 0 = pattern fill (not solid)
+        add(71,0);       // not associative
+        add(91,1);       // 1 boundary path
+        if (b.kind === 'circle'){
+          add(92,0); add(93,1);          // edge-type boundary, 1 edge
+          add(72,2);                     // edge type 2 = circular arc
+          add(10,b.cx); add(20,b.cy); add(40,b.r); add(50,0); add(51,360); add(73,1);
+        } else {
+          add(92,2);                     // polyline boundary
+          add(93,b.points.length);
+          for (const p of b.points){ add(10,p.x); add(20,p.y); add(42,0); }
+        }
+        add(97,0);                       // 0 source boundary objects
+        add(75,0); add(76,1);
+        add(52,0); add(41,1);
+        add(78,1);                       // 1 pattern definition line
+        add(53,45); add(43,0); add(44,0); add(45,0); add(46, Math.max(0.3, e.width||2)); add(79,0);
+        add(47, Math.max(0.05, (b.kind==='circle'?b.r:10)/40)); // pixel size hint
+        add(98,0);                       // 0 seed points
       }
     }
     add(0,'ENDSEC');
@@ -3104,14 +3251,19 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const { entities: parsed, skipped, warnings } = parseDxf(reader.result);
+        const { entities: parsed, skipped, warnings, blocks: fileBlocks } = parseDxf(reader.result);
         snapshot();
         entities = entities.concat(parsed);
         renumber();
+        let importedBlockCount = 0;
+        if (fileBlocks) Object.keys(fileBlocks).forEach(name => {
+          if (fileBlocks[name].entities.length){ blocks[name] = fileBlocks[name].entities; importedBlockCount++; }
+        });
+        if (importedBlockCount) buildModifyForm();
         zoomToFit(); renderList();
 
         const skippedTypes = Object.keys(skipped);
-        let msg = `Imported ${parsed.length} entities.`;
+        let msg = `Imported ${parsed.length} entities.` + (importedBlockCount ? ` (${importedBlockCount} block definition${importedBlockCount===1?'':'s'} also loaded — usable via Insert.)` : '');
         flashHint(msg);
         log('Command: (DXF import) ' + file.name, 'echo');
         log(msg, 'prompt');
@@ -3141,10 +3293,13 @@
 
   // Lightweight ASCII-DXF reader. Supports the common drawing entities
   // (LINE, CIRCLE, ARC, LWPOLYLINE, old-style POLYLINE/VERTEX, TEXT, MTEXT,
-  // POINT, INSERT-as-marker). It intentionally does NOT support binary DXF,
-  // 3D solids, HATCH fills, DIMENSION objects, SPLINE curves, or fully
-  // resolving BLOCK definitions — those are reported back as "skipped" so
-  // it's clear what didn't come through, rather than failing silently.
+  // POINT), plus BLOCK definitions resolved through INSERT (with scale/rotation,
+  // grouped together on import), and HATCH for its two most common boundary
+  // forms (a closed polyline outline, or a single full-circle edge). It does
+  // NOT support binary DXF, 3D solids, hatches with spline/mixed-edge or
+  // multiple boundary paths, DIMENSION objects, or SPLINE curves — those are
+  // reported back as "skipped" so it's clear what didn't come through, rather
+  // than failing silently or guessing at broken geometry.
   function parseDxf(text){
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
 
@@ -3164,20 +3319,10 @@
       throw new Error('File doesn\'t look like ASCII DXF group-code pairs (expected a numeric code on the first line).');
     }
 
-    // find ENTITIES section
-    let i = 0;
-    while (i < pairs.length && !(pairs[i][0]===2 && pairs[i][1]==='ENTITIES')) i++;
-    if (i >= pairs.length){
-      throw new Error('No ENTITIES section found in this file.');
-    }
-    i++;
-
-    const out = [];
     const skipped = {};
     const warnings = [];
     const markSkipped = (type) => { skipped[type] = (skipped[type]||0) + 1; };
     const defaultStyle = { color:'#e0a458', width:1.5, layer:'0' };
-    const supported = new Set(['LINE','CIRCLE','ARC','LWPOLYLINE','POLYLINE','VERTEX','SEQEND','TEXT','MTEXT','POINT','INSERT']);
 
     function readUntilNextEntity(startIdx){
       const props = {};
@@ -3190,7 +3335,9 @@
         else if (code === 11) props.x2 = parseFloat(val);
         else if (code === 21) props.y2 = parseFloat(val);
         else if (code === 40) props.r = parseFloat(val);
-        else if (code === 50) props.startAngle = parseFloat(val);
+        else if (code === 41) props.xscale = parseFloat(val);
+        else if (code === 42) props.yscale = parseFloat(val);
+        else if (code === 50) { props.startAngle = parseFloat(val); props.rotation = parseFloat(val); }
         else if (code === 51) props.endAngle = parseFloat(val);
         else if (code === 70) props.flag = parseInt(val,10) || 0;
         else if (code === 2) props.name = val;
@@ -3201,25 +3348,156 @@
       return { props, nextIdx: j };
     }
 
+    // Simple, self-contained entity types shared between the top-level ENTITIES
+    // section and BLOCK definitions (used to resolve INSERT geometry).
+    function simpleEntityFromProps(type, props){
+      if (type === 'LINE' && props.xs) return { type:'line', x1:props.xs[0], y1:props.ys[0], x2:props.x2, y2:props.y2, ...defaultStyle };
+      if (type === 'CIRCLE' && props.xs) return { type:'circle', cx:props.xs[0], cy:props.ys[0], r:props.r||1, ...defaultStyle };
+      if (type === 'ARC' && props.xs) return { type:'arc', cx:props.xs[0], cy:props.ys[0], r:props.r||1, startAngle:props.startAngle||0, endAngle:props.endAngle||90, ...defaultStyle };
+      if (type === 'LWPOLYLINE' && props.xs){
+        const pts = props.xs.map((x,idx)=>({x, y:props.ys[idx]}));
+        return { type:'polyline', points:pts, closed: !!((props.flag||0) & 1), ...defaultStyle };
+      }
+      if (type === 'TEXT' && props.xs) return { type:'text', x:props.xs[0], y:props.ys[0], content:props.text||'', height:props.r||3, ...defaultStyle };
+      if (type === 'MTEXT' && props.xs){
+        const content = (props.text||'').replace(/\\P/g,' ').replace(/\{|\}/g,'').replace(/\\[A-Za-z][^;]*;/g,'');
+        return { type:'text', x:props.xs[0], y:props.ys[0], content:content||'(mtext)', height:props.r||3, ...defaultStyle };
+      }
+      if (type === 'POINT' && props.xs) return { type:'circle', cx:props.xs[0], cy:props.ys[0], r:0.08, ...defaultStyle };
+      return null;
+    }
+
+    // ---- BLOCKS section: read every BLOCK definition (base point + member
+    // entities) so INSERT can resolve real geometry instead of a text marker. ----
+    const blocksFromFile = {}; // name -> { base:{x,y}, entities:[...] }
+    (function scanBlocks(){
+      let i = 0;
+      while (i < pairs.length && !(pairs[i][0]===0 && pairs[i][1]==='SECTION' && pairs[i+1] && pairs[i+1][0]===2 && pairs[i+1][1]==='BLOCKS')) i++;
+      if (i >= pairs.length) return; // no BLOCKS section — fine, just means no blocks to resolve
+      i += 2;
+      while (i < pairs.length){
+        const [code, val] = pairs[i];
+        if (code===0 && val==='ENDSEC') break;
+        if (code===0 && val==='BLOCK'){
+          const r = readUntilNextEntity(i+1);
+          const name = r.props.name || ('Block'+Object.keys(blocksFromFile).length);
+          const base = { x:(r.props.xs&&r.props.xs[0])||0, y:(r.props.ys&&r.props.ys[0])||0 };
+          let j = r.nextIdx;
+          const members = [];
+          let guard = 0;
+          while (j < pairs.length && guard++ < 100000){
+            const [c2, v2] = pairs[j];
+            if (c2===0 && v2==='ENDBLK'){ const r2=readUntilNextEntity(j+1); j=r2.nextIdx; break; }
+            if (c2===0 && v2==='BLOCK'){ break; } // malformed safety net
+            if (c2!==0){ j++; continue; }
+            const r2 = readUntilNextEntity(j+1);
+            const ent = simpleEntityFromProps(v2, r2.props);
+            if (ent) members.push(ent);
+            j = r2.nextIdx;
+          }
+          blocksFromFile[name] = { base, entities: members };
+          i = j;
+          continue;
+        }
+        i++;
+      }
+    })();
+
+    // ---- HATCH: supports a closed-polyline boundary (the common case), or a
+    // single full-circle edge boundary. Anything else (splines, mixed edges,
+    // multiple boundary loops) is reported as skipped rather than guessed at. ----
+    function parseHatch(startIdx){
+      let j = startIdx;
+      let boundaryPolygon = null, boundaryCircle = null, angle = 45, sawUnsupported = false;
+      let guard = 0;
+      while (j < pairs.length && guard++ < 200000){
+        const [code, val] = pairs[j];
+        if (code === 0) break;
+        if (code === 53){ angle = parseFloat(val) || 45; j++; continue; }
+        if (code === 92){
+          const flag = parseInt(val,10) || 0;
+          j++;
+          if (flag & 2){ // polyline boundary
+            if (j < pairs.length && pairs[j][0] === 93){
+              const vcount = parseInt(pairs[j][1],10)||0; j++;
+              const pts = [];
+              while (pts.length < vcount && j < pairs.length){
+                if (pairs[j][0] === 10){
+                  const x = parseFloat(pairs[j][1]); j++;
+                  let y = 0;
+                  if (j<pairs.length && pairs[j][0]===20){ y = parseFloat(pairs[j][1]); j++; }
+                  pts.push({x,y});
+                  // skip any trailing per-vertex codes (e.g. 42 bulge — curves get
+                  // approximated as straight) up to the next vertex's 10, or the terminator
+                  while (j<pairs.length && pairs[j][0]!==10 && pairs[j][0]!==0 && pairs[j][0]!==97) j++;
+                } else if (pairs[j][0]===0 || pairs[j][0]===97){
+                  break;
+                } else {
+                  j++;
+                }
+              }
+              if (!boundaryPolygon && pts.length>=3) boundaryPolygon = pts;
+            }
+          } else if (j < pairs.length && pairs[j][0] === 93){
+            const ecount = parseInt(pairs[j][1],10)||0; j++;
+            if (ecount === 1 && j<pairs.length && pairs[j][0]===72 && parseInt(pairs[j][1],10)===2){
+              j++;
+              let cx,cy,r=1;
+              while (j<pairs.length && pairs[j][0]!==0 && pairs[j][0]!==97){
+                const [c3,v3] = pairs[j];
+                if (c3===10) cx=parseFloat(v3); else if (c3===20) cy=parseFloat(v3);
+                else if (c3===40) r=parseFloat(v3);
+                else if (c3===72) break;
+                j++;
+              }
+              if (cx!=null && !boundaryCircle) boundaryCircle = { cx, cy, r };
+            } else {
+              sawUnsupported = true;
+              while (j<pairs.length && pairs[j][0]!==0 && pairs[j][0]!==97) j++;
+            }
+          }
+          continue;
+        }
+        j++;
+      }
+      if (!boundaryPolygon && !boundaryCircle){
+        markSkipped(sawUnsupported ? 'HATCH (spline/mixed-edge boundary)' : 'HATCH (unrecognized boundary)');
+        return { entity:null, nextIdx:j };
+      }
+      const boundary = boundaryCircle ? { kind:'circle', ...boundaryCircle } : { kind:'polygon', points:boundaryPolygon };
+      const lines = generateHatchLines(boundary, Math.max(0.3, (boundaryCircle?boundaryCircle.r:10)/12), angle);
+      return { entity: { type:'hatch', boundary, lines, ...defaultStyle }, nextIdx:j };
+    }
+
+    // ---- ENTITIES section ----
+    let i = 0;
+    while (i < pairs.length && !(pairs[i][0]===0 && pairs[i][1]==='SECTION' && pairs[i+1] && pairs[i+1][0]===2 && pairs[i+1][1]==='ENTITIES')) i++;
+    if (i >= pairs.length){
+      throw new Error('No ENTITIES section found in this file.');
+    }
+    i += 2;
+
+    const out = [];
+    const supported = new Set(['LINE','CIRCLE','ARC','LWPOLYLINE','POLYLINE','VERTEX','SEQEND','TEXT','MTEXT','POINT','INSERT','HATCH']);
+
     while (i < pairs.length){
       const [code, val] = pairs[i];
       if (code === 0 && val === 'ENDSEC') break;
       if (code !== 0){ i++; continue; }
 
       const type = val;
-      let { props, nextIdx } = readUntilNextEntity(i+1);
 
       try {
-        if (type === 'LINE' && props.xs && props.ys){
-          out.push({ id:0, type:'line', x1:props.xs[0], y1:props.ys[0], x2:props.x2, y2:props.y2, ...defaultStyle });
-        } else if (type === 'CIRCLE' && props.xs){
-          out.push({ id:0, type:'circle', cx:props.xs[0], cy:props.ys[0], r:props.r||1, ...defaultStyle });
-        } else if (type === 'ARC' && props.xs){
-          out.push({ id:0, type:'arc', cx:props.xs[0], cy:props.ys[0], r:props.r||1, startAngle:props.startAngle||0, endAngle:props.endAngle||90, ...defaultStyle });
-        } else if (type === 'LWPOLYLINE' && props.xs){
-          const pts = props.xs.map((x,idx)=>({x, y:props.ys[idx]}));
-          out.push({ id:0, type:'polyline', points:pts, closed: !!((props.flag||0) & 1), ...defaultStyle });
-        } else if (type === 'POLYLINE'){
+        if (type === 'HATCH'){
+          const r = parseHatch(i+1);
+          if (r.entity) out.push({ id:0, ...r.entity });
+          i = r.nextIdx;
+          continue;
+        }
+
+        let { props, nextIdx } = readUntilNextEntity(i+1);
+
+        if (type === 'POLYLINE'){
           // Old-style polyline: geometry lives in sibling VERTEX entities that follow,
           // terminated by SEQEND — walk those here instead of treating them as top-level.
           const closed = !!((props.flag||0) & 1);
@@ -3242,18 +3520,34 @@
           if (pts.length >= 2) out.push({ id:0, type:'polyline', points:pts, closed, ...defaultStyle });
           else markSkipped('POLYLINE (empty)');
           nextIdx = k;
-        } else if (type === 'TEXT' && props.xs){
-          out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content: props.text||'', height: props.r||3, ...defaultStyle });
-        } else if (type === 'MTEXT' && props.xs){
-          const content = (props.text||'').replace(/\\P/g,' ').replace(/\{|\}/g,'').replace(/\\[A-Za-z][^;]*;/g,'');
-          out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content: content||'(mtext)', height: props.r||3, ...defaultStyle });
-        } else if (type === 'POINT' && props.xs){
-          out.push({ id:0, type:'circle', cx:props.xs[0], cy:props.ys[0], r:0.08, ...defaultStyle });
         } else if (type === 'INSERT' && props.xs){
-          // Block reference: geometry isn't resolved, but drop a labeled marker so it's visible.
-          out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content:`[${props.name||'BLOCK'}]`, height: 2.5, color:'#6f9bd1', width:1.5 });
-        } else if (!supported.has(type)){
-          markSkipped(type);
+          const name = props.name;
+          const blk = blocksFromFile[name];
+          if (blk){
+            const insPt = { x: props.xs[0], y: props.ys[0] };
+            const sx = props.xscale != null ? props.xscale : 1;
+            const sy = props.yscale != null ? props.yscale : 1;
+            const scale = Math.abs(sx - sy) < 1e-6 ? sx : (sx + sy) / 2; // our Scale is uniform; average if non-uniform
+            const rot = props.rotation || 0;
+            const gid = newGroupId();
+            blk.entities.forEach(rel => {
+              const c = JSON.parse(JSON.stringify(rel));
+              translateEntity(c, c, -blk.base.x, -blk.base.y);
+              if (Math.abs(scale-1) > 1e-9) scaleEntity(c, c, {x:0,y:0}, scale);
+              if (Math.abs(rot) > 1e-9) rotateEntity(c, c, {x:0,y:0}, rot);
+              translateEntity(c, c, insPt.x, insPt.y);
+              c.groupId = gid;
+              out.push({ id:0, ...c });
+            });
+            if (Math.abs(sx-sy) > 1e-6) warnings.push(`INSERT "${name}" used non-uniform X/Y scale — approximated with a single uniform factor.`);
+          } else {
+            out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content:`[${name||'BLOCK'}]`, height: 2.5, color:'#6f9bd1', width:1.5 });
+            warnings.push(`INSERT "${name||'?'}" — block definition not found in file, showing as a text marker.`);
+          }
+        } else {
+          const ent = simpleEntityFromProps(type, props);
+          if (ent) out.push({ id:0, ...ent });
+          else if (!supported.has(type)) markSkipped(type);
         }
       } catch(entErr){
         markSkipped(type + ' (parse error)');
@@ -3261,7 +3555,7 @@
 
       i = nextIdx;
     }
-    return { entities: out, skipped, warnings };
+    return { entities: out, skipped, warnings, blocks: blocksFromFile };
   }
 
   // ---------- Init ----------
@@ -3276,6 +3570,7 @@
   renderLayers();
   syncLayerSelect();
   buildModifyForm();
+  restoreAutosave();
 })();
 </script>
 </body>
