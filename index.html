@@ -370,6 +370,68 @@
             white-space: nowrap;
         }
 
+        /* ---- Tank fill/discharge flow overlay (see getTankFlowState /
+           renderTankFlowOverlay). Anchored top-left of the tank card so
+           it never collides with the pump-name label (top-right) or the
+           dimension badge. Direction driven by BALLASTPLAN(mT) pump
+           status — see PUMP_STATUS_COL comment. Gated by showTankFlow. */
+        .tank-flow-marker {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            z-index: 17;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            pointer-events: none;
+        }
+
+        .tank-flow-arrow {
+            font-size: 10px;
+            line-height: 1;
+            font-weight: 700;
+            border-radius: 50%;
+            width: 13px;
+            height: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: tankFlowPulse 1.3s ease-in-out infinite;
+        }
+
+        .tank-flow-arrow.flow-fill {
+            background: #0284c7;
+            color: #e0f2fe;
+            box-shadow: 0 0 6px rgba(56,189,248,0.9);
+        }
+
+        .tank-flow-arrow.flow-discharge {
+            background: #b91c1c;
+            color: #fee2e2;
+            box-shadow: 0 0 6px rgba(239,68,68,0.9);
+        }
+
+        .tank-flow-arrow.flow-mixed {
+            background: #7e22ce;
+            color: #f5f3ff;
+            box-shadow: 0 0 6px rgba(168,85,247,0.9);
+        }
+
+        @keyframes tankFlowPulse {
+            0%, 100% { transform: scale(1); opacity: 0.85; }
+            50% { transform: scale(1.18); opacity: 1; }
+        }
+
+        .tank-flow-label {
+            font-size: 8px;
+            font-weight: 700;
+            color: #f5f3ff;
+            background: rgba(15,17,21,0.65);
+            padding: 0 3px;
+            border-radius: 2px;
+            white-space: nowrap;
+        }
+
         .tank-control-box {
             position: absolute;
             background: var(--tank-box-bg);
@@ -1344,6 +1406,10 @@
                 <span>⚡ Pump-only input</span>
                 <input type="checkbox" id="pumpInputToggleCheckbox" onchange="togglePumpOnlyInput()">
             </div>
+            <div class="toggle-container" title="Show/hide the active fill (blue ▼) / discharge (red ▲) indicator on tanks currently being ballasted or deballasted, driven by BALLASTPLAN(mT) pump status.">
+                <span>💧 Tank Flow</span>
+                <input type="checkbox" id="tankFlowToggleCheckbox" checked onchange="toggleTankFlowOverlay()">
+            </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
             <button class="sync-btn" title="Export tanks, trailer axles &amp; hull outline as a .json file for the CAD editor" onclick="exportProjectForCAD()">⬇ Export to CAD</button>
@@ -1586,18 +1652,24 @@
         const EXCEL_START_ROW = 14; // Load_Editor name/weight/capacity rows
 
         // ---- trailer axle constants ----
-        // Each "axle" position from Excel (E124:F.. = x,y center) is now
-        // rendered as TWO rectangles spaced 1.45m apart center-to-center
-        // along the Y (PS/SB) axis, then both rectangles are grouped as
-        // ONE unit. The axle-to-axle spacing read from Excel (the x,y
-        // pairs) is measured using the CENTER of this whole group (i.e.
-        // the same x,y Excel already gives us — unchanged), so existing
-        // Excel data needs no changes; only the rendering of a single
-        // axle position changes from "one rectangle" to "two rectangles
-        // + connecting hub, grouped".
-        const AXLE_WIDTH_X = 0.86;       // width (X) of EACH rectangle in the pair
-        const AXLE_RECT_HEIGHT_Y = 0.50; // height (Y) of EACH individual rectangle
-        const AXLE_PAIR_SPACING_Y = 1.45; // center-to-center distance between the two rectangles in a group (m)
+        // Verified against SPMT-19942D (2D dims) + user confirmation:
+        // an "axle LINE" (one Excel row, E124:F.. = x,y center) is a
+        // tandem pair of 2 axles, each axle carrying 2 tires (left/right
+        // across the 0.86m track width) — 2 axles x 2 tires = 4 tires
+        // per axle line, matching the dumbbell/"two rectangles" shape.
+        // The axle line's own x,y (from Excel) is the MIDPOINT between
+        // its two axles, not either axle individually — confirmed by the
+        // DXF circle ("center for XPOS/YPOS") sitting exactly halfway
+        // between the two rectangles' centers.
+        //   - AXLE_WIDTH_X = 0.86m        : track width, each rectangle (measured, constant across axle lines)
+        //   - AXLE_RECT_HEIGHT_Y = 0.325m : tire length in the travel direction (measured, constant)
+        //   - AXLE_PAIR_SPACING_Y = 0.62m : center-to-center distance between the 2 axles WITHIN one axle
+        //     line (measured from the DXF: NOT the same as the 1.45m axle-LINE-to-axle-LINE pitch, which
+        //     is a separate, per-train "spacing" value entered in the Trailer Generator and is already
+        //     expressed naturally by each row's own distinct x,y — it needs no constant here).
+        const AXLE_WIDTH_X = 0.86;        // width (X) of EACH rectangle in the pair — track width
+        const AXLE_RECT_HEIGHT_Y = 0.325; // height (Y) of EACH individual rectangle — tire length
+        const AXLE_PAIR_SPACING_Y = 0.62; // center-to-center distance between the two axles in one line (m)
         // Kept for backward-compat with any code/comments referencing the
         // old single-rectangle footprint; now represents the OVERALL
         // group footprint along Y (both rectangles + the gap between).
@@ -1825,10 +1897,56 @@
         // (text only — no dot/marker graphic) is shown at the matching
         // tank's top-right corner. Multiple pumps can reference the same
         // tank.
+        //
+        // *** ASSUMPTION — CONFIRM WITH REAL WORKBOOK ***
+        // Tank fill/discharge direction (see getTankFlowState /
+        // renderTankFlowOverlay) is read from PUMP_STATUS_COL below, on
+        // the SAME row as each pump's name/tank (i.e. BALLASTPLAN(mT)!F,
+        // one column right of the pump name in E). Text is matched
+        // case-insensitively against FLOW_STATUS_KEYWORDS. If the real
+        // workbook keeps this on a different column (or a different
+        // sheet, e.g. a live valve/pump-run status block elsewhere),
+        // change PUMP_STATUS_COL (and PUMP_SHEET_NAME if needed) — no
+        // other code needs to change.
         const PUMP_SHEET_NAME = "BALLASTPLAN(mT)";
         const PUMP_START_ROW = 33;
         const PUMP_MAX_ROWS = 200;
-        let pumpLocations = []; // [{ tankName, pumpName }]
+        const PUMP_STATUS_COL = "F"; // ASSUMPTION — confirm actual column with the real workbook
+        // Keywords matched case-insensitively against the status cell
+        // text. First match wins (checked in this order); unmatched or
+        // blank -> 'off'. Edit these lists if the real workbook uses
+        // different wording (e.g. "RUNNING IN" / "RUNNING OUT").
+        const FLOW_STATUS_FILL_KEYWORDS = ['FILL', 'BALLASTING', 'IN'];
+        const FLOW_STATUS_DISCHARGE_KEYWORDS = ['DISCHARGE', 'DEBALLAST', 'OUT'];
+
+        function normalizeFlowStatus(raw) {
+            const s = (raw || '').toString().trim().toUpperCase();
+            if (!s) return 'off';
+            if (FLOW_STATUS_DISCHARGE_KEYWORDS.some(k => s.includes(k))) return 'discharge';
+            if (FLOW_STATUS_FILL_KEYWORDS.some(k => s.includes(k))) return 'fill';
+            return 'off';
+        }
+
+        let pumpLocations = []; // [{ tankName, pumpName, flowStatus }]
+
+        // Aggregates flow state across every pump matched to a tank
+        // (same tank-name matching rule as isTankPumpAvailable/
+        // renderPumpMarkers): 'fill' if at least one pump on the tank is
+        // filling and none are discharging, 'discharge' likewise, 'mixed'
+        // if pumps disagree (rare — both running at once), 'off' if none
+        // of the tank's pumps are currently running.
+        function getTankFlowState(cfg) {
+            if (!cfg || !pumpLocations.length) return 'off';
+            const targetNorm = normalizeTankName(cfg.name);
+            const pumpsForTank = pumpLocations.filter(p => normalizeTankName(p.tankName) === targetNorm);
+            if (!pumpsForTank.length) return 'off';
+            const hasFill = pumpsForTank.some(p => p.flowStatus === 'fill');
+            const hasDischarge = pumpsForTank.some(p => p.flowStatus === 'discharge');
+            if (hasFill && hasDischarge) return 'mixed';
+            if (hasFill) return 'fill';
+            if (hasDischarge) return 'discharge';
+            return 'off';
+        }
 
         // 6 free-text labels positioned around the barge, sourced from
         // Load_Editor!I1:I6:
@@ -2469,6 +2587,7 @@
 
             renderBargeCornerLabels(container);
             renderPumpMarkers(container);
+            renderTankFlowOverlay(container);
             applyDimensionVisibility();
         }
 
@@ -2651,6 +2770,56 @@
             });
 
             applyPumpInputRestriction();
+        }
+
+        // ============================================================
+        // 3a4. TANK FILL/DISCHARGE FLOW OVERLAY (2D)
+        //      Shows a small pulsing arrow badge + "<weight> mT" label on
+        //      any tank currently being actively filled or discharged —
+        //      distinct from the tank's ALWAYS-visible static water-level
+        //      fill bar (.tank-water-level, driven by pct alone). Flow
+        //      direction comes from getTankFlowState(cfg), which reads
+        //      real pump/valve status published from Excel (see
+        //      PUMP_STATUS_COL — currently an ASSUMED column, confirm
+        //      with the real workbook). Gated by showTankFlow; anchored
+        //      top-LEFT of the tank card so it never collides with the
+        //      pump-name label (top-right, see renderPumpMarkers).
+        // ============================================================
+        let showTankFlow = true;
+
+        function renderTankFlowOverlay(container) {
+            container.querySelectorAll('.tank-flow-marker').forEach(el => el.remove());
+            if (!showTankFlow || !TANK_CONFIG.length) return;
+
+            TANK_CONFIG.forEach((cfg) => {
+                const state = getTankFlowState(cfg);
+                if (state === 'off') return;
+                const card = document.getElementById(`tank_card_${cfg.id}`);
+                if (!card) return;
+
+                const tank = tankData.find(t => t.row === cfg.id);
+                const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
+
+                const arrowChar = state === 'discharge' ? '▲' : (state === 'mixed' ? '↕' : '▼');
+                const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
+                const stateLabel = state === 'discharge' ? 'Discharging' : (state === 'mixed' ? 'Filling & discharging' : 'Filling');
+
+                const wrap = document.createElement('div');
+                wrap.className = 'tank-flow-marker';
+                wrap.title = `${stateLabel} — ${weightMT.toFixed(1)} mT`;
+                wrap.innerHTML = `
+                    <span class="tank-flow-arrow ${arrowCls}">${arrowChar}</span>
+                    <span class="tank-flow-label">${weightMT.toFixed(1)} mT</span>
+                `;
+                card.appendChild(wrap);
+            });
+        }
+
+        function toggleTankFlowOverlay() {
+            const checked = document.getElementById('tankFlowToggleCheckbox').checked;
+            showTankFlow = checked;
+            refreshPlanView(); // immediately show/hide (2D)
+            if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude(); // (3D glow visibility; labels re-gate on next renderLabels3D frame)
         }
 
         // ============================================================
@@ -2861,7 +3030,7 @@
         //
         //     Axle shape: each axle position from Excel is now rendered
         //     as a GROUP of TWO identical rectangles spaced
-        //     AXLE_PAIR_SPACING_Y (1.45m) apart center-to-center along Y,
+        //     AXLE_PAIR_SPACING_Y (0.62m) apart center-to-center along Y,
         //     with the group's own center placed at the axle's real (x,y)
         //     — i.e. exactly where the single rectangle used to sit. A
         //     thin connector line ties the two rectangles together so
@@ -3171,15 +3340,17 @@
                     const rangeAxles = editorSheet.getRange(`E${AXLE_START_ROW}:F${axleEndRow}`);
                     rangeAxles.load("values");
 
-                    // Pump locations: BALLASTPLAN(mT)!A33:E(33+N) — column A
-                    // = tank name, column E = pump name. Read a generous
+                    // Pump locations: BALLASTPLAN(mT)!A33:F(33+N) — column A
+                    // = tank name, column E = pump name, column F = pump
+                    // fill/discharge status (see PUMP_STATUS_COL — ASSUMPTION,
+                    // confirm with the real workbook). Read a generous
                     // over-read block, trimmed below at the first row where
                     // column A is blank.
                     let rangePumps = null;
                     try {
                         const pumpSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
                         const pumpEndRow = PUMP_START_ROW + PUMP_MAX_ROWS - 1;
-                        rangePumps = pumpSheet.getRange(`A${PUMP_START_ROW}:E${pumpEndRow}`);
+                        rangePumps = pumpSheet.getRange(`A${PUMP_START_ROW}:${PUMP_STATUS_COL}${pumpEndRow}`);
                         rangePumps.load("values");
                     } catch (e) { /* sheet not found — pumps simply won't render */ }
 
@@ -3250,7 +3421,8 @@
                             if (tankEmpty) break; // stop at first blank tank-name row
                             const pumpEmpty = (rawPump === '' || rawPump === null || rawPump === undefined);
                             if (pumpEmpty) continue; // tank listed but no pump on this row — skip, keep scanning
-                            parsedPumps.push({ tankName: String(rawTank), pumpName: String(rawPump) });
+                            const rawStatus = pumpValues[i][5]; // column F — see PUMP_STATUS_COL
+                            parsedPumps.push({ tankName: String(rawTank), pumpName: String(rawPump), flowStatus: normalizeFlowStatus(rawStatus) });
                         }
                         pumpLocations = parsedPumps;
                     } else {
@@ -3711,11 +3883,11 @@
             // Mock pump locations (demo mode), matching mockNames above —
             // exercises the same name-matching path as the real Excel sync.
             pumpLocations = [
-                { tankName: 'AFT C', pumpName: 'P1' },
-                { tankName: 'C7 C', pumpName: 'P2' },
-                { tankName: 'C5 C', pumpName: 'P3' },
-                { tankName: 'C3 C', pumpName: 'P4' },
-                { tankName: 'FWD C', pumpName: 'P5' }
+                { tankName: 'AFT C', pumpName: 'P1', flowStatus: 'fill' },
+                { tankName: 'C7 C', pumpName: 'P2', flowStatus: 'off' },
+                { tankName: 'C5 C', pumpName: 'P3', flowStatus: 'discharge' },
+                { tankName: 'C3 C', pumpName: 'P4', flowStatus: 'off' },
+                { tankName: 'FWD C', pumpName: 'P5', flowStatus: 'off' }
             ];
             TANK_CONFIG = buildTankConfigFromCrest(mockCrestRows, mockNameWeightRows);
             recomputeBargeExtents();
@@ -3733,7 +3905,7 @@
             // Mock trailer axle layout: a typical multi-axle trailer footprint
             // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
             // Each (x,y) here is the CENTER of an axle GROUP (the two
-            // rectangles 1.45m apart along Y), unchanged in meaning.
+            // rectangles 0.62m apart along Y), unchanged in meaning.
             trailerAxles = [
                 { row: AXLE_START_ROW, x: 30, y: 3.2 },
                 { row: AXLE_START_ROW + 1, x: 30, y: -3.2 },
@@ -4588,7 +4760,7 @@
         const PUMP_HEIGHT_Z_M = 1.25;    // (unused now — pump marker post/cap removed, label-only) kept for reference
         // Axle redesign: each axle GROUP (from one Excel x,y pair) is now
         // rendered as TWO separate box "rectangles" spaced
-        // AXLE_PAIR_SPACING_Y (1.45m) apart center-to-center along Y,
+        // AXLE_PAIR_SPACING_Y (0.62m) apart center-to-center along Y,
         // mirroring the 2D plan's two-rectangle-plus-connector look,
         // rather than the old single-footprint two-housing-and-hub design.
         // EACH_AXLE_BOX is the size of ONE of the two rectangles; the pair
@@ -4689,6 +4861,19 @@
             colorHigh: 0xf08a3c,   // ballast colour at/above the 85% high-fill threshold
             opacity: 1.0,          // ballast fill transparency (1 = solid)
             transparent: false     // set true if opacity < 1 is desired
+        };
+        // Tank fill/discharge flow glow (3D) — a thin translucent ring
+        // sitting just above each tank's shell, shown only while that
+        // tank is actively filling/discharging (see getTankFlowState).
+        // Mirrors the 2D flow badge's colour coding. Pulses via
+        // updateTankFlowPulse3D(), driven by the existing animate3d()
+        // render loop.
+        const TANK_FLOW_GLOW_STYLE_3D = {
+            colorFill: 0x38bdf8,
+            colorDischarge: 0xef4444,
+            colorMixed: 0xa855f7,
+            baseOpacity: 0.35,
+            pulseAmplitude: 0.22
         };
         // Sea-level plane (the big flat "ocean" surface) styling — separate
         // from the per-tank ballast fill above.
@@ -5003,6 +5188,7 @@
 
             function animate3d() {
                 requestAnimationFrame(animate3d);
+                if (typeof updateTankFlowPulse3D === 'function') updateTankFlowPulse3D();
                 if (renderer3d && scene3d && camera3d) renderer3d.render(scene3d, camera3d);
                 if (typeof renderLabels3D === 'function') renderLabels3D();
             }
@@ -5206,7 +5392,25 @@
                 ballast.position.set(cfg.x, TANK_TOP_Y - TANK_DEPTH_M + 0.005, worldYToZ3D(cfg.y));
                 hull3dGroup.add(ballast);
 
-                tankMeshes3d.push({ cfgId: cfg.id, shell, ballast });
+                // Flow glow ring — a slightly larger, translucent box
+                // that sits just above the shell, shown/coloured by
+                // updateTankFlowPulse3D() only while the tank is
+                // actively filling/discharging (see getTankFlowState).
+                // Hidden by default; visibility+colour set on every data
+                // refresh, opacity pulsed every animation frame.
+                const flowGlow = new THREE.Mesh(
+                    new THREE.BoxGeometry(w * 1.06, 0.25, h * 1.06),
+                    new THREE.MeshBasicMaterial({
+                        color: TANK_FLOW_GLOW_STYLE_3D.colorFill,
+                        transparent: true,
+                        opacity: 0
+                    })
+                );
+                flowGlow.position.set(cfg.x, TANK_TOP_Y + 0.15, worldYToZ3D(cfg.y));
+                flowGlow.visible = false;
+                hull3dGroup.add(flowGlow);
+
+                tankMeshes3d.push({ cfgId: cfg.id, shell, ballast, flowGlow });
             });
 
             // Pump LABELS only (no post/cap marker graphic anymore) — see
@@ -5218,7 +5422,7 @@
             // backward compatibility with clear3DGeometry()).
 
             // axle markers — each Excel axle (x,y) is now a GROUP of TWO
-            // separate rectangles spaced AXLE_PAIR_SPACING_Y (1.45m) apart
+            // separate rectangles spaced AXLE_PAIR_SPACING_Y (0.62m) apart
             // center-to-center along Y (mirrors the 2D plan), with a thin
             // connector beam tying them together. The GROUP's own position
             // is set to the axle's real (x,y) — i.e. exactly the same
@@ -5311,8 +5515,28 @@
             updateTrailerGhostVisualization3D();
         }
 
+        // Pulses the opacity of every currently-visible tank flow-glow
+        // mesh — called every animation frame from animate3d(). Only
+        // touches meshes already marked .visible by
+        // update3DFillAndAttitude(), so cost stays proportional to the
+        // (usually small) number of tanks actively flowing, not the
+        // full tank count.
+        function updateTankFlowPulse3D() {
+            if (!tankMeshes3d.length) return;
+            const t = performance.now() * 0.0025;
+            const wave = Math.sin(t) * TANK_FLOW_GLOW_STYLE_3D.pulseAmplitude;
+            tankMeshes3d.forEach((tm) => {
+                if (tm.flowGlow && tm.flowGlow.visible) {
+                    tm.flowGlow.material.opacity = Math.max(0.05, TANK_FLOW_GLOW_STYLE_3D.baseOpacity + wave);
+                }
+            });
+        }
+
         // Updates ONLY fill heights + hull rotation — cheap, safe to call
-        // every sync/refresh without rebuilding any geometry.
+        // every sync/refresh without rebuilding any geometry. Also
+        // updates each tank's flow-glow visibility/colour (opacity
+        // pulsing itself happens every animation frame, see
+        // updateTankFlowPulse3D()).
         function update3DFillAndAttitude() {
             if (!hull3dGroup || !tankMeshes3d.length) return;
             tankMeshes3d.forEach((tm) => {
@@ -5325,6 +5549,18 @@
                 // Colour driven by WATER_FILL_STYLE_3D (see its comment
                 // further up for how to change normal/high-fill colours).
                 tm.ballast.material.color.set(hot ? WATER_FILL_STYLE_3D.colorHigh : WATER_FILL_STYLE_3D.colorNormal);
+
+                if (tm.flowGlow) {
+                    const cfg = TANK_CONFIG.find(c => c.id === tm.cfgId);
+                    const state = cfg ? getTankFlowState(cfg) : 'off';
+                    const active = showTankFlow && state !== 'off';
+                    tm.flowGlow.visible = active;
+                    if (active) {
+                        const glowColor = state === 'discharge' ? TANK_FLOW_GLOW_STYLE_3D.colorDischarge
+                            : (state === 'mixed' ? TANK_FLOW_GLOW_STYLE_3D.colorMixed : TANK_FLOW_GLOW_STYLE_3D.colorFill);
+                        tm.flowGlow.material.color.set(glowColor);
+                    }
+                }
             });
             hull3dGroup.rotation.z = (currentTrimDegrees * Math.PI) / 180;
             // Heel > 0 means PORT (PS) goes DOWN. PS is now placed at
@@ -5406,6 +5642,20 @@
                 addAnchor(`pct_${cfg.id}`, cfg.x, 0.4, worldYToZ3D(cfg.y), '', 'pct');
             });
 
+            // Per-tank fill/discharge flow label anchor — mirrors the 2D
+            // badge's TOP-LEFT placement (AFT edge, PS/SB-outboard
+            // corner opposite the pump label's top-right corner) so the
+            // two never collide. Text/visibility is computed live in
+            // renderLabels3D() from getTankFlowState(), same "always add
+            // the anchor, gate at render time" pattern the pct/pump
+            // anchors use.
+            TANK_CONFIG.forEach((cfg) => {
+                const isPortSide = cfg.y >= 0;
+                const cornerX = cfg.x - cfg.width / 2;
+                const cornerYWorld = isPortSide ? (cfg.y + cfg.height / 2) : (cfg.y - cfg.height / 2);
+                addAnchor(`flow_${cfg.id}`, cornerX, 0.6, worldYToZ3D(cornerYWorld), '', 'flow');
+            });
+
             // Per-tank pump-name label anchor(s) — text only, positioned
             // at the tank's TOP-RIGHT corner (FWD edge, PS-side if the
             // tank's Y center is positive / SB-side if negative), same
@@ -5464,9 +5714,12 @@
 
             labelAnchors3d.forEach((a) => {
                 // %-fill and pump-name labels are gated by the "Labels"
-                // toggle (show3DPctPumpLabels); AFT/FWD/PS/SB and corner
-                // labels are NOT gated by it and always render.
+                // toggle (show3DPctPumpLabels); flow labels are gated by
+                // the separate "Tank Flow" toggle (showTankFlow);
+                // AFT/FWD/PS/SB and corner labels are NOT gated by
+                // either and always render.
                 if ((a.cls === 'pct' || a.cls === 'pump') && !show3DPctPumpLabels) return;
+                if (a.cls === 'flow' && !showTankFlow) return;
 
                 a.obj.getWorldPosition(v);
                 v.project(camera3d);
@@ -5493,6 +5746,18 @@
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:9px; font-weight:600; ${bg} padding:0px 4px; border-radius:3px; white-space:nowrap;">${pct}%</div>`;
                 } else if (a.cls === 'pump') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:8px; font-weight:700; color:#f5f3ff; background:#7e22ce; padding:0 3px; border-radius:2px; white-space:nowrap;">${a.text}</div>`;
+                } else if (a.cls === 'flow') {
+                    const cfgId = parseInt(a.id.replace('flow_', ''), 10);
+                    const cfg = TANK_CONFIG.find(c => c.id === cfgId);
+                    const state = cfg ? getTankFlowState(cfg) : 'off';
+                    if (state === 'off') return;
+                    const td = tankData.find(t => t.row === cfgId);
+                    const weightMT = td ? (parseFloat(td.weight) || 0) : 0;
+                    const arrowChar = state === 'discharge' ? '▲' : (state === 'mixed' ? '↕' : '▼');
+                    const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); display:flex; align-items:center; gap:2px; white-space:nowrap;">` +
+                        `<span class="tank-flow-arrow ${arrowCls}" style="position:static;">${arrowChar}</span>` +
+                        `<span class="tank-flow-label" style="position:static;">${weightMT.toFixed(1)} mT</span></div>`;
                 } else if (a.cls === 'cog') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#f5f3ff; background:rgba(168,85,247,0.85); padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:30;">${a.text}</div>`;
                 }
