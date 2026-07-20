@@ -1691,28 +1691,32 @@
         const EXCEL_START_ROW = 14; // Load_Editor name/weight/capacity rows
 
         // ---- trailer axle constants ----
-        // Verified against SPMT-19942D (2D dims) + user confirmation:
-        // an "axle LINE" (one Excel row, E124:F.. = x,y center) is a
-        // tandem pair of 2 axles, each axle carrying 2 tires (left/right
-        // across the 0.86m track width) — 2 axles x 2 tires = 4 tires
-        // per axle line, matching the dumbbell/"two rectangles" shape.
-        // The axle line's own x,y (from Excel) is the MIDPOINT between
-        // its two axles, not either axle individually — confirmed by the
-        // DXF circle ("center for XPOS/YPOS") sitting exactly halfway
-        // between the two rectangles' centers.
-        //   - AXLE_WIDTH_X = 0.86m        : track width, each rectangle (measured, constant across axle lines)
-        //   - AXLE_RECT_HEIGHT_Y = 0.325m : tire length in the travel direction (measured, constant)
-        //   - AXLE_PAIR_SPACING_Y = 0.62m : center-to-center distance between the 2 axles WITHIN one axle
-        //     line (measured from the DXF: NOT the same as the 1.45m axle-LINE-to-axle-LINE pitch, which
-        //     is a separate, per-train "spacing" value entered in the Trailer Generator and is already
-        //     expressed naturally by each row's own distinct x,y — it needs no constant here).
-        const AXLE_WIDTH_X = 0.86;        // width (X) of EACH rectangle in the pair — track width
-        const AXLE_RECT_HEIGHT_Y = 0.325; // height (Y) of EACH individual rectangle — tire length
-        const AXLE_PAIR_SPACING_Y = 0.62; // center-to-center distance between the two axles in one line (m)
+        // CORRECTED against SPMT-19942D (2D dims) + explicit user
+        // clarification — the initial reading of this drawing had the
+        // hierarchy one level off:
+        //   - An "axle LINE" (one Excel row, E124:F.. = x,y center) is a
+        //     tandem pair of 2 AXLES, 1.45m apart center-to-center
+        //     (hub-to-hub) along Y. This 1.45m is what the DXF's own
+        //     "center for XPOS/YPOS" circles measure between — i.e. it is
+        //     the axle-to-axle spacing, NOT axle-line-to-axle-line pitch.
+        //   - EACH of those 2 axles carries 2 TIRES, 0.62m apart
+        //     center-to-center, flanking that axle's own hub (circle) —
+        //     2 axles x 2 tires = 4 tires per axle line, matching the
+        //     rectangle-circle-rectangle glyph per axle the reference
+        //     picture/DXF shows.
+        //   - The axle line's own x,y (from Excel) is the MIDPOINT
+        //     between its two axles' hubs.
+        //   - Each tire rectangle measures 0.86m (X) x 0.325m (Y).
+        //   - Each hub circle has a 0.175m radius (DXF "R175").
+        const AXLE_WIDTH_X = 0.86;         // width (X) of EACH tire rectangle — track width
+        const AXLE_RECT_HEIGHT_Y = 0.325;  // height (Y) of EACH tire rectangle — tire length
+        const AXLE_TIRE_SPACING_Y = 0.62;  // center-to-center distance between the 2 TIRES within ONE axle (m)
+        const AXLE_LINE_SPACING_Y = 1.45;  // center-to-center distance between the 2 AXLES within one axle LINE — hub-to-hub (m)
+        const AXLE_HUB_RADIUS_M = 0.175;   // hub/circle radius at each axle's own center — DXF "R175" (m)
         // Kept for backward-compat with any code/comments referencing the
         // old single-rectangle footprint; now represents the OVERALL
-        // group footprint along Y (both rectangles + the gap between).
-        const AXLE_HEIGHT_Y = AXLE_PAIR_SPACING_Y + AXLE_RECT_HEIGHT_Y;
+        // group footprint along Y (both axles + their own tire spans).
+        const AXLE_HEIGHT_Y = AXLE_LINE_SPACING_Y + AXLE_TIRE_SPACING_Y + AXLE_RECT_HEIGHT_Y;
         const AXLE_START_ROW = 124;
         const AXLE_MAX_ROWS = 60;
 
@@ -1968,6 +1972,61 @@
 
         let pumpLocations = []; // [{ tankName, pumpName, flowStatus }]
 
+        // ---- Weight-delta flow fallback ----
+        // getTankFlowState() below prefers real pump/valve status text
+        // from BALLASTPLAN(mT) (PUMP_STATUS_COL) when it's available.
+        // But that column is still an ASSUMPTION (see its comment) and
+        // many workbooks/mock setups have no pumpLocations at all, in
+        // which case the pump-based check always returns 'off' and the
+        // flow arrow never appears — even while the operator is actively
+        // typing a new weight into a tank's input box. To make the arrow
+        // actually useful without depending on that column, every tank
+        // also tracks a "settled" baseline weight; whenever its CURRENT
+        // weight differs from that baseline, the arrow shows fill
+        // (weight went up) or discharge (weight went down) on its own.
+        // The baseline re-settles automatically a few seconds after the
+        // weight stops changing (see scheduleFlowBaselineSettle), which
+        // turns the arrow back off once the transfer looks finished.
+        let flowWeightBaseline = {};   // { [row]: number } last "settled" weight
+        let flowManualState = {};      // { [row]: 'fill' | 'discharge' }
+        let flowSettleTimers = {};     // { [row]: timeoutId }
+        const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
+        const FLOW_SETTLE_MS = 4000;         // how long a weight must hold steady before the arrow turns off
+
+        // Seeds/repins a tank's baseline to its CURRENT weight with no
+        // transition shown — used on first load/sync so every tank
+        // doesn't flash "filling" the moment real data first arrives.
+        function seedFlowBaseline(row, weight) {
+            flowWeightBaseline[row] = parseFloat(weight) || 0;
+            delete flowManualState[row];
+            if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
+        }
+
+        // Called every time a tank's weight actually changes (manual
+        // input or Excel sync). Sets the transient fill/discharge state
+        // from the sign of the change, and (re)starts the settle timer
+        // that will commit the new baseline — and clear the arrow —
+        // once the value has held steady for FLOW_SETTLE_MS.
+        function noteFlowWeightChange(row, newWeight) {
+            const w = parseFloat(newWeight) || 0;
+            const baseline = flowWeightBaseline[row];
+            if (baseline === undefined) { seedFlowBaseline(row, w); return; }
+            const delta = w - baseline;
+            if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) return; // no meaningful change
+            flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
+            if (flowSettleTimers[row]) clearTimeout(flowSettleTimers[row]);
+            flowSettleTimers[row] = setTimeout(() => {
+                flowWeightBaseline[row] = w;
+                delete flowManualState[row];
+                delete flowSettleTimers[row];
+                if (typeof renderTankFlowOverlay === 'function') {
+                    const c = document.getElementById('tankContainer');
+                    if (c) renderTankFlowOverlay(c);
+                }
+                if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+            }, FLOW_SETTLE_MS);
+        }
+
         // Aggregates flow state across every pump matched to a tank
         // (same tank-name matching rule as isTankPumpAvailable/
         // renderPumpMarkers): 'fill' if at least one pump on the tank is
@@ -1975,16 +2034,21 @@
         // if pumps disagree (rare — both running at once), 'off' if none
         // of the tank's pumps are currently running.
         function getTankFlowState(cfg) {
-            if (!cfg || !pumpLocations.length) return 'off';
+            if (!cfg) return 'off';
             const targetNorm = normalizeTankName(cfg.name);
             const pumpsForTank = pumpLocations.filter(p => normalizeTankName(p.tankName) === targetNorm);
-            if (!pumpsForTank.length) return 'off';
-            const hasFill = pumpsForTank.some(p => p.flowStatus === 'fill');
-            const hasDischarge = pumpsForTank.some(p => p.flowStatus === 'discharge');
-            if (hasFill && hasDischarge) return 'mixed';
-            if (hasFill) return 'fill';
-            if (hasDischarge) return 'discharge';
-            return 'off';
+            if (pumpsForTank.length) {
+                const hasFill = pumpsForTank.some(p => p.flowStatus === 'fill');
+                const hasDischarge = pumpsForTank.some(p => p.flowStatus === 'discharge');
+                if (hasFill && hasDischarge) return 'mixed';
+                if (hasFill) return 'fill';
+                if (hasDischarge) return 'discharge';
+            }
+            // No real pump/valve status found (or it's currently idle) —
+            // fall back to the weight-delta signal so the arrow still
+            // reflects an actual in-progress fill/discharge. See
+            // noteFlowWeightChange()/flowManualState above.
+            return flowManualState[cfg.id] || 'off';
         }
 
         // 6 free-text labels positioned around the barge, sourced from
@@ -3072,13 +3136,16 @@
         //     pixel-aligned to the tanks' real CREST_301 coordinates.
         //     Respects showTrailer flag.
         //
-        //     Axle shape: each axle position from Excel is now rendered
-        //     as a GROUP of TWO identical rectangles spaced
-        //     AXLE_PAIR_SPACING_Y (0.62m) apart center-to-center along Y,
-        //     with the group's own center placed at the axle's real (x,y)
-        //     — i.e. exactly where the single rectangle used to sit. A
-        //     thin connector line ties the two rectangles together so
-        //     they read visually as one grouped unit.
+        //     Axle shape: each axle-LINE position from Excel is rendered
+        //     as a GROUP of TWO axles spaced AXLE_LINE_SPACING_Y (1.45m)
+        //     apart center-to-center (hub-to-hub) along Y, with the
+        //     group's own center placed at the axle line's real (x,y).
+        //     EACH of those 2 axles is itself drawn as 2 tire rectangles
+        //     AXLE_TIRE_SPACING_Y (0.62m) apart flanking that axle's own
+        //     hub circle (AXLE_HUB_RADIUS_M) — rectangle/circle/rectangle
+        //     per axle, matching the reference drawing. A thin connector
+        //     line ties the two axles' hubs together so the pair reads
+        //     visually as one grouped axle line.
         //
         //     GHOST target footprint(s) + move arrow(s): at Level 2/3,
         //     also draws a dashed/translucent copy of this same footprint
@@ -3194,23 +3261,28 @@
             // already drawn regardless.
             if (!showTrailer) return;
 
-            // Each rectangle's own footprint (real meters -> px)
+            // Each tire rectangle's own footprint (real meters -> px)
             const rectHalfW = Math.max((AXLE_WIDTH_X / 2) * scaleX, 4);
             const rectHalfH = Math.max((AXLE_RECT_HEIGHT_Y / 2) * scaleY, 3);
-            // Center-to-center offset between the two rectangles (half the
-            // pair spacing, applied on either side of the group center).
-            const pairHalfOffsetPx = (AXLE_PAIR_SPACING_Y / 2) * scaleY;
+            // Half-offsets for the two nesting levels — both center-to-
+            // center, applied on either side of their own parent center:
+            //   lineHalfOffsetPx : the 2 AXLES within one axle LINE (1.45m)
+            //   tireHalfOffsetPx : the 2 TIRES within ONE axle (0.62m)
+            const lineHalfOffsetPx = (AXLE_LINE_SPACING_Y / 2) * scaleY;
+            const tireHalfOffsetPx = (AXLE_TIRE_SPACING_Y / 2) * scaleY;
+            const hubRadiusPx = Math.max(AXLE_HUB_RADIUS_M * scaleY, 2);
 
             const fillStyle = isLight
                 ? `rgba(${AXLE_STYLE.fillColorLight},${AXLE_STYLE.fillOpacityLight})`
                 : `rgba(${AXLE_STYLE.fillColorDark},${AXLE_STYLE.fillOpacityDark})`;
             const strokeStyle = isLight ? AXLE_STYLE.borderColorLight : AXLE_STYLE.borderColorDark;
 
-            // Draws ONE axle-group footprint (connector + two rectangles)
-            // centered at screen point (sx,sy) — shared by the REAL axle
-            // render below and the GHOST target-footprint render further
-            // down, so both always read as "the same shape," just styled
-            // differently (solid vs dashed/translucent).
+            // Draws ONE axle-LINE footprint (2 axles, 1.45m apart hub-to-
+            // hub; each axle its own 2 tires 0.62m apart flanking a hub
+            // circle) centered at screen point (sx,sy) — shared by the
+            // REAL axle render below and the GHOST target-footprint
+            // render further down, so both always read as "the same
+            // shape," just styled differently (solid vs dashed/translucent).
             function drawAxleGroupShape(sx, sy, style) {
                 ctx.save();
                 ctx.fillStyle = style.fillStyle || 'transparent';
@@ -3218,16 +3290,37 @@
                 ctx.lineWidth = style.lineWidth;
                 if (style.dash) ctx.setLineDash(style.dash);
 
+                // Connector between the 2 axles' hubs (the "line" in axle
+                // line), spanning the full 1.45m hub-to-hub distance.
                 ctx.beginPath();
-                ctx.moveTo(sx, sy - pairHalfOffsetPx);
-                ctx.lineTo(sx, sy + pairHalfOffsetPx);
+                ctx.moveTo(sx, sy - lineHalfOffsetPx);
+                ctx.lineTo(sx, sy + lineHalfOffsetPx);
                 ctx.lineWidth = Math.max(style.lineWidth, style.dash ? style.lineWidth : 1.5);
                 ctx.stroke();
 
-                [-pairHalfOffsetPx, pairHalfOffsetPx].forEach((offset) => {
+                // Each of the 2 offsets below is ONE AXLE, 1.45m apart.
+                // Per the reference drawing/picture, each axle is its own
+                // 2 tires flanking a center hub — rectangle / circle /
+                // rectangle, 0.62m tire-to-tire — not a single blank box.
+                [-lineHalfOffsetPx, lineHalfOffsetPx].forEach((axleOffset) => {
+                    const axleCy = sy + axleOffset;
+
+                    [-tireHalfOffsetPx, tireHalfOffsetPx].forEach((tireOffset) => {
+                        const tireCy = axleCy + tireOffset;
+                        ctx.lineWidth = style.lineWidth;
+                        ctx.fillStyle = style.fillStyle || 'transparent';
+                        ctx.beginPath();
+                        ctx.rect(sx - rectHalfW, tireCy - rectHalfH, rectHalfW * 2, rectHalfH * 2);
+                        if (style.fillStyle) ctx.fill();
+                        ctx.stroke();
+                    });
+
+                    // Hub — this axle's own center/reference point.
                     ctx.beginPath();
-                    ctx.rect(sx - rectHalfW, sy + offset - rectHalfH, rectHalfW * 2, rectHalfH * 2);
-                    if (style.fillStyle) ctx.fill();
+                    ctx.arc(sx, axleCy, hubRadiusPx, 0, Math.PI * 2);
+                    ctx.fillStyle = isLight ? '#ffffff' : '#0f1115';
+                    ctx.fill();
+                    ctx.strokeStyle = style.strokeStyle;
                     ctx.stroke();
                 });
 
@@ -3515,6 +3608,12 @@
                         if (extra) {
                             tank.weight = extra.weight.toFixed(2);
                             tank.percent = extra.percent > 1 ? extra.percent / 100 : extra.percent;
+                            // First time we ever see this row, this just
+                            // seeds its baseline silently (no arrow). On
+                            // every later sync, it compares against the
+                            // last-seen weight so an external Excel edit
+                            // shows the arrow exactly like a manual one.
+                            noteFlowWeightChange(tank.row, tank.weight);
                         }
                     });
 
@@ -3942,14 +4041,15 @@
                 const base = 60 + (i * 7);
                 tank.weight = (base + (i % 5) * 1.8).toFixed(2);
                 tank.percent = Math.min(0.10 + (i * 0.025), 0.90);
+                seedFlowBaseline(tank.row, tank.weight);
             });
             currentTrimDegrees = 2.8;
             currentHeelDegrees = -1.9;
 
             // Mock trailer axle layout: a typical multi-axle trailer footprint
             // straddling midship, spaced along X (fwd/aft) with a port/stbd pair.
-            // Each (x,y) here is the CENTER of an axle GROUP (the two
-            // rectangles 0.62m apart along Y), unchanged in meaning.
+            // Each (x,y) here is the CENTER of an axle LINE GROUP (its two
+            // axles 1.45m apart along Y), unchanged in meaning.
             trailerAxles = [
                 { row: AXLE_START_ROW, x: 30, y: 3.2 },
                 { row: AXLE_START_ROW + 1, x: 30, y: -3.2 },
@@ -4020,6 +4120,17 @@
             if (tankRecord) {
                 tankRecord.weight = parsed.toFixed(2);
                 tankRecord.percent = targetPct;
+            }
+            // Real-time fill/discharge arrow: register this change (sign
+            // of the delta decides fill vs discharge) and repaint BOTH
+            // the 2D badge and the 3D scene/label right away — previously
+            // only the 3D side refreshed here, and flow state depended
+            // entirely on BALLASTPLAN pump-status text that may not
+            // exist, so the arrow could go unseen on a manual edit.
+            noteFlowWeightChange(row, parsed);
+            if (showTankFlow) {
+                const flowContainer = document.getElementById('tankContainer');
+                if (flowContainer) renderTankFlowOverlay(flowContainer);
             }
             update3DFillAndAttitude();
 
@@ -4802,15 +4913,15 @@
         const DECK_THICKNESS_M = 0.022;  // 22mm top barge deck plate
         const TANK_DECK_GAP_M = 0.05;    // small clearance: tank top sits under, not flush with, deck underside
         const PUMP_HEIGHT_Z_M = 1.25;    // (unused now — pump marker post/cap removed, label-only) kept for reference
-        // Axle redesign: each axle GROUP (from one Excel x,y pair) is now
-        // rendered as TWO separate box "rectangles" spaced
-        // AXLE_PAIR_SPACING_Y (0.62m) apart center-to-center along Y,
-        // mirroring the 2D plan's two-rectangle-plus-connector look,
-        // rather than the old single-footprint two-housing-and-hub design.
-        // EACH_AXLE_BOX is the size of ONE of the two rectangles; the pair
-        // is then grouped (THREE.Group) so the group's own position is the
-        // axle's real (x,y) center from Excel — unchanged meaning.
-        const EACH_AXLE_BOX = { x: AXLE_WIDTH_X, y: AXLE_RECT_HEIGHT_Y, z: 1.4 }; // one rectangle's envelope (m)
+        // Axle model: each axle-LINE GROUP (from one Excel x,y pair) is
+        // rendered as TWO axles spaced AXLE_LINE_SPACING_Y (1.45m) apart
+        // center-to-center (hub-to-hub) along Y, mirroring the 2D plan.
+        // EACH of those 2 axles is itself TWO tire boxes spaced
+        // AXLE_TIRE_SPACING_Y (0.62m) apart flanking a hub cylinder.
+        // EACH_AXLE_BOX is the size of ONE tire; the whole thing is
+        // grouped (THREE.Group) so the group's own position is the axle
+        // LINE's real (x,y) center from Excel — unchanged meaning.
+        const EACH_AXLE_BOX = { x: AXLE_WIDTH_X, y: AXLE_RECT_HEIGHT_Y, z: 1.4 }; // one tire's envelope (m)
         const BARGE_QUAY_GAP_M = 1.2;    // real gap between barge leading edge and quay
         const QUAY_SLAB_THICKNESS_M = 0.4;
         const TANK_FOOTPRINT_GAP_M = 0.12; // real gap between adjacent tank footprints (visual daylight)
@@ -5061,7 +5172,7 @@
             trailerGhostGroup3d = new THREE.Group();
 
             const DECK_TOP_Y_M = TANK_DECK_GAP_M + DECK_THICKNESS_M; // 0 (TANK_TOP_Y) + gap + deck plate
-            const halfPairOffset = AXLE_PAIR_SPACING_Y / 2;
+            const halfPairOffset = AXLE_LINE_SPACING_Y / 2;
             const boxHeight3d = EACH_AXLE_BOX.z * 0.85; // same scale-down the real axle boxes use
             const ghostY = DECK_TOP_Y_M + boxHeight3d / 2;
             const cogGhostY = DECK_TOP_Y_M + 1.6; // matches updateCoGMarker3D's real-sign float height
@@ -5506,17 +5617,18 @@
             // pumps; pumpMeshes3d stays empty (kept as a variable for
             // backward compatibility with clear3DGeometry()).
 
-            // axle markers — each Excel axle (x,y) is now a GROUP of TWO
-            // separate rectangles spaced AXLE_PAIR_SPACING_Y (0.62m) apart
-            // center-to-center along Y (mirrors the 2D plan), with a thin
-            // connector beam tying them together. The GROUP's own position
-            // is set to the axle's real (x,y) — i.e. exactly the same
-            // center point the old single-footprint design used, so
-            // axle-to-axle spacing (and matching to the 2D overlay) is
-            // unaffected by this change.
-            const halfPairOffset = AXLE_PAIR_SPACING_Y / 2;
-            const connectorLength = AXLE_PAIR_SPACING_Y - EACH_AXLE_BOX.y; // gap between the two rectangle edges
+            // axle markers — each Excel axle-LINE (x,y) is a GROUP of TWO
+            // axles spaced AXLE_LINE_SPACING_Y (1.45m) apart center-to-
+            // center (hub-to-hub) along Y (mirrors the 2D plan), with a
+            // thin connector beam tying the two axles' hubs together.
+            // EACH axle is itself 2 tire boxes AXLE_TIRE_SPACING_Y (0.62m)
+            // apart, flanking that axle's own hub cylinder. The overall
+            // GROUP's own position is set to the axle line's real (x,y).
+            const halfLineOffset = AXLE_LINE_SPACING_Y / 2;
+            const halfTireOffset = AXLE_TIRE_SPACING_Y / 2;
+            const connectorLength = AXLE_LINE_SPACING_Y - AXLE_TIRE_SPACING_Y - EACH_AXLE_BOX.y; // gap between the two axles' outer tire edges
             const boxHeight3d = EACH_AXLE_BOX.z * 0.85;
+            const hubRadius3d = Math.max(AXLE_HUB_RADIUS_M, Math.min(EACH_AXLE_BOX.x, EACH_AXLE_BOX.y) * 0.3);
             // Same group-color meta used by the 2D overlay (see
             // renderPlanView) — mirrors generator group colors onto the
             // 3D scene whenever it's available and aligned with trailerAxles.
@@ -5526,23 +5638,38 @@
                 const meta3d = metaAligned3d ? trailerAxleMeta[axleIdx3d] : null;
                 const axleColor3d = meta3d ? hexToThreeColor(meta3d.color) : AXLE_STYLE_3D.color;
 
-                [-halfPairOffset, halfPairOffset].forEach((offsetY) => {
-                    const box = new THREE.Mesh(
-                        new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
-                        new THREE.MeshPhongMaterial({
-                            color: axleColor3d,
-                            transparent: AXLE_STYLE_3D.transparent,
-                            opacity: AXLE_STYLE_3D.opacity
-                        })
+                [-halfLineOffset, halfLineOffset].forEach((axleOffsetY) => {
+                    // This axle's 2 tires, flanking its own hub.
+                    [-halfTireOffset, halfTireOffset].forEach((tireOffsetY) => {
+                        const box = new THREE.Mesh(
+                            new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
+                            new THREE.MeshPhongMaterial({
+                                color: axleColor3d,
+                                transparent: AXLE_STYLE_3D.transparent,
+                                opacity: AXLE_STYLE_3D.opacity
+                            })
+                        );
+                        box.position.set(0, DECK_TOP_Y + boxHeight3d / 2, axleOffsetY + tireOffsetY);
+                        axleGroup.add(box);
+                        axleMeshes3d.push(box);
+                    });
+
+                    // Hub — this axle's own center reference point, drawn
+                    // as a small disc sitting on top of its tires, matching
+                    // the rectangle-circle-rectangle glyph used in the 2D
+                    // overlay (drawAxleGroupShape) for the SAME axle.
+                    const hub = new THREE.Mesh(
+                        new THREE.CylinderGeometry(hubRadius3d, hubRadius3d, boxHeight3d * 0.4, 16),
+                        new THREE.MeshPhongMaterial({ color: 0x0f1115 })
                     );
-                    box.position.set(0, DECK_TOP_Y + boxHeight3d / 2, offsetY);
-                    axleGroup.add(box);
-                    axleMeshes3d.push(box);
+                    hub.position.set(0, DECK_TOP_Y + boxHeight3d + (boxHeight3d * 0.2), axleOffsetY);
+                    axleGroup.add(hub);
+                    axleMeshes3d.push(hub);
                 });
 
-                // Thin connector beam between the two rectangles, along Y,
-                // so the pair reads visually as one grouped unit (mirrors
-                // the 2D overlay's connector line).
+                // Thin connector beam between the two AXLES' hubs, along Y,
+                // so the pair reads visually as one grouped axle line
+                // (mirrors the 2D overlay's connector line).
                 if (connectorLength > 0.02) {
                     const connector = new THREE.Mesh(
                         new THREE.BoxGeometry(EACH_AXLE_BOX.x * 0.35, boxHeight3d * 0.5, connectorLength),
