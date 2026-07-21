@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-50(V4)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-51-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1440,9 +1440,13 @@
                 <span>Day</span>
                 <label class="switch"><input type="checkbox" id="themeToggleCheckbox" checked onchange="toggleDashboardTheme()"><span class="slider"></span></label>
             </div>
-            <div class="toggle-container">
-                <span>🚛 Trailer</span>
+            <div class="toggle-container" title="Show/hide the trailer axle overlay in the 2D plan view only">
+                <span>🚛 Trailer (2D)</span>
                 <input type="checkbox" id="trailerToggleCheckbox" checked onchange="toggleTrailerOverlay()">
+            </div>
+            <div class="toggle-container" title="Show/hide the trailer axle groups in the 3D model only">
+                <span>🚛 Trailer (3D)</span>
+                <input type="checkbox" id="trailer3DToggleCheckbox" checked onchange="toggleTrailerOverlay3D()">
             </div>
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
@@ -1480,13 +1484,6 @@
                         <canvas id="heelCanvas" class="attitude-canvas-mini" width="120" height="50"></canvas>
                         <span class="grid-side-label" id="lbl_GridSB">SB</span>
                     </div>
-                </div>
-                <div class="plan-zoom-controls" style="display:flex; align-items:center; gap:6px;" title="Zoom the 2D barge/tank plan view — Ctrl+scroll wheel also works">
-                    <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">🔍</span>
-                    <button type="button" class="sync-btn" title="Zoom out" onclick="zoomTankPlanOut()">−</button>
-                    <span id="planZoomPct" style="font-size:11px; color:var(--text-muted); min-width:36px; text-align:center;">100%</span>
-                    <button type="button" class="sync-btn" title="Zoom in" onclick="zoomTankPlanIn()">+</button>
-                    <button type="button" class="sync-btn" title="Reset zoom to 100%" onclick="resetTankPlanZoom()">Reset</button>
                 </div>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
@@ -1547,6 +1544,10 @@
             <div class="section-title">
                 <span>🎯 Auto Ballast</span>
                 <span id="abPriorityLabel" style="font-size:10px; color:var(--text-muted); text-transform:none;">Priority: Heel → Trim → Deck-Quay</span>
+                <label class="toggle-container" style="margin:0; font-size:10px;" title="When ON, the target values below are set here and kept as typed — Sync will no longer overwrite them from CREST_301!P1:P9. When OFF (default), targets always follow whatever is in Excel.">
+                    <span>✏ Manual targets</span>
+                    <input type="checkbox" id="abManualTargetToggle" onchange="setManualTargetOverride(this.checked)">
+                </label>
             </div>
 
             <div class="ab-mode-row">
@@ -1560,12 +1561,22 @@
                 <div class="ab-stat">
                     <span class="ab-stat-label">Current Heel / Target</span>
                     <span class="ab-stat-value" id="abCurrentHeel">0.00°</span>
-                    <span class="ab-stat-value" style="font-size:11px; color:var(--text-muted);" id="abTargetHeel">/ 0.00°</span>
+                    <span style="display:flex; align-items:center; gap:3px;">
+                        <span style="font-size:11px; color:var(--text-muted);">/</span>
+                        <input type="number" step="0.01" id="abTargetHeelInput" class="ab-weight-input" style="width:58px;"
+                               title="Target heel (°). Positive = PS down, negative = SB down." onchange="updateTargetHeel(this.value)">
+                        <span style="font-size:10px; color:var(--text-muted);">°</span>
+                    </span>
                 </div>
                 <div class="ab-stat">
                     <span class="ab-stat-label">Current Trim / Target</span>
                     <span class="ab-stat-value" id="abCurrentTrim">0.00°</span>
-                    <span class="ab-stat-value" style="font-size:11px; color:var(--text-muted);" id="abTargetTrim">/ 0.00°</span>
+                    <span style="display:flex; align-items:center; gap:3px;">
+                        <span style="font-size:11px; color:var(--text-muted);">/</span>
+                        <input type="number" step="0.01" id="abTargetTrimInput" class="ab-weight-input" style="width:58px;"
+                               title="Target trim (°). Positive = AFT down, negative = FWD down." onchange="updateTargetTrim(this.value)">
+                        <span style="font-size:10px; color:var(--text-muted);">°</span>
+                    </span>
                 </div>
                 <div class="ab-stat">
                     <span class="ab-stat-label">Error Score</span>
@@ -1586,7 +1597,10 @@
             </div>
 
             <div class="ab-deck-grid" id="abDeckGrid">
-                <!-- populated by renderAutoBallastDeckGrid() -->
+                <!-- populated by renderAutoBallastDeckGrid(); each cell has an editable target input -->
+            </div>
+            <div class="ab-protect-row" style="justify-content:flex-end;">
+                <button type="button" class="sync-btn" title="Set heel, trim &amp; all 6 deck-to-quay targets to 0 (a level barge at the quay) and switch on Manual targets" onclick="levelAllTargets()">⚖ Level all targets to 0</button>
             </div>
 
             <div class="ab-protect-section">
@@ -1947,7 +1961,8 @@
         let currentTrimDegrees = 0.0;
         let currentHeelDegrees = 0.0;
         let trailerAxles = []; // [{ name, x, y }]
-        let showTrailer = true;  // new state for trailer toggle
+        let showTrailer = true;    // 2D overlay — drives drawAxleOverlay()
+        let showTrailer3D = true;  // 3D axle groups — drives set3DAxlesVisible(), independent of the 2D flag
 
         // Barge CoG (center of gravity), sourced from Load_Editor!P31
         // (LCG), Q31 (TCG), R31 (VCG). lcg/tcg use the same world frame
@@ -2123,6 +2138,14 @@
         let targetDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
         let currentDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
         let pumpCapacityMTPerHr = 250; // BALLASTPLAN(mT)!C153, default per §11
+
+        // When true, the operator has typed one or more target values by
+        // hand (heel/trim/deck inputs in the Auto Ballast panel, or the
+        // "Level all targets" button) and Sync must stop overwriting them
+        // from CREST_301!P1:P9 — see the "if (rangeTargets ...)" guard in
+        // pullExcelTankData(). Off by default so behavior is unchanged
+        // until the operator opts in via the "Manual targets" toggle.
+        let manualTargetOverride = false;
 
         // §13 recommended settings
         // Step-down schedule: optimizer starts coarse (fast convergence)
@@ -2515,17 +2538,14 @@
         const PLAN_LABEL_COL_PX = 90;   // reserved space for nothing now (kept for quay wall margin)
         const PLAN_MARGIN_PX = 10;      // breathing room around the whole plan
 
-        // ---- 2D plan zoom ----
+        // ---- 2D plan scale ----
         // Multiplies PLAN_PX_PER_METER when sizing the plan view, so the
         // whole 2D barge/tank drawing (tanks, quay, axle overlay, labels
         // — everything reads world coordinates through worldToScreen())
-        // scales together. Controlled by the zoom +/- /reset buttons and
-        // Ctrl+scroll-wheel over the plan (see setPlanZoom()/zoom event
-        // listener near the bottom of the file).
+        // scales together. Zoom controls were removed; this stays fixed
+        // at 1 (100%) but is kept as a variable since sizeTankPlanView()
+        // and worldToScreen() still reference it.
         let planZoom = 1;
-        const PLAN_ZOOM_MIN = 0.5;
-        const PLAN_ZOOM_MAX = 2.5;
-        const PLAN_ZOOM_STEP = 0.15;
 
         // Quay wall real-world footprint (meters), positioned just aft/port
         // of the barge origin.
@@ -3486,38 +3506,6 @@
             requestAnimationFrame(() => drawAxleOverlay());
         }
 
-        // ---- 2D plan zoom controls ----
-        // Changing planZoom changes the pixel size sizeTankPlanView()
-        // gives the plan container, so everything drawn from world
-        // coordinates needs a full rebuild (tank cards, quay box, corner
-        // labels, pump markers, flow overlay) followed by the axle
-        // overlay/CoG redraw — the same pairing used everywhere else in
-        // this file after the underlying geometry changes.
-        function setPlanZoom(newZoom) {
-            planZoom = Math.min(PLAN_ZOOM_MAX, Math.max(PLAN_ZOOM_MIN, newZoom));
-            const pctLabel = document.getElementById('planZoomPct');
-            if (pctLabel) pctLabel.textContent = Math.round(planZoom * 100) + '%';
-            if (typeof initTankMatrix === 'function') initTankMatrix();
-            refreshPlanView();
-        }
-
-        function zoomTankPlanIn() { setPlanZoom(planZoom + PLAN_ZOOM_STEP); }
-        function zoomTankPlanOut() { setPlanZoom(planZoom - PLAN_ZOOM_STEP); }
-        function resetTankPlanZoom() { setPlanZoom(1); }
-
-        // Ctrl+scroll-wheel over the plan zooms it (plain scroll still
-        // scrolls the page/container normally, so this never hijacks
-        // ordinary mouse-wheel use).
-        (function initPlanZoomWheel() {
-            const wrap = document.getElementById('tankGridWrap');
-            if (!wrap) return;
-            wrap.addEventListener('wheel', function (e) {
-                if (!e.ctrlKey) return;
-                e.preventDefault();
-                if (e.deltaY < 0) zoomTankPlanIn(); else zoomTankPlanOut();
-            }, { passive: false });
-        })();
-
         // Recompute overlay alignment whenever the layout reflows
         window.addEventListener('resize', () => drawAxleOverlay());
 
@@ -3621,7 +3609,7 @@
                         bargeCoG.valid = false;
                     }
 
-                    if (rangeTargets) {
+                    if (rangeTargets && !manualTargetOverride) {
                         const tv = rangeTargets.values; // rows P1..P9 → indices 0..8
                         targetTrimDegrees = parseFloat(tv[0][0]) || 0;
                         targetHeelDegrees = parseFloat(tv[1][0]) || 0;
@@ -3889,9 +3877,11 @@
                     bargeCornerLabels: bargeCornerLabels,
                     bargeName: BARGE_NAME,
                     showTrailer: showTrailer,
+                    showTrailer3D: showTrailer3D,
                     targetTrim: targetTrimDegrees,
                     targetHeel: targetHeelDegrees,
                     targetDeck: targetDeck,
+                    manualTargetOverride: manualTargetOverride,
                     pumpCapacityMTPerHr: pumpCapacityMTPerHr,
                     bufferTankNames: Array.from(bufferTankNames),
                     failedPumps: Array.from(failedPumps),
@@ -3973,6 +3963,11 @@
                 if (typeof data.targetTrim === 'number') targetTrimDegrees = data.targetTrim;
                 if (typeof data.targetHeel === 'number') targetHeelDegrees = data.targetHeel;
                 if (data.targetDeck) targetDeck = Object.assign({}, targetDeck, data.targetDeck);
+                if (typeof data.manualTargetOverride === 'boolean') {
+                    manualTargetOverride = data.manualTargetOverride;
+                    const manualToggleEl = document.getElementById('abManualTargetToggle');
+                    if (manualToggleEl) manualToggleEl.checked = manualTargetOverride;
+                }
                 if (typeof data.pumpCapacityMTPerHr === 'number') pumpCapacityMTPerHr = data.pumpCapacityMTPerHr;
                 if (Array.isArray(data.bufferTankNames)) bufferTankNames = new Set(data.bufferTankNames);
                 if (Array.isArray(data.failedPumps)) failedPumps = new Set(data.failedPumps);
@@ -3991,6 +3986,12 @@
                     showTrailer = data.showTrailer;
                     const trailerBox = document.getElementById('trailerToggleCheckbox');
                     if (trailerBox) trailerBox.checked = showTrailer;
+                }
+                if (typeof data.showTrailer3D === 'boolean') {
+                    showTrailer3D = data.showTrailer3D;
+                    const trailer3DBox = document.getElementById('trailer3DToggleCheckbox');
+                    if (trailer3DBox) trailer3DBox.checked = showTrailer3D;
+                    if (typeof set3DAxlesVisible === 'function') set3DAxlesVisible(showTrailer3D);
                 }
 
                 initTankMatrix();
@@ -4573,19 +4574,42 @@
         }
 
         // ---- §15 stat readout + deck grid -------------------------------
+        // Built ONCE (guarded by dataset.built), same reasoning as
+        // renderDeckWeightInputs()/syncBufferTankInputField() elsewhere in
+        // this file: each cell now includes an editable target input, and
+        // rebuilding the whole innerHTML on every refresh would wipe out
+        // an operator's in-progress keystroke or focus.
         function renderAutoBallastDeckGrid() {
             const grid = document.getElementById('abDeckGrid');
             if (!grid) return;
-            grid.innerHTML = DECK_KEYS.map((key, i) => {
+            if (grid.dataset.built !== '1') {
+                grid.innerHTML = DECK_KEYS.map((key, i) => `
+                    <div class="ab-deck-cell">
+                        <span class="ab-deck-name">${DECK_LABELS_DISPLAY[i]}</span>
+                        <span class="ab-deck-cur" id="abDeckCur_${key}">0.00m</span>
+                        <div style="display:flex; align-items:center; justify-content:center; gap:2px;">
+                            <span class="ab-deck-tgt">/</span>
+                            <input type="number" step="0.01" class="ab-weight-input" id="abDeckTarget_${key}"
+                                   style="width:100%; max-width:56px; font-size:9px; padding:2px 3px;"
+                                   title="Target ${DECK_LABELS_DISPLAY[i]} deck-to-quay (m)"
+                                   onchange="updateDeckTarget('${key}', this.value)">
+                            <span class="ab-deck-tgt">m</span>
+                        </div>
+                    </div>`).join('');
+                grid.dataset.built = '1';
+            }
+            DECK_KEYS.forEach((key, i) => {
                 const cur = currentDeck[key] || 0;
                 const tgt = targetDeck[key] || 0;
                 const off = Math.abs(cur - tgt) > AB_DECK_TOLERANCE;
-                return `<div class="ab-deck-cell">
-                    <span class="ab-deck-name">${DECK_LABELS_DISPLAY[i]}</span>
-                    <span class="ab-deck-cur" style="${off ? 'color:#f97316;' : 'color:var(--accent-green);'}">${cur.toFixed(2)}m</span>
-                    <span class="ab-deck-tgt">/ ${tgt.toFixed(2)}m</span>
-                </div>`;
-            }).join('');
+                const curEl = document.getElementById(`abDeckCur_${key}`);
+                if (curEl) {
+                    curEl.textContent = cur.toFixed(2) + 'm';
+                    curEl.style.color = off ? '#f97316' : 'var(--accent-green)';
+                }
+                const tgtInput = document.getElementById(`abDeckTarget_${key}`);
+                if (tgtInput && document.activeElement !== tgtInput) tgtInput.value = tgt.toFixed(2);
+            });
         }
 
         // Master refresh — call after ANY change to current/target values
@@ -4595,9 +4619,12 @@
 
             const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
             setText('abCurrentHeel', Math.abs(currentHeelDegrees).toFixed(2) + '°' + (currentHeelDegrees > 0 ? ' PS' : currentHeelDegrees < 0 ? ' SB' : ''));
-            setText('abTargetHeel', '/ ' + Math.abs(targetHeelDegrees).toFixed(2) + '°');
             setText('abCurrentTrim', Math.abs(currentTrimDegrees).toFixed(2) + '°' + (currentTrimDegrees > 0 ? ' AFT' : currentTrimDegrees < 0 ? ' FWD' : ''));
-            setText('abTargetTrim', '/ ' + Math.abs(targetTrimDegrees).toFixed(2) + '°');
+
+            const targetHeelInput = document.getElementById('abTargetHeelInput');
+            if (targetHeelInput && document.activeElement !== targetHeelInput) targetHeelInput.value = targetHeelDegrees.toFixed(2);
+            const targetTrimInput = document.getElementById('abTargetTrimInput');
+            if (targetTrimInput && document.activeElement !== targetTrimInput) targetTrimInput.value = targetTrimDegrees.toFixed(2);
 
             const errEl = document.getElementById('abErrorScore');
             if (errEl) {
@@ -4674,6 +4701,67 @@
             abDeckWeights[key] = w;
             const idx = DECK_KEYS.indexOf(key);
             logAutoBallast(`⚖ ${DECK_LABELS_DISPLAY[idx] || key} weight set to ${w}`);
+            refreshAutoBallastUI();
+        }
+
+        // ============================================================
+        // AUTO BALLAST TARGET VALUES (heel, trim, 6× deck-to-quay)
+        // Normally these come straight from CREST_301!P1:P9 every Sync
+        // (see pullExcelTankData()). Editing any of them here — or
+        // ticking "Manual targets" directly — turns on
+        // manualTargetOverride so Sync stops overwriting them, letting
+        // the operator drive Auto Ballast toward a hand-picked target
+        // (e.g. 0° heel/trim and equal deck-to-quay all round, for a
+        // level barge at the quay) instead of whatever is in Excel.
+        // ============================================================
+        function setManualTargetOverride(checked) {
+            manualTargetOverride = !!checked;
+            logAutoBallast(manualTargetOverride
+                ? '✏ Manual targets ON — Sync will no longer overwrite target heel/trim/deck values from Excel.'
+                : '✏ Manual targets OFF — target heel/trim/deck values will follow CREST_301!P1:P9 again on next Sync.');
+            refreshAutoBallastUI();
+        }
+
+        function updateTargetHeel(value) {
+            targetHeelDegrees = parseFloat(value) || 0;
+            manualTargetOverride = true;
+            const toggle = document.getElementById('abManualTargetToggle');
+            if (toggle) toggle.checked = true;
+            logAutoBallast(`🎯 Target heel set to ${targetHeelDegrees.toFixed(2)}° (manual)`);
+            refreshAutoBallastUI();
+        }
+
+        function updateTargetTrim(value) {
+            targetTrimDegrees = parseFloat(value) || 0;
+            manualTargetOverride = true;
+            const toggle = document.getElementById('abManualTargetToggle');
+            if (toggle) toggle.checked = true;
+            logAutoBallast(`🎯 Target trim set to ${targetTrimDegrees.toFixed(2)}° (manual)`);
+            refreshAutoBallastUI();
+        }
+
+        function updateDeckTarget(key, value) {
+            targetDeck[key] = parseFloat(value) || 0;
+            manualTargetOverride = true;
+            const toggle = document.getElementById('abManualTargetToggle');
+            if (toggle) toggle.checked = true;
+            const idx = DECK_KEYS.indexOf(key);
+            logAutoBallast(`🎯 Target ${DECK_LABELS_DISPLAY[idx] || key} set to ${targetDeck[key].toFixed(2)}m (manual)`);
+            refreshAutoBallastUI();
+        }
+
+        // Quick action: heel = 0°, trim = 0°, all 6 deck-to-quay corners
+        // = 0m — i.e. a level barge sitting evenly at the quay ("same or
+        // very near" across every corner). Switches Manual targets on
+        // since these values no longer come from Excel.
+        function levelAllTargets() {
+            targetHeelDegrees = 0;
+            targetTrimDegrees = 0;
+            DECK_KEYS.forEach(key => { targetDeck[key] = 0; });
+            manualTargetOverride = true;
+            const toggle = document.getElementById('abManualTargetToggle');
+            if (toggle) toggle.checked = true;
+            logAutoBallast('⚖ All targets leveled to 0 (heel, trim, AFT-PS, PS, FWD-PS, AFT-SB, SB, FWD-SB) — manual targets ON.');
             refreshAutoBallastUI();
         }
 
@@ -4916,15 +5004,20 @@
         }
 
         // ============================================================
-        // 9. TRAILER OVERLAY TOGGLE — now also drives the 3D axle groups'
-        //    visibility (see set3DAxlesVisible), so hiding/showing the
-        //    trailer affects both the 2D overlay and the 3D scene.
+        // 9. TRAILER OVERLAY TOGGLES — separate switches for the 2D
+        //    overlay and the 3D axle groups, so either view's trailer
+        //    can be shown/hidden independently of the other.
         // ============================================================
         function toggleTrailerOverlay() {
             const checked = document.getElementById('trailerToggleCheckbox').checked;
             showTrailer = checked;
-            drawAxleOverlay();  // immediately show/hide (2D)
-            if (typeof set3DAxlesVisible === 'function') set3DAxlesVisible(checked); // (3D, incl. ghost group)
+            drawAxleOverlay();  // immediately show/hide (2D only)
+        }
+
+        function toggleTrailerOverlay3D() {
+            const checked = document.getElementById('trailer3DToggleCheckbox').checked;
+            showTrailer3D = checked;
+            if (typeof set3DAxlesVisible === 'function') set3DAxlesVisible(checked); // (3D only, incl. ghost group)
         }
 
         // ============================================================
@@ -5811,8 +5904,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 fromPt = cogPt;
             });
 
-            const trailerToggleEl = document.getElementById('trailerToggleCheckbox');
-            trailerGhostGroup3d.visible = trailerToggleEl ? trailerToggleEl.checked : true;
+            const trailer3DToggleEl = document.getElementById('trailer3DToggleCheckbox');
+            trailerGhostGroup3d.visible = trailer3DToggleEl ? trailer3DToggleEl.checked : true;
             hull3dGroup.add(trailerGhostGroup3d);
         }
 
@@ -6285,10 +6378,11 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 }
 
                 axleGroup.position.set(axle.x, 0, worldYToZ3D(axle.y));
-                // Visibility follows the SAME "Trailer" toggle as the 2D
-                // overlay (see toggleTrailerOverlay / set3DAxlesVisible).
-                const trailerToggleEl = document.getElementById('trailerToggleCheckbox');
-                axleGroup.visible = trailerToggleEl ? trailerToggleEl.checked : true;
+                // Visibility follows the "Trailer (3D)" toggle, independent
+                // of the 2D overlay's toggle (see toggleTrailerOverlay3D /
+                // set3DAxlesVisible).
+                const trailer3DToggleEl = document.getElementById('trailer3DToggleCheckbox');
+                axleGroup.visible = trailer3DToggleEl ? trailer3DToggleEl.checked : true;
                 hull3dGroup.add(axleGroup);
                 axleGroups3d.push(axleGroup);
                 axleMeshes3d.push(axleGroup);
@@ -6713,10 +6807,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 last3DSignature = signature;
             } else {
                 // Even without a full rebuild, make sure axle visibility
-                // matches the current Trailer toggle state (e.g. after a
-                // theme change or other no-rebuild refresh).
-                const trailerToggleEl = document.getElementById('trailerToggleCheckbox');
-                if (trailerToggleEl) set3DAxlesVisible(trailerToggleEl.checked);
+                // matches the current Trailer (3D) toggle state (e.g.
+                // after a theme change or other no-rebuild refresh).
+                const trailer3DToggleEl = document.getElementById('trailer3DToggleCheckbox');
+                if (trailer3DToggleEl) set3DAxlesVisible(trailer3DToggleEl.checked);
                 // Ghost group isn't tied to the tank/axle/pump-count
                 // signature (it only depends on move data + level), so
                 // refresh it every call regardless of whether a full
