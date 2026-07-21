@@ -371,10 +371,13 @@
         }
 
         /* ---- Tank fill/discharge flow overlay (see getTankFlowState /
-           renderTankFlowOverlay). Anchored top-left of the tank card so
-           it never collides with the pump-name label (top-right) or the
-           dimension badge. Direction driven by BALLASTPLAN(mT) pump
-           status — see PUMP_STATUS_COL comment. Gated by showTankFlow. */
+           renderTankFlowOverlay). By default anchored top-left of the
+           tank card so it never collides with the pump-name label
+           (top-right) or the dimension badge. Direction driven by
+           BALLASTPLAN(mT) pump status — see PUMP_STATUS_COL comment.
+           Gated by showTankFlow. PORT/STARBOARD tanks instead get the
+           .tank-flow-marker-outside variant below, positioned via inline
+           style outside the hull. */
         .tank-flow-marker {
             position: absolute;
             top: 2px;
@@ -385,6 +388,19 @@
             align-items: center;
             gap: 1px;
             pointer-events: none;
+        }
+
+        /* PORT/STARBOARD variant — floats outside the hull instead of
+           inside the tank card (top/left/transform set inline per-tank
+           in renderTankFlowOverlay). A faint backdrop panel keeps the
+           moving arrow legible over the plain margin area it now sits
+           over, instead of over the tank card's own background. */
+        .tank-flow-marker-outside {
+            top: auto;
+            left: auto;            
+            border-radius: 4px;
+            padding: 2px 3px;
+            z-index: 16;
         }
 
         /* Real flow-pipe visual: a short vertical "pipe" containing 3
@@ -1416,10 +1432,19 @@
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
+    <!-- STLLoader is embedded inline further down (see "AXLE STL LOADER"
+         block, right before the 3D script) instead of loaded from
+         threejs.org/examples/js/loaders/STLLoader.js — that path was
+         deleted from the live examples/js folder once three.js passed
+         r124 (we're on r128), so it 404s silently and THREE.STLLoader
+         never gets defined. Embedding a known-good classic (non-module,
+         THREE.STLLoader = function(...)) build removes that dependency
+         entirely and matches the single-file philosophy. -->
+
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-50-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-50(V1)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1709,8 +1734,14 @@
         //   - Each tire rectangle measures 0.86m (X) x 0.325m (Y).
         //   - Each hub circle has a 0.175m radius (DXF "R175").
         const AXLE_WIDTH_X = 0.86;         // width (X) of EACH tire rectangle — track width
-        const AXLE_RECT_HEIGHT_Y = 0.325;  // height (Y) of EACH tire rectangle — tire length
-        const AXLE_TIRE_SPACING_Y = 0.62;  // center-to-center distance between the 2 TIRES within ONE axle (m)
+        const AXLE_RECT_HEIGHT_Y = 0.225;  // height (Y) of EACH tire rectangle — tire length
+        // Re-derived directly from the dimensioned drawing: overall
+        // height of the 2-tire stack is 946mm, each tire rectangle is
+        // 325mm tall, so the daylight GAP between the two rectangles is
+        // 946 - 325 - 325 = 296mm (the two 148mm halves shown either
+        // side of the hub circle, 148 + 148 = 296mm). Center-to-center
+        // spacing = rect height + gap = 325 + 296 = 621mm.
+        const AXLE_TIRE_SPACING_Y = 0.621; // center-to-center distance between the 2 TIRES within ONE axle (m) — 325mm rect + 296mm gap (148+148mm)
         const AXLE_LINE_SPACING_Y = 1.45;  // center-to-center distance between the 2 AXLES within one axle LINE — hub-to-hub (m)
         const AXLE_HUB_RADIUS_M = 0.175;   // hub/circle radius at each axle's own center — DXF "R175" (m)
         // Kept for backward-compat with any code/comments referencing the
@@ -2455,6 +2486,23 @@
             return `${num}${side}`;
         }
 
+        // Identifies whether a tank is a PORT, STARBOARD, or CENTRE tank
+        // from the trailing letter of its name — matches both the full
+        // Excel pattern ("WB-01-PS.P" / "WB-01-C.C" / "WB-01-SB.S") and
+        // the demo mock names ("AFT P" / "AFT C" / "AFT S"): both end in
+        // P / C / S. Returns null if the name doesn't end in one of
+        // those letters (e.g. a fallback "TANK 3" name), in which case no
+        // outside gauge/tag is drawn for that tank in either view.
+        function getTankSide(cfg) {
+            const nm = String((cfg && cfg.name) || '').trim().toUpperCase();
+            if (!nm) return null;
+            const last = nm.charAt(nm.length - 1);
+            if (last === 'P') return 'port';
+            if (last === 'S') return 'stbd';
+            if (last === 'C') return 'centre';
+            return null;
+        }
+
         // ============================================================
         // 2c. SHARED WORLD <-> SCREEN MAPPING
         //     ONE function used by BOTH the tank plan view and the
@@ -2470,6 +2518,14 @@
         const PLAN_PX_PER_METER = 9;
         const PLAN_LABEL_COL_PX = 90;   // reserved space for nothing now (kept for quay wall margin)
         const PLAN_MARGIN_PX = 10;      // breathing room around the whole plan
+        // Extra fixed vertical band reserved ABOVE the top hull edge and
+        // BELOW the bottom hull edge, on top of PLAN_MARGIN_PX, so the
+        // PORT/STARBOARD tank fill/discharge flow markers (see
+        // renderTankFlowOverlay) have room to float outside the hull
+        // without being clipped or overlapping the AFT/FWD/PS/SB/corner
+        // labels. Only affects the Y axis — X-axis scale/margins are
+        // untouched — so the plan stays true-to-scale.
+        const OUTSIDE_FLOW_BAND_PX = 75;
 
         // Quay wall real-world footprint (meters), positioned just aft/port
         // of the barge origin.
@@ -2487,7 +2543,7 @@
             const worldW = (BARGE_X_MAX - BARGE_X_MIN) + (QUAY_X_END - QUAY_X_START);
             const worldH = (BARGE_Y_MAX - BARGE_Y_MIN);
             const pxW = Math.max(700, Math.round(worldW * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2);
-            const pxH = Math.max(260, Math.round(worldH * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2);
+            const pxH = Math.max(260, Math.round(worldH * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2 + OUTSIDE_FLOW_BAND_PX * 2);
             container.style.width = pxW + 'px';
             container.style.height = pxH + 'px';
         }
@@ -2505,13 +2561,13 @@
             const worldXMax = BARGE_X_MAX;
             const worldW = worldXMax - worldXMin;
             const plottableW = cssW - PLAN_MARGIN_PX * 2;
-            const plottableH = cssH - PLAN_MARGIN_PX * 2;
+            const plottableH = cssH - PLAN_MARGIN_PX * 2 - OUTSIDE_FLOW_BAND_PX * 2;
 
             const xFrac = (x - worldXMin) / worldW;
             const sx = PLAN_MARGIN_PX + xFrac * plottableW;
 
             const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
-            const sy = PLAN_MARGIN_PX + yFrac * plottableH;
+            const sy = PLAN_MARGIN_PX + OUTSIDE_FLOW_BAND_PX + yFrac * plottableH;
 
             return { sx, sy };
         }
@@ -2524,7 +2580,7 @@
             const cssH = container ? container.clientHeight : 320;
             const worldW = BARGE_X_MAX - QUAY_X_START;
             const plottableW = cssW - PLAN_MARGIN_PX * 2;
-            const plottableH = cssH - PLAN_MARGIN_PX * 2;
+            const plottableH = cssH - PLAN_MARGIN_PX * 2 - OUTSIDE_FLOW_BAND_PX * 2;
             return {
                 scaleX: plottableW / worldW,
                 scaleY: plottableH / (BARGE_Y_MAX - BARGE_Y_MIN)
@@ -2884,11 +2940,19 @@
         //      direction comes from getTankFlowState(cfg), which reads
         //      real pump/valve status published from Excel (see
         //      PUMP_STATUS_COL — currently an ASSUMED column, confirm
-        //      with the real workbook). Gated by showTankFlow; anchored
-        //      top-LEFT of the tank card so it never collides with the
-        //      pump-name label (top-right, see renderPumpMarkers).
+        //      with the real workbook). Gated by showTankFlow.
+        //      PORT/STARBOARD tanks (see getTankSide()) have this marker
+        //      floated OUTSIDE the hull instead — above the top edge for
+        //      port tanks, below the bottom edge for starboard tanks,
+        //      aligned to that tank's real X — the same "outside the
+        //      barge" placement as the PS/SB edge tags, so the moving
+        //      blue (fill) / red (discharge) arrow reads clearly instead
+        //      of overlapping the (often narrow) wing tank card. Centre
+        //      tanks keep the original top-left in-card placement, since
+        //      they have no adjacent hull edge to anchor to.
         // ============================================================
         let showTankFlow = true;
+        const OUTSIDE_FLOW_CLEARANCE_PX = 20; // gap between hull edge and the outside flow marker
 
         function renderTankFlowOverlay(container) {
             container.querySelectorAll('.tank-flow-marker').forEach(el => el.remove());
@@ -2897,8 +2961,6 @@
             TANK_CONFIG.forEach((cfg) => {
                 const state = getTankFlowState(cfg);
                 if (state === 'off') return;
-                const card = document.getElementById(`tank_card_${cfg.id}`);
-                if (!card) return;
 
                 const tank = tankData.find(t => t.row === cfg.id);
                 const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
@@ -2909,7 +2971,7 @@
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-flow-marker';
-                wrap.title = `${stateLabel} — ${weightMT.toFixed(1)} mT`;
+                wrap.title = `${cfg.name} — ${stateLabel} — ${weightMT.toFixed(1)} mT`;
                 wrap.innerHTML = `
                     <span class="tank-flow-state ${arrowCls}">${stateWord}</span>
                     <span class="tank-flow-pipe ${arrowCls}">
@@ -2919,7 +2981,28 @@
                     </span>
                     <span class="tank-flow-label">${weightMT.toFixed(1)} mT</span>
                 `;
-                card.appendChild(wrap);
+
+                const side = getTankSide(cfg);
+                if (side === 'port' || side === 'stbd') {
+                    const edgeY = side === 'port' ? BARGE_Y_MAX : BARGE_Y_MIN;
+                    const p = worldToScreen(cfg.x, edgeY);
+                    wrap.classList.add('tank-flow-marker-outside');
+                    wrap.style.left = p.sx + 'px';
+                    if (side === 'port') {
+                        wrap.style.top = (p.sy - OUTSIDE_FLOW_CLEARANCE_PX) + 'px';
+                        wrap.style.transform = 'translate(-50%, -100%)';
+                    } else {
+                        wrap.style.top = (p.sy + OUTSIDE_FLOW_CLEARANCE_PX) + 'px';
+                        wrap.style.transform = 'translate(-50%, 0)';
+                    }
+                    container.appendChild(wrap);
+                } else {
+                    // Centre tank (or unrecognized name) — original
+                    // in-card top-left placement.
+                    const card = document.getElementById(`tank_card_${cfg.id}`);
+                    if (!card) return;
+                    card.appendChild(wrap);
+                }
             });
         }
 
@@ -4900,6 +4983,407 @@
     </script>
     <script>
         // ============================================================
+        // AXLE STL LOADER — embedded inline (classic, non-module build,
+        // pulled from a pre-r124 three.js tag) because threejs.org no
+        // longer serves examples/js/loaders/STLLoader.js for r128 (see
+        // the <head> comment above the three.js script tags). Defines
+        // THREE.STLLoader on the global THREE object, same as the old
+        // external script would have, so nothing below needs to change.
+        // ============================================================
+/**
+ * Description: A THREE loader for STL ASCII files, as created by Solidworks and other CAD programs.
+ *
+ * Supports both binary and ASCII encoded files, with automatic detection of type.
+ *
+ * The loader returns a non-indexed buffer geometry.
+ *
+ * Limitations:
+ *  Binary decoding supports "Magics" color format (http://en.wikipedia.org/wiki/STL_(file_format)#Color_in_binary_STL).
+ *  There is perhaps some question as to how valid it is to always assume little-endian-ness.
+ *  ASCII decoding assumes file is UTF-8.
+ *
+ * Usage:
+ *  var loader = new THREE.STLLoader();
+ *  loader.load( './models/stl/slotted_disk.stl', function ( geometry ) {
+ *    scene.add( new THREE.Mesh( geometry ) );
+ *  });
+ *
+ * For binary STLs geometry might contain colors for vertices. To use it:
+ *  // use the same code to load STL as above
+ *  if (geometry.hasColors) {
+ *    material = new THREE.MeshPhongMaterial({ opacity: geometry.alpha, vertexColors: true });
+ *  } else { .... }
+ *  var mesh = new THREE.Mesh( geometry, material );
+ *
+ * For ASCII STLs containing multiple solids, each solid is assigned to a different group.
+ * Groups can be used to assign a different color by defining an array of materials with the same length of
+ * geometry.groups and passing it to the Mesh constructor:
+ *
+ * var mesh = new THREE.Mesh( geometry, material );
+ *
+ * For example:
+ *
+ *  var materials = [];
+ *  var nGeometryGroups = geometry.groups.length;
+ *
+ *  var colorMap = ...; // Some logic to index colors.
+ *
+ *  for (var i = 0; i < nGeometryGroups; i++) {
+ *
+ *		var material = new THREE.MeshPhongMaterial({
+ *			color: colorMap[i],
+ *			wireframe: false
+ *		});
+ *
+ *  }
+ *
+ *  materials.push(material);
+ *  var mesh = new THREE.Mesh(geometry, materials);
+ */
+
+
+THREE.STLLoader = function ( manager ) {
+
+	THREE.Loader.call( this, manager );
+
+};
+
+THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype ), {
+
+	constructor: THREE.STLLoader,
+
+	load: function ( url, onLoad, onProgress, onError ) {
+
+		var scope = this;
+
+		var loader = new THREE.FileLoader( this.manager );
+		loader.setPath( this.path );
+		loader.setResponseType( 'arraybuffer' );
+		loader.setRequestHeader( this.requestHeader );
+		loader.setWithCredentials( this.withCredentials );
+
+		loader.load( url, function ( text ) {
+
+			try {
+
+				onLoad( scope.parse( text ) );
+
+			} catch ( e ) {
+
+				if ( onError ) {
+
+					onError( e );
+
+				} else {
+
+					console.error( e );
+
+				}
+
+				scope.manager.itemError( url );
+
+			}
+
+		}, onProgress, onError );
+
+	},
+
+	parse: function ( data ) {
+
+		function isBinary( data ) {
+
+			var expect, face_size, n_faces, reader;
+			reader = new DataView( data );
+			face_size = ( 32 / 8 * 3 ) + ( ( 32 / 8 * 3 ) * 3 ) + ( 16 / 8 );
+			n_faces = reader.getUint32( 80, true );
+			expect = 80 + ( 32 / 8 ) + ( n_faces * face_size );
+
+			if ( expect === reader.byteLength ) {
+
+				return true;
+
+			}
+
+			// An ASCII STL data must begin with 'solid ' as the first six bytes.
+			// However, ASCII STLs lacking the SPACE after the 'd' are known to be
+			// plentiful.  So, check the first 5 bytes for 'solid'.
+
+			// Several encodings, such as UTF-8, precede the text with up to 5 bytes:
+			// https://en.wikipedia.org/wiki/Byte_order_mark#Byte_order_marks_by_encoding
+			// Search for "solid" to start anywhere after those prefixes.
+
+			// US-ASCII ordinal values for 's', 'o', 'l', 'i', 'd'
+
+			var solid = [ 115, 111, 108, 105, 100 ];
+
+			for ( var off = 0; off < 5; off ++ ) {
+
+				// If "solid" text is matched to the current offset, declare it to be an ASCII STL.
+
+				if ( matchDataViewAt( solid, reader, off ) ) return false;
+
+			}
+
+			// Couldn't find "solid" text at the beginning; it is binary STL.
+
+			return true;
+
+		}
+
+		function matchDataViewAt( query, reader, offset ) {
+
+			// Check if each byte in query matches the corresponding byte from the current offset
+
+			for ( var i = 0, il = query.length; i < il; i ++ ) {
+
+				if ( query[ i ] !== reader.getUint8( offset + i, false ) ) return false;
+
+			}
+
+			return true;
+
+		}
+
+		function parseBinary( data ) {
+
+			var reader = new DataView( data );
+			var faces = reader.getUint32( 80, true );
+
+			var r, g, b, hasColors = false, colors;
+			var defaultR, defaultG, defaultB, alpha;
+
+			// process STL header
+			// check for default color in header ("COLOR=rgba" sequence).
+
+			for ( var index = 0; index < 80 - 10; index ++ ) {
+
+				if ( ( reader.getUint32( index, false ) == 0x434F4C4F /*COLO*/ ) &&
+					( reader.getUint8( index + 4 ) == 0x52 /*'R'*/ ) &&
+					( reader.getUint8( index + 5 ) == 0x3D /*'='*/ ) ) {
+
+					hasColors = true;
+					colors = new Float32Array( faces * 3 * 3 );
+
+					defaultR = reader.getUint8( index + 6 ) / 255;
+					defaultG = reader.getUint8( index + 7 ) / 255;
+					defaultB = reader.getUint8( index + 8 ) / 255;
+					alpha = reader.getUint8( index + 9 ) / 255;
+
+				}
+
+			}
+
+			var dataOffset = 84;
+			var faceLength = 12 * 4 + 2;
+
+			var geometry = new THREE.BufferGeometry();
+
+			var vertices = new Float32Array( faces * 3 * 3 );
+			var normals = new Float32Array( faces * 3 * 3 );
+
+			for ( var face = 0; face < faces; face ++ ) {
+
+				var start = dataOffset + face * faceLength;
+				var normalX = reader.getFloat32( start, true );
+				var normalY = reader.getFloat32( start + 4, true );
+				var normalZ = reader.getFloat32( start + 8, true );
+
+				if ( hasColors ) {
+
+					var packedColor = reader.getUint16( start + 48, true );
+
+					if ( ( packedColor & 0x8000 ) === 0 ) {
+
+						// facet has its own unique color
+
+						r = ( packedColor & 0x1F ) / 31;
+						g = ( ( packedColor >> 5 ) & 0x1F ) / 31;
+						b = ( ( packedColor >> 10 ) & 0x1F ) / 31;
+
+					} else {
+
+						r = defaultR;
+						g = defaultG;
+						b = defaultB;
+
+					}
+
+				}
+
+				for ( var i = 1; i <= 3; i ++ ) {
+
+					var vertexstart = start + i * 12;
+					var componentIdx = ( face * 3 * 3 ) + ( ( i - 1 ) * 3 );
+
+					vertices[ componentIdx ] = reader.getFloat32( vertexstart, true );
+					vertices[ componentIdx + 1 ] = reader.getFloat32( vertexstart + 4, true );
+					vertices[ componentIdx + 2 ] = reader.getFloat32( vertexstart + 8, true );
+
+					normals[ componentIdx ] = normalX;
+					normals[ componentIdx + 1 ] = normalY;
+					normals[ componentIdx + 2 ] = normalZ;
+
+					if ( hasColors ) {
+
+						colors[ componentIdx ] = r;
+						colors[ componentIdx + 1 ] = g;
+						colors[ componentIdx + 2 ] = b;
+
+					}
+
+				}
+
+			}
+
+			geometry.setAttribute( 'position', new THREE.BufferAttribute( vertices, 3 ) );
+			geometry.setAttribute( 'normal', new THREE.BufferAttribute( normals, 3 ) );
+
+			if ( hasColors ) {
+
+				geometry.setAttribute( 'color', new THREE.BufferAttribute( colors, 3 ) );
+				geometry.hasColors = true;
+				geometry.alpha = alpha;
+
+			}
+
+			return geometry;
+
+		}
+
+		function parseASCII( data ) {
+
+			var geometry = new THREE.BufferGeometry();
+			var patternSolid = /solid([\s\S]*?)endsolid/g;
+			var patternFace = /facet([\s\S]*?)endfacet/g;
+			var faceCounter = 0;
+
+			var patternFloat = /[\s]+([+-]?(?:\d*)(?:\.\d*)?(?:[eE][+-]?\d+)?)/.source;
+			var patternVertex = new RegExp( 'vertex' + patternFloat + patternFloat + patternFloat, 'g' );
+			var patternNormal = new RegExp( 'normal' + patternFloat + patternFloat + patternFloat, 'g' );
+
+			var vertices = [];
+			var normals = [];
+
+			var normal = new THREE.Vector3();
+
+			var result;
+
+			var groupCount = 0;
+			var startVertex = 0;
+			var endVertex = 0;
+
+			while ( ( result = patternSolid.exec( data ) ) !== null ) {
+
+				startVertex = endVertex;
+
+				var solid = result[ 0 ];
+
+				while ( ( result = patternFace.exec( solid ) ) !== null ) {
+
+					var vertexCountPerFace = 0;
+					var normalCountPerFace = 0;
+
+					var text = result[ 0 ];
+
+					while ( ( result = patternNormal.exec( text ) ) !== null ) {
+
+						normal.x = parseFloat( result[ 1 ] );
+						normal.y = parseFloat( result[ 2 ] );
+						normal.z = parseFloat( result[ 3 ] );
+						normalCountPerFace ++;
+
+					}
+
+					while ( ( result = patternVertex.exec( text ) ) !== null ) {
+
+						vertices.push( parseFloat( result[ 1 ] ), parseFloat( result[ 2 ] ), parseFloat( result[ 3 ] ) );
+						normals.push( normal.x, normal.y, normal.z );
+						vertexCountPerFace ++;
+						endVertex ++;
+
+					}
+
+					// every face have to own ONE valid normal
+
+					if ( normalCountPerFace !== 1 ) {
+
+						console.error( 'THREE.STLLoader: Something isn\'t right with the normal of face number ' + faceCounter );
+
+					}
+
+					// each face have to own THREE valid vertices
+
+					if ( vertexCountPerFace !== 3 ) {
+
+						console.error( 'THREE.STLLoader: Something isn\'t right with the vertices of face number ' + faceCounter );
+
+					}
+
+					faceCounter ++;
+
+				}
+
+				var start = startVertex;
+				var count = endVertex - startVertex;
+
+				geometry.addGroup( start, count, groupCount );
+				groupCount ++;
+
+			}
+
+			geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( vertices, 3 ) );
+			geometry.setAttribute( 'normal', new THREE.Float32BufferAttribute( normals, 3 ) );
+
+			return geometry;
+
+		}
+
+		function ensureString( buffer ) {
+
+			if ( typeof buffer !== 'string' ) {
+
+				return THREE.LoaderUtils.decodeText( new Uint8Array( buffer ) );
+
+			}
+
+			return buffer;
+
+		}
+
+		function ensureBinary( buffer ) {
+
+			if ( typeof buffer === 'string' ) {
+
+				var array_buffer = new Uint8Array( buffer.length );
+				for ( var i = 0; i < buffer.length; i ++ ) {
+
+					array_buffer[ i ] = buffer.charCodeAt( i ) & 0xff; // implicitly assumes little-endian
+
+				}
+
+				return array_buffer.buffer || array_buffer;
+
+			} else {
+
+				return buffer;
+
+			}
+
+		}
+
+		// start
+
+		var binData = ensureBinary( data );
+
+		return isBinary( binData ) ? parseBinary( binData ) : parseASCII( ensureString( data ) );
+
+	}
+
+} );
+
+    </script>
+    <script>
+        // ============================================================
         // 11. 3D BALLAST VIEW — a true twin of the 2D plan view, built
         //     from the SAME live data: TANK_CONFIG (geometry), tankData
         //     (percent fill), currentTrimDegrees/currentHeelDegrees
@@ -4921,7 +5405,92 @@
         // EACH_AXLE_BOX is the size of ONE tire; the whole thing is
         // grouped (THREE.Group) so the group's own position is the axle
         // LINE's real (x,y) center from Excel — unchanged meaning.
-        const EACH_AXLE_BOX = { x: AXLE_WIDTH_X, y: AXLE_RECT_HEIGHT_Y, z: 1.4 }; // one tire's envelope (m)
+        const EACH_AXLE_BOX = { x: AXLE_WIDTH_X, y: AXLE_RECT_HEIGHT_Y, z: 1.4 }; // one tire's envelope (m) — fallback box, used only if the STL below fails to load/parse
+
+        // ---- real SPMT axle geometry (SPMT-19943D-1axle.stl) ----
+        // Embedded as base64 (single-file constraint — see project notes)
+        // so it parses synchronously with zero network round-trip. This
+        // one STL is ONE COMPLETE "axle" per the hierarchy above (both of
+        // its 2 tires + hub/frame already modeled together, at their real
+        // CAD spacing) — NOT a single tire. One axle LINE therefore needs
+        // TWO instances of this same mesh (at +-AXLE_LINE_SPACING_Y/2),
+        // exactly mirroring how the old box+hub loop placed two axles.
+        //
+        // Verified against the file (measured, not assumed):
+        //   - 4 solid bodies: 2 wheels (each a true cylinder, diameter
+        //     ~0.858m, axial width ~0.355m) + a connecting frame + a
+        //     bracket/pin.
+        //   - The 2 wheels' centers are 620mm apart — matches
+        //     AXLE_TIRE_SPACING_Y (0.62m) exactly.
+        //   - Wheel diameter (~0.858m) matches AXLE_WIDTH_X (0.86m); tire
+        //     axial width (~0.355m) is close to AXLE_RECT_HEIGHT_Y
+        //     (0.325m) — the old box dims were a reasonable simplified
+        //     footprint of this exact geometry, not an unrelated guess.
+        //   - STL's own local axes (by inspection: which sub-parts are
+        //     circular vs. span the model's full height) are X = axial/
+        //     spacing direction (the 0.62m axis), Y = vertical — wheel's
+        //     lowest point sits at Y~=0, i.e. Y=0 IS the wheel's own
+        //     ground-contact plane — and Z = fore-aft/rolling direction.
+        //     A +90 deg rotation about Y (x'=z, y'=y, z'=-x) is a PURE
+        //     rotation (determinant +1, no mirroring/inside-out normals)
+        //     that maps this onto the scene's convention: scene X =
+        //     fore-aft, scene Y = up, scene Z = the axle/tire spacing
+        //     axis (see worldYToZ3D comment above for why spacing is on
+        //     Z here). Because Y already starts at ~0 pre-rotation, NOT
+        //     touching Y during centering keeps that ground-contact plane
+        //     intact — position.y = DECK_TOP_Y then sits the wheel
+        //     exactly on the deck with no extra fudge factor.
+        //
+        // OPEN QUESTION (not yet resolved, does not block 3D use): the
+        // companion 2D DXF dimensions the wheel's 0.86m fore-aft envelope
+        // ASYMMETRICALLY around its own "center for XPOS" hub reference —
+        // 0.49m one way, 0.37m the other (not 0.43/0.43) — implying the
+        // XPOS reference point used for Excel's x,y is offset ~60mm from
+        // the wheel's own geometric center along that axis. This STL has
+        // no explicit XPOS marker to confirm which way, so this mesh is
+        // centered on its own bounding box for now. Purely visual/3D —
+        // does not touch AXLE_WIDTH_X or any Auto Ballast/CoG math, which
+        // stay keyed to the real Excel x,y regardless.
+        const AXLE_STL_BASE64 = "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";
+
+        let axleSTLGeometry = null;   // prepared THREE.BufferGeometry, or null until loaded/if it fails
+        let axleSTLLoadAttempted = false;
+
+        function getAxleSTLGeometry() {
+            // STL loading is disabled on purpose — the 3D axle should
+            // keep showing the old simplified box+hub geometry instead
+            // of the real SPMT STL mesh. Flip DISABLE_AXLE_STL back to
+            // false to re-enable STL loading later.
+            const DISABLE_AXLE_STL = true;
+            if (DISABLE_AXLE_STL) return null;
+            if (axleSTLLoadAttempted) return axleSTLGeometry;
+            axleSTLLoadAttempted = true;
+            try {
+                if (typeof THREE.STLLoader !== 'function') throw new Error('STLLoader not available');
+                const binary = atob(AXLE_STL_BASE64);
+                const buf = new ArrayBuffer(binary.length);
+                const view = new Uint8Array(buf);
+                for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
+
+                const geometry = new THREE.STLLoader().parse(buf);
+                geometry.computeBoundingBox();
+                const bbox = geometry.boundingBox;
+                const cx = (bbox.min.x + bbox.max.x) / 2; // STL X = axial/spacing axis -> center it
+                const cz = (bbox.min.z + bbox.max.z) / 2; // STL Z = fore-aft axis -> center it
+                const minY = bbox.min.y;                  // STL Y = vertical, min IS the wheel's ground-contact plane
+                // Center X/Z, drop Y so its minimum lands exactly at 0,
+                // THEN convert mm -> m, THEN rotate into scene axes.
+                geometry.translate(-cx, -minY, -cz);
+                geometry.scale(0.001, 0.001, 0.001);
+                geometry.rotateY(Math.PI / 2); // (x,y,z) -> (z,y,-x): pure rotation, see note above
+                geometry.computeVertexNormals();
+                axleSTLGeometry = geometry;
+            } catch (err) {
+                console.warn('Axle STL failed to load; falling back to box geometry for 3D axles.', err);
+                axleSTLGeometry = null;
+            }
+            return axleSTLGeometry;
+        }
         const BARGE_QUAY_GAP_M = 1.2;    // real gap between barge leading edge and quay
         const QUAY_SLAB_THICKNESS_M = 0.4;
         const TANK_FOOTPRINT_GAP_M = 0.12; // real gap between adjacent tank footprints (visual daylight)
@@ -5633,12 +6202,37 @@
             // renderPlanView) — mirrors generator group colors onto the
             // 3D scene whenever it's available and aligned with trailerAxles.
             const metaAligned3d = trailerAxleMeta.length === trailerAxles.length;
+            const axleSTLGeo3d = getAxleSTLGeometry(); // null => box+hub fallback below
             trailerAxles.forEach((axle, axleIdx3d) => {
                 const axleGroup = new THREE.Group();
                 const meta3d = metaAligned3d ? trailerAxleMeta[axleIdx3d] : null;
                 const axleColor3d = meta3d ? hexToThreeColor(meta3d.color) : AXLE_STYLE_3D.color;
 
                 [-halfLineOffset, halfLineOffset].forEach((axleOffsetY) => {
+                    if (axleSTLGeo3d) {
+                        // Real SPMT-19943D geometry — ONE mesh already IS
+                        // this whole axle (both its tires + hub/frame at
+                        // their real spacing), so just place one instance
+                        // per axle offset; no separate tire boxes or hub
+                        // disc needed. Geometry was pre-centered on X/Z
+                        // with its ground-contact plane at local Y=0 (see
+                        // getAxleSTLGeometry), so position.y = DECK_TOP_Y
+                        // sits it exactly on the deck with no fudge term.
+                        const axleMesh = new THREE.Mesh(
+                            axleSTLGeo3d,
+                            new THREE.MeshPhongMaterial({
+                                color: axleColor3d,
+                                transparent: AXLE_STYLE_3D.transparent,
+                                opacity: AXLE_STYLE_3D.opacity
+                            })
+                        );
+                        axleMesh.position.set(0, DECK_TOP_Y, axleOffsetY);
+                        axleGroup.add(axleMesh);
+                        axleMeshes3d.push(axleMesh);
+                        return;
+                    }
+
+                    // ---- fallback: simplified box+hub (STL unavailable) ----
                     // This axle's 2 tires, flanking its own hub.
                     [-halfTireOffset, halfTireOffset].forEach((tireOffsetY) => {
                         const box = new THREE.Mesh(
@@ -5885,18 +6479,29 @@
                 addAnchor(`pct_${cfg.id}`, cfg.x, 0.4, worldYToZ3D(cfg.y), '', 'pct');
             });
 
-            // Per-tank fill/discharge flow label anchor — mirrors the 2D
-            // badge's TOP-LEFT placement (AFT edge, PS/SB-outboard
-            // corner opposite the pump label's top-right corner) so the
-            // two never collide. Text/visibility is computed live in
-            // renderLabels3D() from getTankFlowState(), same "always add
-            // the anchor, gate at render time" pattern the pct/pump
-            // anchors use.
+            // Per-tank fill/discharge flow label anchor. For PORT/
+            // STARBOARD tanks (see getTankSide()), this sits OUTSIDE the
+            // hull — on the same edge line as the PS/SB tag, at this
+            // tank's own real X — so the moving fill/discharge arrow
+            // reads clearly outside the hull instead of over the (often
+            // narrow) wing tank itself. Centre tanks keep the original
+            // TOP-LEFT-of-tank corner placement (AFT edge, PS/SB-outboard
+            // corner opposite the pump label's top-right corner), since
+            // they have no adjacent hull edge to anchor to. Text/visibility
+            // is computed live in renderLabels3D() from getTankFlowState(),
+            // same "always add the anchor, gate at render time" pattern
+            // the pct/pump anchors use.
             TANK_CONFIG.forEach((cfg) => {
-                const isPortSide = cfg.y >= 0;
-                const cornerX = cfg.x - cfg.width / 2;
-                const cornerYWorld = isPortSide ? (cfg.y + cfg.height / 2) : (cfg.y - cfg.height / 2);
-                addAnchor(`flow_${cfg.id}`, cornerX, 0.6, worldYToZ3D(cornerYWorld), '', 'flow');
+                const side = getTankSide(cfg);
+                if (side === 'port' || side === 'stbd') {
+                    const edgeYWorld = side === 'port' ? BARGE_Y_MAX : BARGE_Y_MIN;
+                    addAnchor(`flow_${cfg.id}`, cfg.x, 0.6, worldYToZ3D(edgeYWorld), '', 'flow');
+                } else {
+                    const isPortSide = cfg.y >= 0;
+                    const cornerX = cfg.x - cfg.width / 2;
+                    const cornerYWorld = isPortSide ? (cfg.y + cfg.height / 2) : (cfg.y - cfg.height / 2);
+                    addAnchor(`flow_${cfg.id}`, cornerX, 0.6, worldYToZ3D(cornerYWorld), '', 'flow');
+                }
             });
 
             // Per-tank pump-name label anchor(s) — text only, positioned
@@ -5998,14 +6603,23 @@
                     const weightMT = td ? (parseFloat(td.weight) || 0) : 0;
                     const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
                     const stateWord = state === 'discharge' ? 'DISCHARGE' : (state === 'mixed' ? 'FILL/DISCHARGE' : 'FILL');
-                    // Note: the directional cue itself now lives IN the
+                    // PORT/STARBOARD tanks: this tag now floats OUTSIDE
+                    // the hull (see buildLabelAnchors3D), so it's no
+                    // longer sitting right next to its own tank — prefix
+                    // the short tank name so it's still identifiable.
+                    // Centre tanks keep the original tank-corner
+                    // placement, where the tank is already obvious from
+                    // context, so no name prefix is added there.
+                    const side = cfg ? getTankSide(cfg) : null;
+                    const namePrefix = (side === 'port' || side === 'stbd') && cfg ? `${shortenTankName(cfg.name)} · ` : '';
+                    // Note: the directional cue itself also lives IN the
                     // 3D scene as a real arrow mesh (see flowArrow in
-                    // buildLabelAnchors3D... actually build3DScene, and
-                    // update3DFillAndAttitude for its orientation/colour).
-                    // This DOM tag is just the text readout floating next
-                    // to that mesh, same anchor point.
+                    // build3DScene, and update3DFillAndAttitude for its
+                    // orientation/colour). This DOM tag is just the text
+                    // readout floating next to (or, for PS/SB tanks,
+                    // outside) that mesh.
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); display:flex; align-items:center; gap:3px; white-space:nowrap;">` +
-                        `<span class="tank-flow-state ${arrowCls}" style="position:static; border-radius:3px; padding:1px 4px;">${stateWord}</span>` +
+                        `<span class="tank-flow-state ${arrowCls}" style="position:static; border-radius:3px; padding:1px 4px;">${namePrefix}${stateWord}</span>` +
                         `<span class="tank-flow-label" style="position:static;">${weightMT.toFixed(1)} mT</span></div>`;
                 } else if (a.cls === 'cog') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#f5f3ff; background:rgba(168,85,247,0.85); padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:30;">${a.text}</div>`;
@@ -7066,5 +7680,36 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // ------------------------------------------------------------
+        // TAB KEY -> WATER FILL INPUTS ONLY
+        // The tank water-fill boxes (class "weight-input", one per tank,
+        // id "txt_Row<id>") are rebuilt on every render, so we can't put
+        // a fixed tabindex on them ahead of time. Instead, intercept Tab
+        // globally: if focus is currently inside one of these inputs,
+        // move focus straight to the next/previous one (in DOM/visual
+        // order) and swallow the default Tab behaviour so it never jumps
+        // out to buttons, checkboxes, or any other control on the page.
+        // Tab pressed anywhere else on the page behaves normally.
+        // ------------------------------------------------------------
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Tab') return;
+            const active = document.activeElement;
+            if (!active || !active.classList || !active.classList.contains('weight-input')) return;
+
+            const fillInputs = Array.from(document.querySelectorAll('.weight-input'));
+            const idx = fillInputs.indexOf(active);
+            if (idx === -1) return;
+
+            e.preventDefault();
+            const nextIdx = e.shiftKey
+                ? (idx - 1 + fillInputs.length) % fillInputs.length
+                : (idx + 1) % fillInputs.length;
+            const nextInput = fillInputs[nextIdx];
+            nextInput.focus();
+            nextInput.select();
+        });
+    </script>
 </body>
 </html>
