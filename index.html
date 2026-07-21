@@ -416,19 +416,19 @@
             border-right: 2px solid #38bdf8;
             border-bottom: 2px solid #38bdf8;
             transform: translateX(-50%) rotate(45deg);
-            animation: chevronDown 1.15s linear infinite;
+            animation: chevronDown 0.5s linear infinite;
         }
         .flow-discharge .tank-flow-chevron {
             border-right: 2px solid #f87171;
             border-bottom: 2px solid #f87171;
             transform: translateX(-50%) rotate(225deg);
-            animation: chevronUp 1.15s linear infinite;
+            animation: chevronUp 0.5s linear infinite;
         }
         .flow-mixed .tank-flow-chevron {
             border-right: 2px solid #c084fc;
             border-bottom: 2px solid #c084fc;
             transform: translateX(-50%) rotate(45deg);
-            animation: chevronDown 1.15s linear infinite;
+            animation: chevronDown 0.5s linear infinite;
         }
         .tank-flow-chevron:nth-child(1) { animation-delay: 0s; }
         .tank-flow-chevron:nth-child(2) { animation-delay: 0.38s; }
@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-50(V1)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-50(V2)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2014,7 +2014,7 @@
         let flowManualState = {};      // { [row]: 'fill' | 'discharge' }
         let flowSettleTimers = {};     // { [row]: timeoutId }
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
-        const FLOW_SETTLE_MS = 4000;         // how long a weight must hold steady before the arrow turns off
+        const FLOW_SETTLE_MS = 1500;         // how long a weight must hold steady before the arrow turns off
 
         // Seeds/repins a tank's baseline to its CURRENT weight with no
         // transition shown — used on first load/sync so every tank
@@ -2035,7 +2035,28 @@
             const baseline = flowWeightBaseline[row];
             if (baseline === undefined) { seedFlowBaseline(row, w); return; }
             const delta = w - baseline;
-            if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) return; // no meaningful change
+            if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) {
+                // The new value is back within noise range of the settled
+                // baseline (e.g. operator typed a value then corrected it
+                // back). Previously this just returned, leaving any
+                // in-flight fill/discharge state — and its settle timer,
+                // which still had the OLD (now-stale) weight captured in
+                // its closure — running for the full FLOW_SETTLE_MS. That
+                // made the arrow appear "stuck" showing the earlier
+                // transition even though the box no longer reflects a
+                // real change. Clear it immediately instead so the arrow
+                // turns off right away rather than lingering.
+                if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
+                if (flowManualState[row]) {
+                    delete flowManualState[row];
+                    if (typeof renderTankFlowOverlay === 'function') {
+                        const c = document.getElementById('tankContainer');
+                        if (c) renderTankFlowOverlay(c);
+                    }
+                    if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+                }
+                return;
+            }
             flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
             if (flowSettleTimers[row]) clearTimeout(flowSettleTimers[row]);
             flowSettleTimers[row] = setTimeout(() => {
