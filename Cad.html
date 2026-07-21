@@ -6,7 +6,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>AutoCAD-Style Drafting — 2D CAD Editor (50-V1)</title>
+<title>AutoCAD-Style Drafting — 2D CAD Editor</title>
 <style>
   :root{
     --bg: #000000;
@@ -331,7 +331,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style (50-V1)</div>
+    <div class="brand">Drafting Table — AutoCAD-Style(50-V2)</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -340,7 +340,12 @@
     <button class="tool" data-tool="arc" title="Arc — or type A, Enter — 3 clicks: center, radius/start, end">◠ Arc</button>
     <button class="tool" data-tool="polyline" title="Polyline — or type PL, Enter — click points, Enter/dblclick to finish">⟍ Poly</button>
     <button class="tool" data-tool="text" title="Text — or type T, Enter">A Text</button>
-    <button class="tool" data-tool="dimension" title="Linear Dimension — or type DIM/DIMLINEAR, Enter — click first point, second point, then click to place the dimension line">📏 Dim</button>
+    <button class="tool" data-tool="dimension" title="Aligned Dimension — or type DIM/DIMALIGNED, Enter — click first point, second point, then click to place the dimension line (true distance, any angle)">📏 Dim Align</button>
+    <button class="tool" data-tool="dimlinear" title="Linear Dimension — or type DLI/DIMLINEAR, Enter — click first point, second point, then click to place the dimension line (forced horizontal or vertical)">📏 Dim Linear</button>
+    <button class="tool" data-tool="dimdiameter" title="Diameter Dimension — or type DDI/DIMDIAMETER, Enter — click a circle or arc, then click to place the label">⌀ Dim Diameter</button>
+    <button class="tool" data-tool="dimradius" title="Radius Dimension — or type DRA/DIMRADIUS, Enter — click a circle or arc, then click to place the label">R Dim Radius</button>
+    <button class="tool" data-tool="dimbaseline" title="Baseline Dimension — or type DBA/DIMBASELINE, Enter — stacks a new dimension from the same origin as the last Linear/Aligned dimension. Create a Linear or Aligned dimension first.">⊢ Dim Baseline</button>
+    <button class="tool" data-tool="dimcontinue" title="Continue Dimension — or type DCO/DIMCONTINUE, Enter — chains a new dimension from the endpoint of the last Linear/Aligned dimension. Create a Linear or Aligned dimension first.">⊣ Dim Continue</button>
 
     <div class="divider"></div>
     <label class="mini">Color</label>
@@ -371,9 +376,9 @@
     <button class="action" id="exportDxf" title="Export as .dxf">⬇ Export DXF</button>
     <button class="action" id="importDxfBtn" title="Import a .dxf file">⬆ Import DXF</button>
     <input type="file" id="fileImport" accept=".dxf">
-    <button class="action" id="exportXlsx" title="Export the entity list as a .csv spreadsheet — opens directly in Excel">⬇ Export Excel</button>
-    <button class="action" id="importXlsxBtn" title="Import entities from a .csv spreadsheet (exported from here, or from Excel)">⬆ Import Excel</button>
-    <input type="file" id="fileImportXlsx" accept=".csv">
+    <button class="action" id="exportXlsx" title="Export the entity list as a .json file — full fidelity, opens/edits fine in Excel or any text/JSON tool">⬇ Export Excel</button>
+    <button class="action" id="importXlsxBtn" title="Import entities from a .json file (exported from here)">⬆ Import Excel</button>
+    <input type="file" id="fileImportXlsx" accept=".json">
     <button class="action" id="sidebarToggle" title="Show/hide the Layers, Entities, Properties &amp; Modify Options panel">☰ Panel</button>
   </div>
 
@@ -664,35 +669,51 @@
   }
 
   // ---------- Object snap (Osnap) ----------
-  // Gathers candidate snap points (endpoints, midpoints, centers, quadrants) from
-  // every visible entity, then resolveWorldPoint() picks the closest one within a
-  // screen-pixel tolerance — taking priority over grid snap, same as real AutoCAD.
+  // Per-entity snap/grip points (endpoints, midpoints, centers, quadrants). Shared by
+  // Osnap candidate-gathering and by the selected-entity grip markers, so both always
+  // agree on where the "interesting" points of a shape are.
+  function entitySnapPoints(e){
+    const pts = [];
+    if (e.type === 'line'){
+      pts.push({x:e.x1,y:e.y1,kind:'endpoint'}, {x:e.x2,y:e.y2,kind:'endpoint'});
+      pts.push({x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2, kind:'midpoint'});
+    } else if (e.type === 'rect'){
+      const corners = [[e.x1,e.y1],[e.x2,e.y1],[e.x2,e.y2],[e.x1,e.y2]];
+      corners.forEach(([x,y]) => pts.push({x,y,kind:'endpoint'}));
+      for (let i=0;i<4;i++){ const a=corners[i], b=corners[(i+1)%4]; pts.push({x:(a[0]+b[0])/2, y:(a[1]+b[1])/2, kind:'midpoint'}); }
+    } else if (e.type === 'circle'){
+      pts.push({x:e.cx,y:e.cy,kind:'center'});
+      [0,90,180,270].forEach(a => { const r=a*Math.PI/180; pts.push({x:e.cx+e.r*Math.cos(r), y:e.cy+e.r*Math.sin(r), kind:'quadrant'}); });
+    } else if (e.type === 'arc'){
+      pts.push({x:e.cx,y:e.cy,kind:'center'});
+      const sr=e.startAngle*Math.PI/180, er=e.endAngle*Math.PI/180;
+      pts.push({x:e.cx+e.r*Math.cos(sr), y:e.cy+e.r*Math.sin(sr), kind:'endpoint'});
+      pts.push({x:e.cx+e.r*Math.cos(er), y:e.cy+e.r*Math.sin(er), kind:'endpoint'});
+      const midAng = (e.endAngle >= e.startAngle ? (e.startAngle+e.endAngle)/2 : (e.startAngle+e.endAngle+360)/2) % 360;
+      const mr = midAng*Math.PI/180;
+      pts.push({x:e.cx+e.r*Math.cos(mr), y:e.cy+e.r*Math.sin(mr), kind:'midpoint'});
+    } else if (e.type === 'polyline'){
+      e.points.forEach(p => pts.push({x:p.x,y:p.y,kind:'endpoint'}));
+      for (let i=0;i<e.points.length-1;i++){ const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
+      if (e.closed && e.points.length>1){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
+    } else if (e.type === 'text'){
+      pts.push({x:e.x,y:e.y,kind:'endpoint'});
+    } else if (e.type === 'dimension'){
+      if (e.dimType === 'diameter' || e.dimType === 'radius'){
+        pts.push({x:e.cx,y:e.cy,kind:'center'});
+        const angRad = (e.ang||0)*Math.PI/180, ld = e.labelDist||e.r*1.3;
+        pts.push({x:e.cx+ld*Math.cos(angRad), y:e.cy+ld*Math.sin(angRad), kind:'endpoint'});
+      } else {
+        pts.push({x:e.x1,y:e.y1,kind:'endpoint'}, {x:e.x2,y:e.y2,kind:'endpoint'}, {x:e.ox,y:e.oy,kind:'midpoint'});
+      }
+    }
+    return pts;
+  }
   function getOsnapCandidates(){
     const pts = [];
     for (const e of entities){
       if (!layerVisible(e.layer)) continue;
-      if (e.type === 'line'){
-        pts.push({x:e.x1,y:e.y1,kind:'endpoint'}, {x:e.x2,y:e.y2,kind:'endpoint'});
-        pts.push({x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2, kind:'midpoint'});
-      } else if (e.type === 'rect'){
-        const corners = [[e.x1,e.y1],[e.x2,e.y1],[e.x2,e.y2],[e.x1,e.y2]];
-        corners.forEach(([x,y]) => pts.push({x,y,kind:'endpoint'}));
-        for (let i=0;i<4;i++){ const a=corners[i], b=corners[(i+1)%4]; pts.push({x:(a[0]+b[0])/2, y:(a[1]+b[1])/2, kind:'midpoint'}); }
-      } else if (e.type === 'circle'){
-        pts.push({x:e.cx,y:e.cy,kind:'center'});
-        [0,90,180,270].forEach(a => { const r=a*Math.PI/180; pts.push({x:e.cx+e.r*Math.cos(r), y:e.cy+e.r*Math.sin(r), kind:'quadrant'}); });
-      } else if (e.type === 'arc'){
-        pts.push({x:e.cx,y:e.cy,kind:'center'});
-        const sr=e.startAngle*Math.PI/180, er=e.endAngle*Math.PI/180;
-        pts.push({x:e.cx+e.r*Math.cos(sr), y:e.cy+e.r*Math.sin(sr), kind:'endpoint'});
-        pts.push({x:e.cx+e.r*Math.cos(er), y:e.cy+e.r*Math.sin(er), kind:'endpoint'});
-      } else if (e.type === 'polyline'){
-        e.points.forEach(p => pts.push({x:p.x,y:p.y,kind:'endpoint'}));
-        for (let i=0;i<e.points.length-1;i++){ const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
-        if (e.closed && e.points.length>1){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
-      } else if (e.type === 'text'){
-        pts.push({x:e.x,y:e.y,kind:'endpoint'});
-      }
+      pts.push(...entitySnapPoints(e));
     }
     return pts;
   }
@@ -738,6 +759,7 @@
     const s = worldToScreen(p.x, p.y);
     const x = s.x/devicePixelRatio, y = s.y/devicePixelRatio;
     ctx.save();
+    ctx.scale(devicePixelRatio, devicePixelRatio);
     ctx.strokeStyle = '#ffd54a'; ctx.lineWidth = 1.6; ctx.shadowBlur = 0;
     const k = p.kind;
     if (k === 'endpoint'){
@@ -762,6 +784,8 @@
     while (step * view.scale < 40) step *= 5;
     while (step * view.scale > 200) step /= 5;
 
+    ctx.save();
+    ctx.scale(devicePixelRatio, devicePixelRatio);
     ctx.lineWidth = 1;
     const topLeft = screenToWorld(0, 0);
     const bottomRight = screenToWorld(cssW, cssH);
@@ -788,6 +812,7 @@
     ctx.moveTo(originS.x/devicePixelRatio, 0); ctx.lineTo(originS.x/devicePixelRatio, cssH);
     ctx.moveTo(0, originS.y/devicePixelRatio); ctx.lineTo(cssW, originS.y/devicePixelRatio);
     ctx.stroke();
+    ctx.restore();
   }
 
   function setStroke(e){
@@ -802,7 +827,7 @@
     ctx.translate(-0 ,0);
     setStroke(e);
     if (ghost) ctx.setLineDash([6,4]);
-    if (selected){ ctx.shadowColor = '#4fd1c5'; ctx.shadowBlur = 6; }
+    if (selected){ ctx.shadowColor = '#4fd1c5'; ctx.shadowBlur = 9; }
 
     const toS = (x,y) => { const p = worldToScreen(x,y); return {x:p.x/devicePixelRatio, y:p.y/devicePixelRatio}; };
 
@@ -870,23 +895,7 @@
         break;
       }
       case 'dimension': {
-        const p1 = {x:e.x1,y:e.y1}, p2 = {x:e.x2,y:e.y2};
-        const dx = p2.x-p1.x, dy = p2.y-p1.y, len = Math.hypot(dx,dy) || 1;
-        const ux = dx/len, uy = dy/len;      // direction along the measured line
-        const nx = -uy, ny = ux;             // perpendicular (points toward the offset)
-        const off = ((e.ox-p1.x)*nx + (e.oy-p1.y)*ny); // signed distance to the dim line
-        const d1 = { x:p1.x+nx*off, y:p1.y+ny*off };
-        const d2 = { x:p2.x+nx*off, y:p2.y+ny*off };
-        const s1=toS(p1.x,p1.y), s2=toS(p2.x,p2.y), sd1=toS(d1.x,d1.y), sd2=toS(d2.x,d2.y);
-        // extension lines (with a small overshoot past the dimension line, AutoCAD-style)
-        const over = 3;
-        const eux = sd1.x-s1.x, euy = sd1.y-s1.y, elen = Math.hypot(eux,euy) || 1;
-        ctx.beginPath(); ctx.moveTo(s1.x,s1.y); ctx.lineTo(sd1.x+eux/elen*over, sd1.y+euy/elen*over); ctx.stroke();
-        const eux2 = sd2.x-s2.x, euy2 = sd2.y-s2.y, elen2 = Math.hypot(eux2,euy2) || 1;
-        ctx.beginPath(); ctx.moveTo(s2.x,s2.y); ctx.lineTo(sd2.x+eux2/elen2*over, sd2.y+euy2/elen2*over); ctx.stroke();
-        // dimension line
-        ctx.beginPath(); ctx.moveTo(sd1.x,sd1.y); ctx.lineTo(sd2.x,sd2.y); ctx.stroke();
-        // arrowheads
+        const dimType = e.dimType || 'aligned';
         const drawArrow = (tip, from) => {
           const adx = tip.x-from.x, ady = tip.y-from.y, alen = Math.hypot(adx,ady) || 1;
           const aux = adx/alen, auy = ady/alen, anx = -auy, any = aux;
@@ -897,19 +906,67 @@
           ctx.lineTo(tip.x-aux*size-anx*size*0.35, tip.y-auy*size-any*size*0.35);
           ctx.closePath(); ctx.fill();
         };
+        const drawDimText = (sPos, ang, text) => {
+          let a = ang;
+          if (a > Math.PI/2 || a < -Math.PI/2) a += Math.PI; // keep text upright
+          ctx.save();
+          ctx.translate(sPos.x, sPos.y); ctx.rotate(a);
+          ctx.font = "12px 'SFMono-Regular', monospace";
+          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(text, 0, -3);
+          ctx.restore();
+        };
+        if (dimType === 'diameter' || dimType === 'radius'){
+          const angRad = (e.ang||0) * Math.PI/180;
+          const labelDist = e.labelDist || e.r*1.3;
+          const edgeNear = { x: e.cx + e.r*Math.cos(angRad), y: e.cy + e.r*Math.sin(angRad) };
+          const labelPt = { x: e.cx + labelDist*Math.cos(angRad), y: e.cy + labelDist*Math.sin(angRad) };
+          const sC = toS(e.cx, e.cy), sEdgeNear = toS(edgeNear.x, edgeNear.y), sLabel = toS(labelPt.x, labelPt.y);
+          if (dimType === 'radius'){
+            ctx.beginPath(); ctx.moveTo(sC.x,sC.y); ctx.lineTo(sLabel.x,sLabel.y); ctx.stroke();
+            drawArrow(sEdgeNear, sC);
+            drawDimText(sLabel, angRad, 'R' + e.r.toFixed(2));
+          } else {
+            const edgeFar = { x: e.cx - e.r*Math.cos(angRad), y: e.cy - e.r*Math.sin(angRad) };
+            const sEdgeFar = toS(edgeFar.x, edgeFar.y);
+            ctx.beginPath(); ctx.moveTo(sLabel.x,sLabel.y); ctx.lineTo(sEdgeFar.x,sEdgeFar.y); ctx.stroke();
+            drawArrow(sEdgeNear, sC);
+            drawArrow(sEdgeFar, sC);
+            drawDimText(sLabel, angRad, '\u2300' + (e.r*2).toFixed(2));
+          }
+          break;
+        }
+        const p1 = {x:e.x1,y:e.y1}, p2 = {x:e.x2,y:e.y2};
+        let d1, d2, measured;
+        if (dimType === 'linear' && e.axis === 'x'){
+          d1 = { x:p1.x, y:e.oy }; d2 = { x:p2.x, y:e.oy }; measured = Math.abs(p2.x-p1.x);
+        } else if (dimType === 'linear' && e.axis === 'y'){
+          d1 = { x:e.ox, y:p1.y }; d2 = { x:e.ox, y:p2.y }; measured = Math.abs(p2.y-p1.y);
+        } else {
+          const dx = p2.x-p1.x, dy = p2.y-p1.y, len = Math.hypot(dx,dy) || 1;
+          const ux = dx/len, uy = dy/len;      // direction along the measured line
+          const nx = -uy, ny = ux;             // perpendicular (points toward the offset)
+          const off = ((e.ox-p1.x)*nx + (e.oy-p1.y)*ny); // signed distance to the dim line
+          d1 = { x:p1.x+nx*off, y:p1.y+ny*off };
+          d2 = { x:p2.x+nx*off, y:p2.y+ny*off };
+          measured = Math.hypot(dx,dy);
+        }
+        const s1=toS(p1.x,p1.y), s2=toS(p2.x,p2.y), sd1=toS(d1.x,d1.y), sd2=toS(d2.x,d2.y);
+        // extension lines (with a small overshoot past the dimension line, AutoCAD-style)
+        const over = 3;
+        const eux = sd1.x-s1.x, euy = sd1.y-s1.y, elen = Math.hypot(eux,euy) || 1;
+        ctx.beginPath(); ctx.moveTo(s1.x,s1.y); ctx.lineTo(sd1.x+eux/elen*over, sd1.y+euy/elen*over); ctx.stroke();
+        const eux2 = sd2.x-s2.x, euy2 = sd2.y-s2.y, elen2 = Math.hypot(eux2,euy2) || 1;
+        ctx.beginPath(); ctx.moveTo(s2.x,s2.y); ctx.lineTo(sd2.x+eux2/elen2*over, sd2.y+euy2/elen2*over); ctx.stroke();
+        // dimension line
+        ctx.beginPath(); ctx.moveTo(sd1.x,sd1.y); ctx.lineTo(sd2.x,sd2.y); ctx.stroke();
+        // arrowheads
         drawArrow(sd1, sd2);
         drawArrow(sd2, sd1);
         // measured length text, centered on the dimension line
-        const dist = Math.hypot(p2.x-p1.x, p2.y-p1.y);
         const mid = { x:(sd1.x+sd2.x)/2, y:(sd1.y+sd2.y)/2 };
-        let ang = Math.atan2(sd2.y-sd1.y, sd2.x-sd1.x);
-        if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI; // keep text upright
-        ctx.save();
-        ctx.translate(mid.x, mid.y); ctx.rotate(ang);
-        ctx.font = "12px 'SFMono-Regular', monospace";
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText(dist.toFixed(2), 0, -3);
-        ctx.restore();
+        const ang = Math.atan2(sd2.y-sd1.y, sd2.x-sd1.x);
+        drawDimText(mid, ang, measured.toFixed(2));
         break;
       }
     }
@@ -922,23 +979,20 @@
 
   function drawHandles(e, toS){
     ctx.fillStyle = '#e0a458';
+    ctx.strokeStyle = '#e0a458';
+    ctx.lineWidth = 1.4;
     const pts = getHandlePoints(e);
     for (const p of pts){
       const s = toS(p.x, p.y);
-      ctx.fillRect(s.x-3, s.y-3, 6, 6);
+      if (p.kind === 'midpoint' || p.kind === 'quadrant'){
+        ctx.beginPath(); ctx.arc(s.x, s.y, 3.2, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.fillRect(s.x-3, s.y-3, 6, 6);
+      }
     }
   }
   function getHandlePoints(e){
-    switch(e.type){
-      case 'line': return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2}];
-      case 'rect': return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2}];
-      case 'circle': return [{x:e.cx,y:e.cy}];
-      case 'arc': return [{x:e.cx,y:e.cy}];
-      case 'polyline': return e.points;
-      case 'text': return [{x:e.x,y:e.y}];
-      case 'dimension': return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2},{x:e.ox,y:e.oy}];
-      default: return [];
-    }
+    return entitySnapPoints(e);
   }
 
   // ---------- Hit testing ----------
@@ -984,11 +1038,22 @@
       } else if (e.type === 'text'){
         if (Math.hypot(world.x-e.x, world.y-e.y) < (e.height||3)) return e;
       } else if (e.type === 'dimension'){
-        const dx = e.x2-e.x1, dy = e.y2-e.y1, len = Math.hypot(dx,dy) || 1;
-        const nx = -dy/len, ny = dx/len;
-        const off = ((e.ox-e.x1)*nx + (e.oy-e.y1)*ny);
-        const d1 = { x:e.x1+nx*off, y:e.y1+ny*off }, d2 = { x:e.x2+nx*off, y:e.y2+ny*off };
-        if (distToSeg(world, d1, d2) < tol || distToSeg(world, {x:e.x1,y:e.y1}, d1) < tol || distToSeg(world, {x:e.x2,y:e.y2}, d2) < tol) return e;
+        if (e.dimType === 'diameter' || e.dimType === 'radius'){
+          const angRad = (e.ang||0)*Math.PI/180, ld = e.labelDist||e.r*1.3;
+          const labelPt = { x:e.cx+ld*Math.cos(angRad), y:e.cy+ld*Math.sin(angRad) };
+          if (distToSeg(world, {x:e.cx,y:e.cy}, labelPt) < tol) return e;
+        } else {
+          let d1, d2;
+          if (e.dimType === 'linear' && e.axis === 'x'){ d1={x:e.x1,y:e.oy}; d2={x:e.x2,y:e.oy}; }
+          else if (e.dimType === 'linear' && e.axis === 'y'){ d1={x:e.ox,y:e.y1}; d2={x:e.ox,y:e.y2}; }
+          else {
+            const dx = e.x2-e.x1, dy = e.y2-e.y1, len = Math.hypot(dx,dy) || 1;
+            const nx = -dy/len, ny = dx/len;
+            const off = ((e.ox-e.x1)*nx + (e.oy-e.y1)*ny);
+            d1 = { x:e.x1+nx*off, y:e.y1+ny*off }; d2 = { x:e.x2+nx*off, y:e.y2+ny*off };
+          }
+          if (distToSeg(world, d1, d2) < tol || distToSeg(world, {x:e.x1,y:e.y1}, d1) < tol || distToSeg(world, {x:e.x2,y:e.y2}, d2) < tol) return e;
+        }
       } else if (e.type === 'hatch'){
         if (hitTestBoundary(world, e.boundary, tol)) return e;
       }
@@ -1107,7 +1172,12 @@
     arc: 'Arc: click center, click for radius + start angle, click again for end angle.',
     polyline: 'Polyline: click points. Press Enter or double-click to finish, Esc to cancel.',
     text: 'Text: click a location, then type your text and press Enter.',
-    dimension: 'Dimension: click the first point, then the second point, then click to place the dimension line — the measured length is added automatically.',
+    dimension: 'Aligned Dimension: click the first point, then the second point, then click to place the dimension line — measures the true (any-angle) distance.',
+    dimlinear: 'Linear Dimension: click the first point, then the second point, then click to place the dimension line — measures the horizontal or vertical distance (whichever side you place it on).',
+    dimdiameter: 'Diameter Dimension: click a circle or arc, then click to place the ⌀ label.',
+    dimradius: 'Radius Dimension: click a circle or arc, then click to place the R label.',
+    dimbaseline: 'Baseline Dimension: click the next point — stacks a new dimension from the same origin as the last Linear/Aligned dimension.',
+    dimcontinue: 'Continue Dimension: click the next point — chains a new dimension from the endpoint of the last Linear/Aligned dimension.',
     move: 'Move: select entities first. Click a base point, then the destination point.',
     copy: 'Copy: select entities first. Click a base point, then one or more destination points (Enter/Esc to finish).',
     rotate: 'Rotate: select entities first. Click the base point, then drag/click to set the angle.',
@@ -1129,8 +1199,26 @@
     tool = t;
     drawing = null; polyPoints = [];
     lineStart = null; rectStart = null; circleCenter = null; arcStage = 0; arcTemp = {};
-    dimStage = 0; dimTemp = {};
+    dimStage = 0; dimTemp = {}; dimTarget = null;
     modifyStage = 0; modifyTemp = {}; currentOsnap = null;
+    if (t === 'dimbaseline' || t === 'dimcontinue'){
+      const src = lastDimEntity;
+      if (!src){
+        dimChain = null;
+        flashHint('Create a Linear or Aligned dimension first, then use Baseline/Continue.');
+      } else {
+        const axis = src.dimType === 'linear' ? src.axis : (Math.abs(src.x2-src.x1) >= Math.abs(src.y2-src.y1) ? 'x' : 'y');
+        const off = axis === 'x' ? src.oy : src.ox;
+        const anchor = axis === 'x' ? src.y1 : src.x1;
+        if (t === 'dimbaseline'){
+          dimChain = { mode:'baseline', p1:{x:src.x1,y:src.y1}, axis, off, step:10, dir:(off>=anchor?1:-1), count:1 };
+        } else {
+          dimChain = { mode:'continue', p1:{x:src.x2,y:src.y2}, axis, off, step:0, dir:1, count:0 };
+        }
+      }
+    } else {
+      dimChain = null;
+    }
     if (['trim','extend','matchprop'].includes(t)){
       modifyBoundaryId = activeSelectionIds().length === 1 ? activeSelectionIds()[0] : null;
       if (modifyBoundaryId == null) flashHint('Select exactly one ' + (t==='matchprop'?'source':'cutting/boundary') + ' entity first.');
@@ -1210,6 +1298,9 @@
   let circleCenter = null;
   let dimStage = 0; // 0=need first point, 1=need second point, 2=need dimension-line placement
   let dimTemp = {};
+  let dimTarget = null;   // circle/arc entity picked for Diameter/Radius dimension
+  let lastDimEntity = null; // most recent Aligned/Linear dimension entity — base for Baseline/Continue
+  let dimChain = null;    // { p1, axis, dimType, off } — active Baseline/Continue chain state
 
   function currentStyle(){
     return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5, layer: currentLayer };
@@ -1283,7 +1374,7 @@
       cmdPrompt('Specify next point or [Undo/Enter to finish]:');
       return;
     }
-    if (tool === 'dimension'){
+    if (tool === 'dimension' || tool === 'dimlinear'){
       if (dimStage === 0){
         dimTemp.p1 = world; dimStage = 1;
         cmdPrompt('Specify second extension line point:');
@@ -1292,10 +1383,60 @@
         cmdPrompt('Specify dimension line location:');
       } else {
         snapshot();
-        entities.push({ id: uid(), type:'dimension', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() });
+        let ent;
+        if (tool === 'dimlinear'){
+          // Orientation follows where you place the dimension line: drag mostly
+          // up/down from the midpoint = horizontal dim (shows the X distance);
+          // drag mostly left/right = vertical dim (shows the Y distance).
+          const midX = (dimTemp.p1.x+dimTemp.p2.x)/2, midY = (dimTemp.p1.y+dimTemp.p2.y)/2;
+          const axis = Math.abs(world.y-midY) >= Math.abs(world.x-midX) ? 'x' : 'y';
+          ent = { id: uid(), type:'dimension', dimType:'linear', axis, x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() };
+        } else {
+          ent = { id: uid(), type:'dimension', dimType:'aligned', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() };
+        }
+        entities.push(ent);
+        lastDimEntity = ent;
         dimStage = 0; dimTemp = {}; drawing = null; render(); renderList();
         cmdDone();
       }
+      return;
+    }
+    if (tool === 'dimdiameter' || tool === 'dimradius'){
+      if (dimStage === 0){
+        const hitE = hitTest(world);
+        if (!hitE || (hitE.type !== 'circle' && hitE.type !== 'arc')){
+          flashHint('Click a circle or arc to dimension.'); return;
+        }
+        dimTarget = hitE; dimStage = 1;
+        cmdPrompt('Specify dimension line location:');
+      } else {
+        const ang = Math.atan2(world.y-dimTarget.cy, world.x-dimTarget.cx) * 180/Math.PI;
+        const labelDist = Math.max(dimTarget.r*1.15, Math.hypot(world.x-dimTarget.cx, world.y-dimTarget.cy));
+        snapshot();
+        const ent = { id: uid(), type:'dimension', dimType: tool==='dimdiameter' ? 'diameter' : 'radius', cx:dimTarget.cx, cy:dimTarget.cy, r:dimTarget.r, ang, labelDist, ...currentStyle() };
+        entities.push(ent);
+        dimTarget = null; dimStage = 0; drawing = null; render(); renderList();
+        cmdDone();
+      }
+      return;
+    }
+    if (tool === 'dimbaseline' || tool === 'dimcontinue'){
+      if (!dimChain){ flashHint('Create a Linear or Aligned dimension first, then use Baseline/Continue.'); setTool('select'); return; }
+      const p2 = world;
+      const newOff = dimChain.mode === 'baseline' ? dimChain.off + dimChain.dir*dimChain.step*dimChain.count : dimChain.off;
+      let ent;
+      if (dimChain.axis === 'x'){
+        ent = { id: uid(), type:'dimension', dimType:'linear', axis:'x', x1:dimChain.p1.x, y1:dimChain.p1.y, x2:p2.x, y2:p2.y, ox:p2.x, oy:newOff, ...currentStyle() };
+      } else {
+        ent = { id: uid(), type:'dimension', dimType:'linear', axis:'y', x1:dimChain.p1.x, y1:dimChain.p1.y, x2:p2.x, y2:p2.y, ox:newOff, oy:p2.y, ...currentStyle() };
+      }
+      snapshot();
+      entities.push(ent);
+      lastDimEntity = ent;
+      if (dimChain.mode === 'baseline') dimChain.count++;
+      else dimChain.p1 = { x:p2.x, y:p2.y }; // continue: next one starts where this ended
+      drawing = null; render(); renderList();
+      cmdPrompt('Specify next ' + (dimChain.mode==='baseline'?'baseline':'continue') + ' point (Esc to finish):');
       return;
     }
     if (tool === 'text'){
@@ -1508,7 +1649,10 @@
     else if (e.type === 'circle' || e.type === 'arc'){ e.cx=o.cx+dx; e.cy=o.cy+dy; }
     else if (e.type === 'polyline'){ e.points = o.points.map(p => ({x:p.x+dx, y:p.y+dy})); }
     else if (e.type === 'text'){ e.x=o.x+dx; e.y=o.y+dy; }
-    else if (e.type === 'dimension'){ e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; e.ox=o.ox+dx; e.oy=o.oy+dy; }
+    else if (e.type === 'dimension'){
+      if (o.dimType === 'diameter' || o.dimType === 'radius'){ e.cx=o.cx+dx; e.cy=o.cy+dy; }
+      else { e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; e.ox=o.ox+dx; e.oy=o.oy+dy; }
+    }
     else if (e.type === 'hatch'){ e.boundary = translateBoundary(o.boundary, dx, dy); e.lines = (o.lines||[]).map(s=>({x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy})); }
   }
   function translateBoundary(b, dx, dy){
@@ -1539,8 +1683,12 @@
     } else if (e.type === 'text'){
       const p = rotatePt({x:o.x,y:o.y}, base, rad); e.x=p.x; e.y=p.y;
     } else if (e.type === 'dimension'){
-      const p1 = rotatePt({x:o.x1,y:o.y1}, base, rad), p2 = rotatePt({x:o.x2,y:o.y2}, base, rad), po = rotatePt({x:o.ox,y:o.oy}, base, rad);
-      e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
+      if (o.dimType === 'diameter' || o.dimType === 'radius'){
+        const c = rotatePt({x:o.cx,y:o.cy}, base, rad); e.cx=c.x; e.cy=c.y; e.ang = (o.ang||0) + angDeg;
+      } else {
+        const p1 = rotatePt({x:o.x1,y:o.y1}, base, rad), p2 = rotatePt({x:o.x2,y:o.y2}, base, rad), po = rotatePt({x:o.ox,y:o.oy}, base, rad);
+        e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
+      }
     } else if (e.type === 'hatch'){
       const b = o.boundary;
       e.boundary = b.kind==='circle' ? { kind:'circle', cx: rotatePt({x:b.cx,y:b.cy},base,rad).x, cy: rotatePt({x:b.cx,y:b.cy},base,rad).y, r:b.r }
@@ -1560,8 +1708,12 @@
     } else if (e.type === 'text'){
       const p = scalePt({x:o.x,y:o.y}, base, f); e.x=p.x; e.y=p.y; e.height = Math.max(0.05, (o.height||3)*f);
     } else if (e.type === 'dimension'){
-      const p1=scalePt({x:o.x1,y:o.y1},base,f), p2=scalePt({x:o.x2,y:o.y2},base,f), po=scalePt({x:o.ox,y:o.oy},base,f);
-      e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
+      if (o.dimType === 'diameter' || o.dimType === 'radius'){
+        const c = scalePt({x:o.cx,y:o.cy}, base, f); e.cx=c.x; e.cy=c.y; e.r=Math.max(0.001,o.r*f); e.labelDist = Math.max(e.r*1.05, (o.labelDist||o.r*1.3)*f);
+      } else {
+        const p1=scalePt({x:o.x1,y:o.y1},base,f), p2=scalePt({x:o.x2,y:o.y2},base,f), po=scalePt({x:o.ox,y:o.oy},base,f);
+        e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
+      }
     } else if (e.type === 'hatch'){
       const b = o.boundary;
       e.boundary = b.kind==='circle' ? { kind:'circle', cx: scalePt({x:b.cx,y:b.cy},base,f).x, cy: scalePt({x:b.cx,y:b.cy},base,f).y, r: Math.max(0.001,b.r*f) }
@@ -1594,8 +1746,16 @@
     } else if (c.type === 'text'){
       const p = mirrorPt({x:c.x,y:c.y},a,b); c.x=p.x; c.y=p.y;
     } else if (c.type === 'dimension'){
-      const p1=mirrorPt({x:c.x1,y:c.y1},a,b), p2=mirrorPt({x:c.x2,y:c.y2},a,b), po=mirrorPt({x:c.ox,y:c.oy},a,b);
-      c.x1=p1.x; c.y1=p1.y; c.x2=p2.x; c.y2=p2.y; c.ox=po.x; c.oy=po.y;
+      if (c.dimType === 'diameter' || c.dimType === 'radius'){
+        const p = mirrorPt({x:c.cx,y:c.cy},a,b); c.cx=p.x; c.cy=p.y;
+        // reflect the leader angle across the mirror line's direction
+        const mAng = Math.atan2(b.y-a.y, b.x-a.x);
+        const origAng = (c.ang||0)*Math.PI/180;
+        c.ang = (2*mAng - origAng) * 180/Math.PI;
+      } else {
+        const p1=mirrorPt({x:c.x1,y:c.y1},a,b), p2=mirrorPt({x:c.x2,y:c.y2},a,b), po=mirrorPt({x:c.ox,y:c.oy},a,b);
+        c.x1=p1.x; c.y1=p1.y; c.x2=p2.x; c.y2=p2.y; c.ox=po.x; c.oy=po.y;
+      }
     }
     return c;
   }
@@ -2100,8 +2260,23 @@
       drawing = { type:'arc', cx:arcTemp.cx, cy:arcTemp.cy, r:arcTemp.r, startAngle:arcTemp.startAngle, endAngle:ang, ...currentStyle() };
     }
     else if (tool==='polyline' && polyPoints.length) drawing = { type:'polyline', points:[...polyPoints, world], closed:false, ...currentStyle() };
-    else if (tool==='dimension' && dimStage===1) drawing = { type:'dimension', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:world.x, y2:world.y, ox:world.x, oy:world.y, ...currentStyle() };
-    else if (tool==='dimension' && dimStage===2) drawing = { type:'dimension', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() };
+    else if ((tool==='dimension'||tool==='dimlinear') && dimStage===1) drawing = { type:'dimension', dimType: tool==='dimension'?'aligned':'linear', axis: (Math.abs(world.y-(dimTemp.p1.y))>=Math.abs(world.x-(dimTemp.p1.x))?'x':'y'), x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:world.x, y2:world.y, ox:world.x, oy:world.y, ...currentStyle() };
+    else if (tool==='dimension' && dimStage===2) drawing = { type:'dimension', dimType:'aligned', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() };
+    else if (tool==='dimlinear' && dimStage===2){
+      const midX = (dimTemp.p1.x+dimTemp.p2.x)/2, midY = (dimTemp.p1.y+dimTemp.p2.y)/2;
+      const axis = Math.abs(world.y-midY) >= Math.abs(world.x-midX) ? 'x' : 'y';
+      drawing = { type:'dimension', dimType:'linear', axis, x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() };
+    }
+    else if ((tool==='dimdiameter'||tool==='dimradius') && dimStage===1){
+      const ang = Math.atan2(world.y-dimTarget.cy, world.x-dimTarget.cx) * 180/Math.PI;
+      const labelDist = Math.max(dimTarget.r*1.15, Math.hypot(world.x-dimTarget.cx, world.y-dimTarget.cy));
+      drawing = { type:'dimension', dimType: tool==='dimdiameter'?'diameter':'radius', cx:dimTarget.cx, cy:dimTarget.cy, r:dimTarget.r, ang, labelDist, ...currentStyle() };
+    }
+    else if ((tool==='dimbaseline'||tool==='dimcontinue') && dimChain){
+      const newOff = dimChain.mode==='baseline' ? dimChain.off + dimChain.dir*dimChain.step*dimChain.count : dimChain.off;
+      if (dimChain.axis === 'x') drawing = { type:'dimension', dimType:'linear', axis:'x', x1:dimChain.p1.x, y1:dimChain.p1.y, x2:world.x, y2:world.y, ox:world.x, oy:newOff, ...currentStyle() };
+      else drawing = { type:'dimension', dimType:'linear', axis:'y', x1:dimChain.p1.x, y1:dimChain.p1.y, x2:world.x, y2:world.y, ox:newOff, oy:world.y, ...currentStyle() };
+    }
     else drawing = null;
 
     modifyGhosts = [];
@@ -2145,8 +2320,12 @@
       const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
       const moved = Math.hypot(sx-selBoxStart.sx, sy-selBoxStart.sy) > 4;
       if (moved){
-        const w1 = screenToWorld(Math.min(selBoxStart.sx,sx), Math.min(selBoxStart.sy,sy));
-        const w2 = screenToWorld(Math.max(selBoxStart.sx,sx), Math.max(selBoxStart.sy,sy));
+        const wA = screenToWorld(Math.min(selBoxStart.sx,sx), Math.min(selBoxStart.sy,sy));
+        const wB = screenToWorld(Math.max(selBoxStart.sx,sx), Math.max(selBoxStart.sy,sy));
+        // screenToWorld flips Y (screen-down = world-down), so the world Y from the
+        // screen-min corner is actually the world-MAX and vice versa — normalize here.
+        const w1 = { x: Math.min(wA.x, wB.x), y: Math.min(wA.y, wB.y) };
+        const w2 = { x: Math.max(wA.x, wB.x), y: Math.max(wA.y, wB.y) };
         // Dragging left→right = WINDOW select: only entities fully enclosed by the box.
         // Dragging right→left = CROSSING select: anything the box merely touches.
         const isWindow = sx >= selBoxStart.sx;
@@ -2173,7 +2352,14 @@
     if (e.type==='circle'||e.type==='arc') return { minX:e.cx-e.r, maxX:e.cx+e.r, minY:e.cy-e.r, maxY:e.cy+e.r };
     if (e.type==='polyline') return { minX:Math.min(...e.points.map(p=>p.x)), maxX:Math.max(...e.points.map(p=>p.x)), minY:Math.min(...e.points.map(p=>p.y)), maxY:Math.max(...e.points.map(p=>p.y)) };
     if (e.type==='text') return { minX:e.x, maxX:e.x+e.content.length*e.height*0.6, minY:e.y, maxY:e.y+e.height };
-    if (e.type==='dimension') return { minX:Math.min(e.x1,e.x2,e.ox), maxX:Math.max(e.x1,e.x2,e.ox), minY:Math.min(e.y1,e.y2,e.oy), maxY:Math.max(e.y1,e.y2,e.oy) };
+    if (e.type==='dimension'){
+      if (e.dimType === 'diameter' || e.dimType === 'radius'){
+        const angRad=(e.ang||0)*Math.PI/180, ld=e.labelDist||e.r*1.3;
+        const lx = e.cx+ld*Math.cos(angRad), ly = e.cy+ld*Math.sin(angRad);
+        return { minX:Math.min(e.cx-e.r,lx), maxX:Math.max(e.cx+e.r,lx), minY:Math.min(e.cy-e.r,ly), maxY:Math.max(e.cy+e.r,ly) };
+      }
+      return { minX:Math.min(e.x1,e.x2,e.ox), maxX:Math.max(e.x1,e.x2,e.ox), minY:Math.min(e.y1,e.y2,e.oy), maxY:Math.max(e.y1,e.y2,e.oy) };
+    }
     if (e.type==='hatch'){ const b=e.boundary; return b.kind==='circle' ? {minX:b.cx-b.r,maxX:b.cx+b.r,minY:b.cy-b.r,maxY:b.cy+b.r} : {minX:Math.min(...b.points.map(p=>p.x)),maxX:Math.max(...b.points.map(p=>p.x)),minY:Math.min(...b.points.map(p=>p.y)),maxY:Math.max(...b.points.map(p=>p.y))}; }
     return null;
   }
@@ -2344,7 +2530,12 @@
     ARC:'arc', A:'arc',
     PLINE:'polyline', PL:'polyline', POLYLINE:'polyline',
     TEXT:'text', T:'text', DT:'text',
-    DIMENSION:'dimension', DIM:'dimension', DIMLINEAR:'dimension', DLI:'dimension',
+    DIMENSION:'dimension', DIM:'dimension', DIMALIGNED:'dimension', DAL:'dimension',
+    DIMLINEAR:'dimlinear', DLI:'dimlinear',
+    DIMDIAMETER:'dimdiameter', DDI:'dimdiameter',
+    DIMRADIUS:'dimradius', DRA:'dimradius',
+    DIMBASELINE:'dimbaseline', DBA:'dimbaseline',
+    DIMCONTINUE:'dimcontinue', DCO:'dimcontinue',
     SELECT:'select', V:'select',
     MOVE:'move', M:'move',
     COPY:'copy', CO:'copy', CP:'copy',
@@ -2381,8 +2572,10 @@
     if (tool==='circle' && circleCenter) return circleCenter;
     if (tool==='arc' && arcStage>=1) return { x: arcTemp.cx, y: arcTemp.cy };
     if (tool==='polyline' && polyPoints.length) return polyPoints[polyPoints.length-1];
-    if (tool==='dimension' && dimStage===1) return dimTemp.p1;
-    if (tool==='dimension' && dimStage===2) return dimTemp.p2;
+    if ((tool==='dimension'||tool==='dimlinear') && dimStage===1) return dimTemp.p1;
+    if ((tool==='dimension'||tool==='dimlinear') && dimStage===2) return dimTemp.p2;
+    if ((tool==='dimdiameter'||tool==='dimradius') && dimStage===1) return { x:dimTarget.cx, y:dimTarget.cy };
+    if ((tool==='dimbaseline'||tool==='dimcontinue') && dimChain) return dimChain.p1;
     return null;
   }
   function parseCoordInput(str){
@@ -2411,7 +2604,7 @@
   function cancelDrawing(){
     lineStart = null; rectStart = null; circleCenter = null;
     arcStage = 0; arcTemp = {}; polyPoints = []; drawing = null;
-    dimStage = 0; dimTemp = {};
+    dimStage = 0; dimTemp = {}; dimTarget = null; dimChain = null;
     modifyStage = 0; modifyTemp = {}; modifyGhosts = []; selBoxStart = null;
     const sb = document.getElementById('selBox'); if (sb) sb.style.display = 'none';
     render();
@@ -2485,7 +2678,8 @@
         break;
       }
       case 'HELP': case '?':
-        log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) DIMLINEAR(DIM) SELECT(V)', 'prompt');
+        log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V)', 'prompt');
+        log('Dimension: DIMALIGNED(DIM) DIMLINEAR(DLI) DIMDIAMETER(DDI) DIMRADIUS(DRA) DIMBASELINE(DBA) DIMCONTINUE(DCO)', 'prompt');
         log('Modify: MOVE(M) COPY(CO) ROTATE(RO) SCALE(SC) MIRROR(MI) OFFSET(O) ARRAY(AR) TRIM(TR) EXTEND(EX) FILLET(F) CHAMFER(CHA) MATCHPROP(MA) EXPLODE(X) HATCH(H) BLOCK(B) INSERT(I)', 'prompt');
         log('Other: ERASE(E) UNDO(U) REDO ZOOM(Z) LAYER(LA) SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
         log('While drawing, type coordinates as "10,5" (absolute), "@2,0" (relative), or a plain number for distance.', 'prompt');
@@ -3170,7 +3364,12 @@
 
     bind('p_color', el => e.color = el.value);
     bind('p_width', el => e.width = Math.max(0.1, parseFloat(el.value)||0.1));
-    bind('p_layer', el => { e.layer = el.value; renderList(); });
+    bind('p_layer', el => {
+      e.layer = el.value;
+      const lyr = layers.find(l => l.name === el.value);
+      if (lyr) e.color = lyr.color; // ByLayer: object adopts its new layer's color
+      buildPropsForm();
+    });
 
     document.getElementById('p_dup').onclick = () => {
       snapshot();
@@ -3418,100 +3617,30 @@
     e.target.value = '';
   });
 
-  // ---------- Excel (CSV) export/import ----------
-  // A lightweight, dependency-free round-trip: exports a .csv that Excel opens directly
-  // as a table (one row per entity), and re-imports that same layout back into entities.
-  const EXCEL_COLS = ['id','type','layer','color','width','x1','y1','x2','y2','cx','cy','r','startAngle','endAngle','closed','content','height','ox','oy','points'];
-  const EXCEL_TYPES = ['line','rect','circle','arc','polyline','text','dimension'];
-  function csvEscape(v){
-    if (v === undefined || v === null) return '';
-    const s = String(v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  // ---------- Excel (JSON) export/import ----------
+  // A dependency-free, full-fidelity round-trip: exports a .json file (readable in Excel,
+  // any text editor, or re-imported here) containing every entity, layer, and block
+  // definition exactly as stored — nothing is lost the way a flat CSV schema would lose it.
+  function toExcelJson(){
+    return JSON.stringify({ format:'cad-drawing', version:1, layers, blocks, entities }, null, 2);
   }
-  function toExcelCsv(){
-    const rows = [EXCEL_COLS.join(',')];
-    let skipped = 0;
-    for (const e of entities){
-      if (!EXCEL_TYPES.includes(e.type)){ skipped++; continue; }
-      const row = {
-        id:e.id, type:e.type, layer:e.layer||'0', color:e.color||'', width:e.width||'',
-        x1: e.type==='text' ? e.x : e.x1, y1: e.type==='text' ? e.y : e.y1,
-        x2:e.x2, y2:e.y2, cx:e.cx, cy:e.cy, r:e.r,
-        startAngle:e.startAngle, endAngle:e.endAngle,
-        closed: e.type==='polyline' ? (e.closed?1:0) : '',
-        content: e.content||'', height:e.height, ox:e.ox, oy:e.oy,
-        points: e.type==='polyline' ? e.points.map(p=>`${p.x};${p.y}`).join('|') : ''
-      };
-      rows.push(EXCEL_COLS.map(c => csvEscape(row[c])).join(','));
-    }
-    return { csv: rows.join('\n'), skipped };
-  }
-  // Minimal RFC4180-style single-line CSV field splitter (handles quoted fields with
-  // embedded commas/escaped quotes; doesn't support embedded newlines within a field).
-  function parseCsvLine(line){
-    const out = []; let cur = ''; let inQ = false;
-    for (let i=0;i<line.length;i++){
-      const ch = line[i];
-      if (inQ){
-        if (ch === '"'){ if (line[i+1] === '"'){ cur+='"'; i++; } else inQ=false; }
-        else cur += ch;
-      } else {
-        if (ch === '"') inQ = true;
-        else if (ch === ','){ out.push(cur); cur=''; }
-        else cur += ch;
-      }
-    }
-    out.push(cur);
-    return out;
-  }
-  function parseExcelCsv(text){
-    const lines = text.split(/\r\n|\n|\r/).filter(l => l.length);
-    if (!lines.length) return { entities: [], skipped: 0 };
-    const header = parseCsvLine(lines[0]).map(h => h.trim());
-    const idx = {}; header.forEach((h,i) => idx[h]=i);
-    const num = (v) => (v === '' || v === undefined) ? undefined : parseFloat(v);
-    const out = [];
-    let skipped = 0;
-    for (let li=1; li<lines.length; li++){
-      if (!lines[li].trim()) continue;
-      const cells = parseCsvLine(lines[li]);
-      const get = (name) => idx[name] !== undefined ? cells[idx[name]] : undefined;
-      const type = (get('type')||'').trim();
-      const layer = get('layer') || '0';
-      const color = get('color') || '#4fd1c5';
-      const width = num(get('width')) ?? 1.5;
-      try {
-        if (type === 'line' || type === 'rect'){
-          out.push({ id: uid(), type, x1:num(get('x1')), y1:num(get('y1')), x2:num(get('x2')), y2:num(get('y2')), color, width, layer });
-        } else if (type === 'circle'){
-          out.push({ id: uid(), type, cx:num(get('cx')), cy:num(get('cy')), r:num(get('r')), color, width, layer });
-        } else if (type === 'arc'){
-          out.push({ id: uid(), type, cx:num(get('cx')), cy:num(get('cy')), r:num(get('r')), startAngle:num(get('startAngle')), endAngle:num(get('endAngle')), color, width, layer });
-        } else if (type === 'polyline'){
-          const points = (get('points')||'').split('|').filter(Boolean).map(pair => { const [x,y] = pair.split(';').map(parseFloat); return {x,y}; });
-          if (points.length < 2) { skipped++; continue; }
-          out.push({ id: uid(), type, points, closed: get('closed')==='1', color, width, layer });
-        } else if (type === 'text'){
-          out.push({ id: uid(), type, x:num(get('x1')), y:num(get('y1')), content: get('content')||'Text', height: num(get('height'))||3, color, width, layer });
-        } else if (type === 'dimension'){
-          out.push({ id: uid(), type, x1:num(get('x1')), y1:num(get('y1')), x2:num(get('x2')), y2:num(get('y2')), ox:num(get('ox')), oy:num(get('oy')), color, width, layer });
-        } else {
-          skipped++;
-        }
-      } catch(err){ skipped++; }
-    }
-    return { entities: out, skipped };
+  function parseExcelJson(text){
+    const data = JSON.parse(text);
+    // Accept either the full { layers, blocks, entities } shape this tool exports,
+    // or a bare array of entities for simpler hand-written/scripted imports.
+    if (Array.isArray(data)) return { entities: data, layers: [], blocks: {} };
+    return { entities: data.entities || [], layers: data.layers || [], blocks: data.blocks || {} };
   }
   document.getElementById('exportXlsx').onclick = () => {
-    const { csv, skipped } = toExcelCsv();
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const json = toExcelJson();
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'drawing.csv';
+    a.href = url; a.download = 'drawing.json';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    log('Command: (Excel export) drawing.csv', 'echo');
-    log(`Exported ${entities.length - skipped} entities to CSV.` + (skipped ? ` (${skipped} unsupported entit${skipped===1?'y':'ies'} skipped — hatch/block/insert aren't in this lightweight exporter.)` : ''), 'prompt');
+    log('Command: (Excel export) drawing.json', 'echo');
+    log(`Exported ${entities.length} entities (plus layers and block definitions) to JSON.`, 'prompt');
   };
   document.getElementById('importXlsxBtn').onclick = () => document.getElementById('fileImportXlsx').click();
   document.getElementById('fileImportXlsx').addEventListener('change', (e) => {
@@ -3520,17 +3649,20 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const { entities: parsed, skipped } = parseExcelCsv(reader.result);
+        const { entities: parsed, layers: parsedLayers, blocks: parsedBlocks } = parseExcelJson(reader.result);
         snapshot();
+        for (const l of parsedLayers){ if (!layers.some(x => x.name === l.name)) layers.push(l); }
+        Object.assign(blocks, parsedBlocks);
+        parsed.forEach(en => { delete en.id; });
         entities = entities.concat(parsed);
         renumber();
-        zoomToFit(); renderList();
-        const msg = `Imported ${parsed.length} entities from CSV.` + (skipped ? ` (${skipped} row${skipped===1?'':'s'} skipped — unrecognized type or missing data.)` : '');
+        zoomToFit(); renderList(); renderLayers();
+        const msg = `Imported ${parsed.length} entities from JSON.`;
         flashHint(msg);
         log('Command: (Excel import) ' + file.name, 'echo');
         log(msg, 'prompt');
-        if (parsed.length === 0 && skipped === 0){
-          log('No rows found. Expecting a header row plus one row per entity (as exported by Export Excel).', 'err');
+        if (parsed.length === 0){
+          log('No entities found in that file. Expecting JSON exported by Export Excel (or a bare array of entities).', 'err');
         }
       } catch(err){
         flashHint('Import failed: ' + err.message);
