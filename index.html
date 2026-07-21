@@ -371,13 +371,10 @@
         }
 
         /* ---- Tank fill/discharge flow overlay (see getTankFlowState /
-           renderTankFlowOverlay). By default anchored top-left of the
-           tank card so it never collides with the pump-name label
-           (top-right) or the dimension badge. Direction driven by
-           BALLASTPLAN(mT) pump status — see PUMP_STATUS_COL comment.
-           Gated by showTankFlow. PORT/STARBOARD tanks instead get the
-           .tank-flow-marker-outside variant below, positioned via inline
-           style outside the hull. */
+           renderTankFlowOverlay). Anchored top-left of the tank card so
+           it never collides with the pump-name label (top-right) or the
+           dimension badge. Direction driven by BALLASTPLAN(mT) pump
+           status — see PUMP_STATUS_COL comment. Gated by showTankFlow. */
         .tank-flow-marker {
             position: absolute;
             top: 2px;
@@ -388,19 +385,6 @@
             align-items: center;
             gap: 1px;
             pointer-events: none;
-        }
-
-        /* PORT/STARBOARD variant — floats outside the hull instead of
-           inside the tank card (top/left/transform set inline per-tank
-           in renderTankFlowOverlay). A faint backdrop panel keeps the
-           moving arrow legible over the plain margin area it now sits
-           over, instead of over the tank card's own background. */
-        .tank-flow-marker-outside {
-            top: auto;
-            left: auto;            
-            border-radius: 4px;
-            padding: 2px 3px;
-            z-index: 16;
         }
 
         /* Real flow-pipe visual: a short vertical "pipe" containing 3
@@ -1483,7 +1467,8 @@
     </header>
     <div class="main-layout">
         <div class="tank-grid-container">
-            <div class="section-title" style="justify-content: center; border-left: none; padding-left: 0;">
+            <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0;">
+                <div style="width: 1px;"><!-- spacer so the attitude block stays visually centered --></div>
                 <div class="grid-attitude-mini">
                     <div class="grid-attitude-block">
                         <span class="grid-side-label" id="lbl_GridAFT">AFT</span>
@@ -1495,6 +1480,13 @@
                         <canvas id="heelCanvas" class="attitude-canvas-mini" width="120" height="50"></canvas>
                         <span class="grid-side-label" id="lbl_GridSB">SB</span>
                     </div>
+                </div>
+                <div class="plan-zoom-controls" style="display:flex; align-items:center; gap:6px;" title="Zoom the 2D barge/tank plan view — Ctrl+scroll wheel also works">
+                    <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">🔍</span>
+                    <button type="button" class="sync-btn" title="Zoom out" onclick="zoomTankPlanOut()">−</button>
+                    <span id="planZoomPct" style="font-size:11px; color:var(--text-muted); min-width:36px; text-align:center;">100%</span>
+                    <button type="button" class="sync-btn" title="Zoom in" onclick="zoomTankPlanIn()">+</button>
+                    <button type="button" class="sync-btn" title="Reset zoom to 100%" onclick="resetTankPlanZoom()">Reset</button>
                 </div>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
@@ -1734,7 +1726,7 @@
         //   - Each tire rectangle measures 0.86m (X) x 0.325m (Y).
         //   - Each hub circle has a 0.175m radius (DXF "R175").
         const AXLE_WIDTH_X = 0.86;         // width (X) of EACH tire rectangle — track width
-        const AXLE_RECT_HEIGHT_Y = 0.225;  // height (Y) of EACH tire rectangle — tire length
+        const AXLE_RECT_HEIGHT_Y = 0.325;  // height (Y) of EACH tire rectangle — tire length
         // Re-derived directly from the dimensioned drawing: overall
         // height of the 2-tire stack is 946mm, each tire rectangle is
         // 325mm tall, so the daylight GAP between the two rectangles is
@@ -2486,23 +2478,6 @@
             return `${num}${side}`;
         }
 
-        // Identifies whether a tank is a PORT, STARBOARD, or CENTRE tank
-        // from the trailing letter of its name — matches both the full
-        // Excel pattern ("WB-01-PS.P" / "WB-01-C.C" / "WB-01-SB.S") and
-        // the demo mock names ("AFT P" / "AFT C" / "AFT S"): both end in
-        // P / C / S. Returns null if the name doesn't end in one of
-        // those letters (e.g. a fallback "TANK 3" name), in which case no
-        // outside gauge/tag is drawn for that tank in either view.
-        function getTankSide(cfg) {
-            const nm = String((cfg && cfg.name) || '').trim().toUpperCase();
-            if (!nm) return null;
-            const last = nm.charAt(nm.length - 1);
-            if (last === 'P') return 'port';
-            if (last === 'S') return 'stbd';
-            if (last === 'C') return 'centre';
-            return null;
-        }
-
         // ============================================================
         // 2c. SHARED WORLD <-> SCREEN MAPPING
         //     ONE function used by BOTH the tank plan view and the
@@ -2518,14 +2493,18 @@
         const PLAN_PX_PER_METER = 9;
         const PLAN_LABEL_COL_PX = 90;   // reserved space for nothing now (kept for quay wall margin)
         const PLAN_MARGIN_PX = 10;      // breathing room around the whole plan
-        // Extra fixed vertical band reserved ABOVE the top hull edge and
-        // BELOW the bottom hull edge, on top of PLAN_MARGIN_PX, so the
-        // PORT/STARBOARD tank fill/discharge flow markers (see
-        // renderTankFlowOverlay) have room to float outside the hull
-        // without being clipped or overlapping the AFT/FWD/PS/SB/corner
-        // labels. Only affects the Y axis — X-axis scale/margins are
-        // untouched — so the plan stays true-to-scale.
-        const OUTSIDE_FLOW_BAND_PX = 75;
+
+        // ---- 2D plan zoom ----
+        // Multiplies PLAN_PX_PER_METER when sizing the plan view, so the
+        // whole 2D barge/tank drawing (tanks, quay, axle overlay, labels
+        // — everything reads world coordinates through worldToScreen())
+        // scales together. Controlled by the zoom +/- /reset buttons and
+        // Ctrl+scroll-wheel over the plan (see setPlanZoom()/zoom event
+        // listener near the bottom of the file).
+        let planZoom = 1;
+        const PLAN_ZOOM_MIN = 0.5;
+        const PLAN_ZOOM_MAX = 2.5;
+        const PLAN_ZOOM_STEP = 0.15;
 
         // Quay wall real-world footprint (meters), positioned just aft/port
         // of the barge origin.
@@ -2540,10 +2519,11 @@
         function sizeTankPlanView() {
             const container = document.getElementById('tankContainer');
             if (!container || !TANK_CONFIG.length) return;
+            const pxPerMeter = PLAN_PX_PER_METER * planZoom;
             const worldW = (BARGE_X_MAX - BARGE_X_MIN) + (QUAY_X_END - QUAY_X_START);
             const worldH = (BARGE_Y_MAX - BARGE_Y_MIN);
-            const pxW = Math.max(700, Math.round(worldW * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2);
-            const pxH = Math.max(260, Math.round(worldH * PLAN_PX_PER_METER) + PLAN_MARGIN_PX * 2 + OUTSIDE_FLOW_BAND_PX * 2);
+            const pxW = Math.max(700, Math.round(worldW * pxPerMeter) + PLAN_MARGIN_PX * 2);
+            const pxH = Math.max(260, Math.round(worldH * pxPerMeter) + PLAN_MARGIN_PX * 2);
             container.style.width = pxW + 'px';
             container.style.height = pxH + 'px';
         }
@@ -2561,13 +2541,13 @@
             const worldXMax = BARGE_X_MAX;
             const worldW = worldXMax - worldXMin;
             const plottableW = cssW - PLAN_MARGIN_PX * 2;
-            const plottableH = cssH - PLAN_MARGIN_PX * 2 - OUTSIDE_FLOW_BAND_PX * 2;
+            const plottableH = cssH - PLAN_MARGIN_PX * 2;
 
             const xFrac = (x - worldXMin) / worldW;
             const sx = PLAN_MARGIN_PX + xFrac * plottableW;
 
             const yFrac = (BARGE_Y_MAX - y) / (BARGE_Y_MAX - BARGE_Y_MIN);
-            const sy = PLAN_MARGIN_PX + OUTSIDE_FLOW_BAND_PX + yFrac * plottableH;
+            const sy = PLAN_MARGIN_PX + yFrac * plottableH;
 
             return { sx, sy };
         }
@@ -2580,7 +2560,7 @@
             const cssH = container ? container.clientHeight : 320;
             const worldW = BARGE_X_MAX - QUAY_X_START;
             const plottableW = cssW - PLAN_MARGIN_PX * 2;
-            const plottableH = cssH - PLAN_MARGIN_PX * 2 - OUTSIDE_FLOW_BAND_PX * 2;
+            const plottableH = cssH - PLAN_MARGIN_PX * 2;
             return {
                 scaleX: plottableW / worldW,
                 scaleY: plottableH / (BARGE_Y_MAX - BARGE_Y_MIN)
@@ -2940,19 +2920,11 @@
         //      direction comes from getTankFlowState(cfg), which reads
         //      real pump/valve status published from Excel (see
         //      PUMP_STATUS_COL — currently an ASSUMED column, confirm
-        //      with the real workbook). Gated by showTankFlow.
-        //      PORT/STARBOARD tanks (see getTankSide()) have this marker
-        //      floated OUTSIDE the hull instead — above the top edge for
-        //      port tanks, below the bottom edge for starboard tanks,
-        //      aligned to that tank's real X — the same "outside the
-        //      barge" placement as the PS/SB edge tags, so the moving
-        //      blue (fill) / red (discharge) arrow reads clearly instead
-        //      of overlapping the (often narrow) wing tank card. Centre
-        //      tanks keep the original top-left in-card placement, since
-        //      they have no adjacent hull edge to anchor to.
+        //      with the real workbook). Gated by showTankFlow; anchored
+        //      top-LEFT of the tank card so it never collides with the
+        //      pump-name label (top-right, see renderPumpMarkers).
         // ============================================================
         let showTankFlow = true;
-        const OUTSIDE_FLOW_CLEARANCE_PX = 20; // gap between hull edge and the outside flow marker
 
         function renderTankFlowOverlay(container) {
             container.querySelectorAll('.tank-flow-marker').forEach(el => el.remove());
@@ -2961,6 +2933,8 @@
             TANK_CONFIG.forEach((cfg) => {
                 const state = getTankFlowState(cfg);
                 if (state === 'off') return;
+                const card = document.getElementById(`tank_card_${cfg.id}`);
+                if (!card) return;
 
                 const tank = tankData.find(t => t.row === cfg.id);
                 const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
@@ -2971,7 +2945,7 @@
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-flow-marker';
-                wrap.title = `${cfg.name} — ${stateLabel} — ${weightMT.toFixed(1)} mT`;
+                wrap.title = `${stateLabel} — ${weightMT.toFixed(1)} mT`;
                 wrap.innerHTML = `
                     <span class="tank-flow-state ${arrowCls}">${stateWord}</span>
                     <span class="tank-flow-pipe ${arrowCls}">
@@ -2981,28 +2955,7 @@
                     </span>
                     <span class="tank-flow-label">${weightMT.toFixed(1)} mT</span>
                 `;
-
-                const side = getTankSide(cfg);
-                if (side === 'port' || side === 'stbd') {
-                    const edgeY = side === 'port' ? BARGE_Y_MAX : BARGE_Y_MIN;
-                    const p = worldToScreen(cfg.x, edgeY);
-                    wrap.classList.add('tank-flow-marker-outside');
-                    wrap.style.left = p.sx + 'px';
-                    if (side === 'port') {
-                        wrap.style.top = (p.sy - OUTSIDE_FLOW_CLEARANCE_PX) + 'px';
-                        wrap.style.transform = 'translate(-50%, -100%)';
-                    } else {
-                        wrap.style.top = (p.sy + OUTSIDE_FLOW_CLEARANCE_PX) + 'px';
-                        wrap.style.transform = 'translate(-50%, 0)';
-                    }
-                    container.appendChild(wrap);
-                } else {
-                    // Centre tank (or unrecognized name) — original
-                    // in-card top-left placement.
-                    const card = document.getElementById(`tank_card_${cfg.id}`);
-                    if (!card) return;
-                    card.appendChild(wrap);
-                }
+                card.appendChild(wrap);
             });
         }
 
@@ -3511,6 +3464,38 @@
             // the grid's rendered box right after the initial paint.
             requestAnimationFrame(() => drawAxleOverlay());
         }
+
+        // ---- 2D plan zoom controls ----
+        // Changing planZoom changes the pixel size sizeTankPlanView()
+        // gives the plan container, so everything drawn from world
+        // coordinates needs a full rebuild (tank cards, quay box, corner
+        // labels, pump markers, flow overlay) followed by the axle
+        // overlay/CoG redraw — the same pairing used everywhere else in
+        // this file after the underlying geometry changes.
+        function setPlanZoom(newZoom) {
+            planZoom = Math.min(PLAN_ZOOM_MAX, Math.max(PLAN_ZOOM_MIN, newZoom));
+            const pctLabel = document.getElementById('planZoomPct');
+            if (pctLabel) pctLabel.textContent = Math.round(planZoom * 100) + '%';
+            if (typeof initTankMatrix === 'function') initTankMatrix();
+            refreshPlanView();
+        }
+
+        function zoomTankPlanIn() { setPlanZoom(planZoom + PLAN_ZOOM_STEP); }
+        function zoomTankPlanOut() { setPlanZoom(planZoom - PLAN_ZOOM_STEP); }
+        function resetTankPlanZoom() { setPlanZoom(1); }
+
+        // Ctrl+scroll-wheel over the plan zooms it (plain scroll still
+        // scrolls the page/container normally, so this never hijacks
+        // ordinary mouse-wheel use).
+        (function initPlanZoomWheel() {
+            const wrap = document.getElementById('tankGridWrap');
+            if (!wrap) return;
+            wrap.addEventListener('wheel', function (e) {
+                if (!e.ctrlKey) return;
+                e.preventDefault();
+                if (e.deltaY < 0) zoomTankPlanIn(); else zoomTankPlanOut();
+            }, { passive: false });
+        })();
 
         // Recompute overlay alignment whenever the layout reflows
         window.addEventListener('resize', () => drawAxleOverlay());
@@ -6479,29 +6464,18 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 addAnchor(`pct_${cfg.id}`, cfg.x, 0.4, worldYToZ3D(cfg.y), '', 'pct');
             });
 
-            // Per-tank fill/discharge flow label anchor. For PORT/
-            // STARBOARD tanks (see getTankSide()), this sits OUTSIDE the
-            // hull — on the same edge line as the PS/SB tag, at this
-            // tank's own real X — so the moving fill/discharge arrow
-            // reads clearly outside the hull instead of over the (often
-            // narrow) wing tank itself. Centre tanks keep the original
-            // TOP-LEFT-of-tank corner placement (AFT edge, PS/SB-outboard
-            // corner opposite the pump label's top-right corner), since
-            // they have no adjacent hull edge to anchor to. Text/visibility
-            // is computed live in renderLabels3D() from getTankFlowState(),
-            // same "always add the anchor, gate at render time" pattern
-            // the pct/pump anchors use.
+            // Per-tank fill/discharge flow label anchor — mirrors the 2D
+            // badge's TOP-LEFT placement (AFT edge, PS/SB-outboard
+            // corner opposite the pump label's top-right corner) so the
+            // two never collide. Text/visibility is computed live in
+            // renderLabels3D() from getTankFlowState(), same "always add
+            // the anchor, gate at render time" pattern the pct/pump
+            // anchors use.
             TANK_CONFIG.forEach((cfg) => {
-                const side = getTankSide(cfg);
-                if (side === 'port' || side === 'stbd') {
-                    const edgeYWorld = side === 'port' ? BARGE_Y_MAX : BARGE_Y_MIN;
-                    addAnchor(`flow_${cfg.id}`, cfg.x, 0.6, worldYToZ3D(edgeYWorld), '', 'flow');
-                } else {
-                    const isPortSide = cfg.y >= 0;
-                    const cornerX = cfg.x - cfg.width / 2;
-                    const cornerYWorld = isPortSide ? (cfg.y + cfg.height / 2) : (cfg.y - cfg.height / 2);
-                    addAnchor(`flow_${cfg.id}`, cornerX, 0.6, worldYToZ3D(cornerYWorld), '', 'flow');
-                }
+                const isPortSide = cfg.y >= 0;
+                const cornerX = cfg.x - cfg.width / 2;
+                const cornerYWorld = isPortSide ? (cfg.y + cfg.height / 2) : (cfg.y - cfg.height / 2);
+                addAnchor(`flow_${cfg.id}`, cornerX, 0.6, worldYToZ3D(cornerYWorld), '', 'flow');
             });
 
             // Per-tank pump-name label anchor(s) — text only, positioned
@@ -6603,23 +6577,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const weightMT = td ? (parseFloat(td.weight) || 0) : 0;
                     const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
                     const stateWord = state === 'discharge' ? 'DISCHARGE' : (state === 'mixed' ? 'FILL/DISCHARGE' : 'FILL');
-                    // PORT/STARBOARD tanks: this tag now floats OUTSIDE
-                    // the hull (see buildLabelAnchors3D), so it's no
-                    // longer sitting right next to its own tank — prefix
-                    // the short tank name so it's still identifiable.
-                    // Centre tanks keep the original tank-corner
-                    // placement, where the tank is already obvious from
-                    // context, so no name prefix is added there.
-                    const side = cfg ? getTankSide(cfg) : null;
-                    const namePrefix = (side === 'port' || side === 'stbd') && cfg ? `${shortenTankName(cfg.name)} · ` : '';
-                    // Note: the directional cue itself also lives IN the
+                    // Note: the directional cue itself now lives IN the
                     // 3D scene as a real arrow mesh (see flowArrow in
-                    // build3DScene, and update3DFillAndAttitude for its
-                    // orientation/colour). This DOM tag is just the text
-                    // readout floating next to (or, for PS/SB tanks,
-                    // outside) that mesh.
+                    // buildLabelAnchors3D... actually build3DScene, and
+                    // update3DFillAndAttitude for its orientation/colour).
+                    // This DOM tag is just the text readout floating next
+                    // to that mesh, same anchor point.
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); display:flex; align-items:center; gap:3px; white-space:nowrap;">` +
-                        `<span class="tank-flow-state ${arrowCls}" style="position:static; border-radius:3px; padding:1px 4px;">${namePrefix}${stateWord}</span>` +
+                        `<span class="tank-flow-state ${arrowCls}" style="position:static; border-radius:3px; padding:1px 4px;">${stateWord}</span>` +
                         `<span class="tank-flow-label" style="position:static;">${weightMT.toFixed(1)} mT</span></div>`;
                 } else if (a.cls === 'cog') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#f5f3ff; background:rgba(168,85,247,0.85); padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:30;">${a.text}</div>`;
@@ -7692,13 +7657,19 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // order) and swallow the default Tab behaviour so it never jumps
         // out to buttons, checkboxes, or any other control on the page.
         // Tab pressed anywhere else on the page behaves normally.
+        //
+        // Also respects "Pump-only input" mode (togglePumpOnlyInput):
+        // when that mode disables the non-pump tanks' inputs, those
+        // disabled boxes are skipped too, so Tab only ever lands on
+        // inputs the operator can actually type into.
         // ------------------------------------------------------------
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Tab') return;
             const active = document.activeElement;
             if (!active || !active.classList || !active.classList.contains('weight-input')) return;
 
-            const fillInputs = Array.from(document.querySelectorAll('.weight-input'));
+            const fillInputs = Array.from(document.querySelectorAll('.weight-input'))
+                .filter(el => !el.disabled);
             const idx = fillInputs.indexOf(active);
             if (idx === -1) return;
 
