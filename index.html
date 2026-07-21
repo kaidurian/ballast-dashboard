@@ -387,75 +387,47 @@
             pointer-events: none;
         }
 
-        /* Real flow-pipe visual: a short vertical "pipe" containing 3
-           chevrons that stream in the actual direction of flow (down
-           into the tank for fill, up out of the tank for discharge).
-           Replaces the old static glyph-in-a-circle badge. Colour
-           coding (blue=fill, red=discharge, purple=mixed) unchanged so
-           existing state logic (getTankFlowState) needs no changes. */
-        .tank-flow-pipe {
-            position: relative;
-            width: 14px;
-            height: 20px;
-            overflow: hidden;
-            border-radius: 2px;
+        /* Simple flow arrow: a single solid triangular arrow, blue for
+           "Water In" (fill) and red for "Water Out" (discharge/mixed
+           uses a purple double-arrow). Replaces the old pulsing
+           chevron-pipe visual. Stays on screen for as long as
+           getTankFlowState()/flowManualState reports an active
+           direction for the tank — which now persists until the
+           operator next edits that tank's water-fill box rather than
+           auto-clearing after a short settle timer (see
+           noteFlowWeightChange()). */
+        .tank-flow-arrow {
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            animation: flowArrowPulse 1s ease-in-out infinite;
+        }
+        .tank-flow-arrow.flow-fill {
+            border-top: 11px solid #38bdf8; /* blue, points down = into tank */
+        }
+        .tank-flow-arrow.flow-discharge {
+            border-bottom: 11px solid #f87171; /* red, points up = out of tank */
+        }
+        .tank-flow-arrow.flow-mixed {
+            border-top: 11px solid #c084fc;
         }
 
-        .tank-flow-pipe.flow-fill { background: rgba(2,132,199,0.18); box-shadow: 0 0 5px rgba(56,189,248,0.75) inset; }
-        .tank-flow-pipe.flow-discharge { background: rgba(185,28,28,0.18); box-shadow: 0 0 5px rgba(239,68,68,0.75) inset; }
-        .tank-flow-pipe.flow-mixed { background: rgba(126,34,206,0.18); box-shadow: 0 0 5px rgba(168,85,247,0.75) inset; }
-
-        .tank-flow-chevron {
-            position: absolute;
-            left: 50%;
-            width: 7px;
-            height: 7px;
-            opacity: 0;
-        }
-        .flow-fill .tank-flow-chevron {
-            border-right: 2px solid #38bdf8;
-            border-bottom: 2px solid #38bdf8;
-            transform: translateX(-50%) rotate(45deg);
-            animation: chevronDown 0.5s linear infinite;
-        }
-        .flow-discharge .tank-flow-chevron {
-            border-right: 2px solid #f87171;
-            border-bottom: 2px solid #f87171;
-            transform: translateX(-50%) rotate(225deg);
-            animation: chevronUp 0.5s linear infinite;
-        }
-        .flow-mixed .tank-flow-chevron {
-            border-right: 2px solid #c084fc;
-            border-bottom: 2px solid #c084fc;
-            transform: translateX(-50%) rotate(45deg);
-            animation: chevronDown 0.5s linear infinite;
-        }
-        .tank-flow-chevron:nth-child(1) { animation-delay: 0s; }
-        .tank-flow-chevron:nth-child(2) { animation-delay: 0.38s; }
-        .tank-flow-chevron:nth-child(3) { animation-delay: 0.76s; }
-
-        @keyframes chevronDown {
-            0%   { top: -8px; opacity: 0; }
-            15%  { opacity: 1; }
-            80%  { opacity: 1; }
-            100% { top: 18px; opacity: 0; }
-        }
-        @keyframes chevronUp {
-            0%   { top: 18px; opacity: 0; }
-            15%  { opacity: 1; }
-            80%  { opacity: 1; }
-            100% { top: -8px; opacity: 0; }
+        @keyframes flowArrowPulse {
+            0%, 100% { opacity: 0.55; }
+            50%      { opacity: 1; }
         }
 
-        /* Small state pill (FILL / DISCHARGE / MIXED) sitting above the
-           pipe — this is the "label" half of the arrow+label ask. */
+        /* Small state pill (WATER IN / WATER OUT) sitting above the
+           arrow — this is the "label" half of the arrow+label ask. */
         .tank-flow-state {
             font-size: 7px;
             font-weight: 800;
-            letter-spacing: 0.4px;
+            letter-spacing: 0.3px;
             text-align: center;
-            border-radius: 2px 2px 0 0;
-            padding: 0 2px;
+            border-radius: 2px;
+            padding: 0 3px;
+            white-space: nowrap;
         }
         .tank-flow-state.flow-fill { background: #0284c7; color: #e0f2fe; }
         .tank-flow-state.flow-discharge { background: #b91c1c; color: #fee2e2; }
@@ -1428,7 +1400,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-50(V2)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-50(V3)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1480,13 +1452,6 @@
                         <canvas id="heelCanvas" class="attitude-canvas-mini" width="120" height="50"></canvas>
                         <span class="grid-side-label" id="lbl_GridSB">SB</span>
                     </div>
-                </div>
-                <div class="plan-zoom-controls" style="display:flex; align-items:center; gap:6px;" title="Zoom the 2D barge/tank plan view — Ctrl+scroll wheel also works">
-                    <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">🔍</span>
-                    <button type="button" class="sync-btn" title="Zoom out" onclick="zoomTankPlanOut()">−</button>
-                    <span id="planZoomPct" style="font-size:11px; color:var(--text-muted); min-width:36px; text-align:center;">100%</span>
-                    <button type="button" class="sync-btn" title="Zoom in" onclick="zoomTankPlanIn()">+</button>
-                    <button type="button" class="sync-btn" title="Reset zoom to 100%" onclick="resetTankPlanZoom()">Reset</button>
                 </div>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
@@ -2007,14 +1972,21 @@
         // also tracks a "settled" baseline weight; whenever its CURRENT
         // weight differs from that baseline, the arrow shows fill
         // (weight went up) or discharge (weight went down) on its own.
-        // The baseline re-settles automatically a few seconds after the
-        // weight stops changing (see scheduleFlowBaselineSettle), which
-        // turns the arrow back off once the transfer looks finished.
+        // The weight baseline still re-settles automatically a few
+        // seconds after the weight stops changing (needed so the NEXT
+        // change computes its direction against a fresh reference), but
+        // the visible arrow/label no longer clears on any timer — it
+        // stays on screen showing the last fill/discharge for that tank
+        // until the operator enters a new value into ANY tank's
+        // water-fill box (not just that same tank's). At that point
+        // every other tank's arrow/label is cleared and only the
+        // just-edited tank shows a (possibly new) indicator — see
+        // noteFlowWeightChange().
         let flowWeightBaseline = {};   // { [row]: number } last "settled" weight
-        let flowManualState = {};      // { [row]: 'fill' | 'discharge' }
-        let flowSettleTimers = {};     // { [row]: timeoutId }
+        let flowManualState = {};      // { [row]: 'fill' | 'discharge' } — at most one entry lives at a time, see noteFlowWeightChange()
+        let flowSettleTimers = {};     // { [row]: timeoutId } — baseline-only, no longer clears the arrow
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
-        const FLOW_SETTLE_MS = 1500;         // how long a weight must hold steady before the arrow turns off
+        const FLOW_SETTLE_MS = 1500;         // how long a weight must hold steady before the baseline re-pins
 
         // Seeds/repins a tank's baseline to its CURRENT weight with no
         // transition shown — used on first load/sync so every tank
@@ -2026,29 +1998,41 @@
         }
 
         // Called every time a tank's weight actually changes (manual
-        // input or Excel sync). Sets the transient fill/discharge state
-        // from the sign of the change, and (re)starts the settle timer
-        // that will commit the new baseline — and clear the arrow —
-        // once the value has held steady for FLOW_SETTLE_MS.
+        // input or Excel sync). Sets the fill/discharge state from the
+        // sign of the change for THIS tank, and — since the ask is for
+        // one continuously-visible indicator that only moves on to the
+        // next entry, wherever that happens — clears any arrow/label
+        // still showing for every OTHER tank at the same time. So the
+        // arrow/label for a tank stays visible until the operator next
+        // types a new value into any tank's water-fill box (this one or
+        // another one), not just its own. The settle timer only re-pins
+        // the internal baseline used to work out the direction of the
+        // next change; it no longer hides the arrow itself.
         function noteFlowWeightChange(row, newWeight) {
             const w = parseFloat(newWeight) || 0;
             const baseline = flowWeightBaseline[row];
             if (baseline === undefined) { seedFlowBaseline(row, w); return; }
+
+            // Any entry into any tank's fill box retires every other
+            // tank's currently-shown indicator first.
+            let changed = false;
+            Object.keys(flowManualState).forEach(r => {
+                if (Number(r) !== row) {
+                    delete flowManualState[r];
+                    if (flowSettleTimers[r]) { clearTimeout(flowSettleTimers[r]); delete flowSettleTimers[r]; }
+                    changed = true;
+                }
+            });
+
             const delta = w - baseline;
             if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) {
                 // The new value is back within noise range of the settled
                 // baseline (e.g. operator typed a value then corrected it
-                // back). Previously this just returned, leaving any
-                // in-flight fill/discharge state — and its settle timer,
-                // which still had the OLD (now-stale) weight captured in
-                // its closure — running for the full FLOW_SETTLE_MS. That
-                // made the arrow appear "stuck" showing the earlier
-                // transition even though the box no longer reflects a
-                // real change. Clear it immediately instead so the arrow
-                // turns off right away rather than lingering.
+                // back). Clear this tank's own arrow immediately too,
+                // since the box no longer reflects any real change.
                 if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
-                if (flowManualState[row]) {
-                    delete flowManualState[row];
+                if (flowManualState[row]) { delete flowManualState[row]; changed = true; }
+                if (changed) {
                     if (typeof renderTankFlowOverlay === 'function') {
                         const c = document.getElementById('tankContainer');
                         if (c) renderTankFlowOverlay(c);
@@ -2058,16 +2042,18 @@
                 return;
             }
             flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
+            if (typeof renderTankFlowOverlay === 'function') {
+                const c = document.getElementById('tankContainer');
+                if (c) renderTankFlowOverlay(c);
+            }
+            if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
             if (flowSettleTimers[row]) clearTimeout(flowSettleTimers[row]);
             flowSettleTimers[row] = setTimeout(() => {
                 flowWeightBaseline[row] = w;
-                delete flowManualState[row];
                 delete flowSettleTimers[row];
-                if (typeof renderTankFlowOverlay === 'function') {
-                    const c = document.getElementById('tankContainer');
-                    if (c) renderTankFlowOverlay(c);
-                }
-                if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+                // Note: flowManualState[row] is intentionally left as-is
+                // here so the arrow/label keep showing "Water In"/"Water
+                // Out" for this tank until the next fill-box entry.
             }, FLOW_SETTLE_MS);
         }
 
@@ -2515,18 +2501,6 @@
         const PLAN_LABEL_COL_PX = 90;   // reserved space for nothing now (kept for quay wall margin)
         const PLAN_MARGIN_PX = 10;      // breathing room around the whole plan
 
-        // ---- 2D plan zoom ----
-        // Multiplies PLAN_PX_PER_METER when sizing the plan view, so the
-        // whole 2D barge/tank drawing (tanks, quay, axle overlay, labels
-        // — everything reads world coordinates through worldToScreen())
-        // scales together. Controlled by the zoom +/- /reset buttons and
-        // Ctrl+scroll-wheel over the plan (see setPlanZoom()/zoom event
-        // listener near the bottom of the file).
-        let planZoom = 1;
-        const PLAN_ZOOM_MIN = 0.5;
-        const PLAN_ZOOM_MAX = 2.5;
-        const PLAN_ZOOM_STEP = 0.15;
-
         // Quay wall real-world footprint (meters), positioned just aft/port
         // of the barge origin.
         const QUAY_X_START = -11.2;
@@ -2540,7 +2514,7 @@
         function sizeTankPlanView() {
             const container = document.getElementById('tankContainer');
             if (!container || !TANK_CONFIG.length) return;
-            const pxPerMeter = PLAN_PX_PER_METER * planZoom;
+            const pxPerMeter = PLAN_PX_PER_METER;
             const worldW = (BARGE_X_MAX - BARGE_X_MIN) + (QUAY_X_END - QUAY_X_START);
             const worldH = (BARGE_Y_MAX - BARGE_Y_MIN);
             const pxW = Math.max(700, Math.round(worldW * pxPerMeter) + PLAN_MARGIN_PX * 2);
@@ -2961,20 +2935,15 @@
                 const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
 
                 const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
-                const stateLabel = state === 'discharge' ? 'Discharging' : (state === 'mixed' ? 'Filling & discharging' : 'Filling');
-                const stateWord = state === 'discharge' ? 'OUT' : (state === 'mixed' ? '↕' : 'IN');
+                const stateLabel = state === 'discharge' ? 'Water Out' : (state === 'mixed' ? 'Water In/Out' : 'Water In');
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-flow-marker';
-                wrap.title = `${stateLabel} — ${weightMT.toFixed(1)} mT`;
+                wrap.title = `${cfg.name}: ${stateLabel} — ${weightMT.toFixed(1)} mT`;
                 wrap.innerHTML = `
-                    <span class="tank-flow-state ${arrowCls}">${stateWord}</span>
-                    <span class="tank-flow-pipe ${arrowCls}">
-                        <span class="tank-flow-chevron"></span>
-                        <span class="tank-flow-chevron"></span>
-                        <span class="tank-flow-chevron"></span>
-                    </span>
-                    <span class="tank-flow-label">${weightMT.toFixed(1)} mT</span>
+                    <span class="tank-flow-state ${arrowCls}">${stateLabel}</span>
+                    <span class="tank-flow-arrow ${arrowCls}"></span>
+                    <span class="tank-flow-label">${cfg.name} · ${weightMT.toFixed(1)} mT</span>
                 `;
                 card.appendChild(wrap);
             });
@@ -3485,38 +3454,6 @@
             // the grid's rendered box right after the initial paint.
             requestAnimationFrame(() => drawAxleOverlay());
         }
-
-        // ---- 2D plan zoom controls ----
-        // Changing planZoom changes the pixel size sizeTankPlanView()
-        // gives the plan container, so everything drawn from world
-        // coordinates needs a full rebuild (tank cards, quay box, corner
-        // labels, pump markers, flow overlay) followed by the axle
-        // overlay/CoG redraw — the same pairing used everywhere else in
-        // this file after the underlying geometry changes.
-        function setPlanZoom(newZoom) {
-            planZoom = Math.min(PLAN_ZOOM_MAX, Math.max(PLAN_ZOOM_MIN, newZoom));
-            const pctLabel = document.getElementById('planZoomPct');
-            if (pctLabel) pctLabel.textContent = Math.round(planZoom * 100) + '%';
-            if (typeof initTankMatrix === 'function') initTankMatrix();
-            refreshPlanView();
-        }
-
-        function zoomTankPlanIn() { setPlanZoom(planZoom + PLAN_ZOOM_STEP); }
-        function zoomTankPlanOut() { setPlanZoom(planZoom - PLAN_ZOOM_STEP); }
-        function resetTankPlanZoom() { setPlanZoom(1); }
-
-        // Ctrl+scroll-wheel over the plan zooms it (plain scroll still
-        // scrolls the page/container normally, so this never hijacks
-        // ordinary mouse-wheel use).
-        (function initPlanZoomWheel() {
-            const wrap = document.getElementById('tankGridWrap');
-            if (!wrap) return;
-            wrap.addEventListener('wheel', function (e) {
-                if (!e.ctrlKey) return;
-                e.preventDefault();
-                if (e.deltaY < 0) zoomTankPlanIn(); else zoomTankPlanOut();
-            }, { passive: false });
-        })();
 
         // Recompute overlay alignment whenever the layout reflows
         window.addEventListener('resize', () => drawAxleOverlay());
@@ -6597,16 +6534,18 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const td = tankData.find(t => t.row === cfgId);
                     const weightMT = td ? (parseFloat(td.weight) || 0) : 0;
                     const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
-                    const stateWord = state === 'discharge' ? 'DISCHARGE' : (state === 'mixed' ? 'FILL/DISCHARGE' : 'FILL');
-                    // Note: the directional cue itself now lives IN the
-                    // 3D scene as a real arrow mesh (see flowArrow in
-                    // buildLabelAnchors3D... actually build3DScene, and
-                    // update3DFillAndAttitude for its orientation/colour).
-                    // This DOM tag is just the text readout floating next
-                    // to that mesh, same anchor point.
+                    const stateWord = state === 'discharge' ? 'Water Out' : (state === 'mixed' ? 'Water In/Out' : 'Water In');
+                    // Note: the directional cue itself lives IN the 3D
+                    // scene as a real arrow mesh (see flowArrow in
+                    // build3DScene, and update3DFillAndAttitude for its
+                    // orientation/colour — blue=Water In, red=Water Out).
+                    // This DOM tag is the text readout floating next to
+                    // that mesh, same anchor point, now including the
+                    // tank name so the in/out quantity label is
+                    // identifiable at a glance in the 3D view.
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); display:flex; align-items:center; gap:3px; white-space:nowrap;">` +
                         `<span class="tank-flow-state ${arrowCls}" style="position:static; border-radius:3px; padding:1px 4px;">${stateWord}</span>` +
-                        `<span class="tank-flow-label" style="position:static;">${weightMT.toFixed(1)} mT</span></div>`;
+                        `<span class="tank-flow-label" style="position:static;">${cfg.name} · ${weightMT.toFixed(1)} mT</span></div>`;
                 } else if (a.cls === 'cog') {
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:#f5f3ff; background:rgba(168,85,247,0.85); padding:1px 6px; border-radius:4px; white-space:nowrap; z-index:30;">${a.text}</div>`;
                 }
