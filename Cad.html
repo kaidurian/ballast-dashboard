@@ -6,7 +6,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>AutoCAD-Style Drafting — 2D CAD Editor</title>
+<title>AutoCAD-Style Drafting — 2D CAD Editor (50-V1)</title>
 <style>
   :root{
     --bg: #000000;
@@ -340,6 +340,7 @@
     <button class="tool" data-tool="arc" title="Arc — or type A, Enter — 3 clicks: center, radius/start, end">◠ Arc</button>
     <button class="tool" data-tool="polyline" title="Polyline — or type PL, Enter — click points, Enter/dblclick to finish">⟍ Poly</button>
     <button class="tool" data-tool="text" title="Text — or type T, Enter">A Text</button>
+    <button class="tool" data-tool="dimension" title="Linear Dimension — or type DIM/DIMLINEAR, Enter — click first point, second point, then click to place the dimension line">📏 Dim</button>
 
     <div class="divider"></div>
     <label class="mini">Color</label>
@@ -348,8 +349,8 @@
     <input type="number" id="lineWidth" value="1.5" min="0.5" max="8" step="0.5">
     <label class="mini">Snap</label>
     <select id="snapGrid">
-      <option value="0">Off</option>
-      <option value="1" selected>1</option>
+      <option value="0" selected>Off</option>
+      <option value="1">1</option>
       <option value="5">5</option>
       <option value="10">10</option>
     </select>
@@ -370,6 +371,9 @@
     <button class="action" id="exportDxf" title="Export as .dxf">⬇ Export DXF</button>
     <button class="action" id="importDxfBtn" title="Import a .dxf file">⬆ Import DXF</button>
     <input type="file" id="fileImport" accept=".dxf">
+    <button class="action" id="exportXlsx" title="Export the entity list as a .csv spreadsheet — opens directly in Excel">⬇ Export Excel</button>
+    <button class="action" id="importXlsxBtn" title="Import entities from a .csv spreadsheet (exported from here, or from Excel)">⬆ Import Excel</button>
+    <input type="file" id="fileImportXlsx" accept=".csv">
     <button class="action" id="sidebarToggle" title="Show/hide the Layers, Entities, Properties &amp; Modify Options panel">☰ Panel</button>
   </div>
 
@@ -383,7 +387,7 @@
     <button class="tool mtool" data-tool="offset" title="Offset — or type O/OFFSET, Enter — pick one entity, set distance in Modify Options, click a side">‖ Offset</button>
     <button class="tool mtool" data-tool="array" title="Array — or type AR/ARRAY, Enter — pick entities, set rows/cols or polar count in Modify Options">▦ Array</button>
     <div class="divider"></div>
-    <button class="tool mtool" data-tool="trim" title="Trim — or type TR/TRIM, Enter — pick one cutting edge (any shape), then click the piece of a line/polyline/circle/arc to remove">✂ Trim</button>
+    <button class="tool mtool" data-tool="trim" title="Trim — or type TR/TRIM, Enter — pick one cutting edge (any shape), then click the piece of a line/polyline/circle/arc/rectangle to remove">✂ Trim</button>
     <button class="tool mtool" data-tool="extend" title="Extend — or type EX/EXTEND, Enter — pick one boundary, then click an open end of a line/polyline/arc to stretch it">⇥ Extend</button>
     <button class="tool mtool" data-tool="fillet" title="Fillet — or type F/FILLET, Enter — pick exactly 2 lines, set radius, Apply">◜ Fillet</button>
     <button class="tool mtool" data-tool="chamfer" title="Chamfer — or type CHA/CHAMFER, Enter — pick exactly 2 lines, set distance, Apply">◲ Chamfer</button>
@@ -471,7 +475,7 @@
     <!-- Status bar -->
     <div id="statusbar">
       <span class="statCoords" id="statCoords">0.00, 0.00, 0.00</span>
-      <button class="statToggle on" id="tgSnap" title="Snap to grid (F9)">Snap</button>
+      <button class="statToggle" id="tgSnap" title="Snap to grid (F9)">Snap</button>
       <button class="statToggle on" id="tgGrid" title="Show grid (F7)">Grid</button>
       <button class="statToggle" id="tgOrtho" title="Ortho mode (F8) — constrain to horizontal/vertical">Ortho</button>
       <button class="statToggle" id="tgPolar" title="Polar tracking (F10) — snap angle to 15° increments">Polar</button>
@@ -513,7 +517,7 @@
   let modifyGhosts = [];  // live-preview entities while a Move/Copy/Rotate/Scale/Mirror is in progress
 
   // Status-bar modes (classic AutoCAD toggles)
-  let modeSnap = true, modeGrid = true, modeOrtho = false, modePolar = false, modeOsnap = true;
+  let modeSnap = false, modeGrid = true, modeOrtho = false, modePolar = false, modeOsnap = true;
 
   // ---------- Layers ----------
   let layers = [ { name:'0', color:'#4fd1c5', visible:true, locked:false } ];
@@ -865,6 +869,49 @@
         ctx.stroke();
         break;
       }
+      case 'dimension': {
+        const p1 = {x:e.x1,y:e.y1}, p2 = {x:e.x2,y:e.y2};
+        const dx = p2.x-p1.x, dy = p2.y-p1.y, len = Math.hypot(dx,dy) || 1;
+        const ux = dx/len, uy = dy/len;      // direction along the measured line
+        const nx = -uy, ny = ux;             // perpendicular (points toward the offset)
+        const off = ((e.ox-p1.x)*nx + (e.oy-p1.y)*ny); // signed distance to the dim line
+        const d1 = { x:p1.x+nx*off, y:p1.y+ny*off };
+        const d2 = { x:p2.x+nx*off, y:p2.y+ny*off };
+        const s1=toS(p1.x,p1.y), s2=toS(p2.x,p2.y), sd1=toS(d1.x,d1.y), sd2=toS(d2.x,d2.y);
+        // extension lines (with a small overshoot past the dimension line, AutoCAD-style)
+        const over = 3;
+        const eux = sd1.x-s1.x, euy = sd1.y-s1.y, elen = Math.hypot(eux,euy) || 1;
+        ctx.beginPath(); ctx.moveTo(s1.x,s1.y); ctx.lineTo(sd1.x+eux/elen*over, sd1.y+euy/elen*over); ctx.stroke();
+        const eux2 = sd2.x-s2.x, euy2 = sd2.y-s2.y, elen2 = Math.hypot(eux2,euy2) || 1;
+        ctx.beginPath(); ctx.moveTo(s2.x,s2.y); ctx.lineTo(sd2.x+eux2/elen2*over, sd2.y+euy2/elen2*over); ctx.stroke();
+        // dimension line
+        ctx.beginPath(); ctx.moveTo(sd1.x,sd1.y); ctx.lineTo(sd2.x,sd2.y); ctx.stroke();
+        // arrowheads
+        const drawArrow = (tip, from) => {
+          const adx = tip.x-from.x, ady = tip.y-from.y, alen = Math.hypot(adx,ady) || 1;
+          const aux = adx/alen, auy = ady/alen, anx = -auy, any = aux;
+          const size = 8;
+          ctx.beginPath();
+          ctx.moveTo(tip.x, tip.y);
+          ctx.lineTo(tip.x-aux*size+anx*size*0.35, tip.y-auy*size+any*size*0.35);
+          ctx.lineTo(tip.x-aux*size-anx*size*0.35, tip.y-auy*size-any*size*0.35);
+          ctx.closePath(); ctx.fill();
+        };
+        drawArrow(sd1, sd2);
+        drawArrow(sd2, sd1);
+        // measured length text, centered on the dimension line
+        const dist = Math.hypot(p2.x-p1.x, p2.y-p1.y);
+        const mid = { x:(sd1.x+sd2.x)/2, y:(sd1.y+sd2.y)/2 };
+        let ang = Math.atan2(sd2.y-sd1.y, sd2.x-sd1.x);
+        if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI; // keep text upright
+        ctx.save();
+        ctx.translate(mid.x, mid.y); ctx.rotate(ang);
+        ctx.font = "12px 'SFMono-Regular', monospace";
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(dist.toFixed(2), 0, -3);
+        ctx.restore();
+        break;
+      }
     }
     if (selected){
       ctx.shadowBlur = 0;
@@ -889,6 +936,7 @@
       case 'arc': return [{x:e.cx,y:e.cy}];
       case 'polyline': return e.points;
       case 'text': return [{x:e.x,y:e.y}];
+      case 'dimension': return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2},{x:e.ox,y:e.oy}];
       default: return [];
     }
   }
@@ -935,6 +983,12 @@
         }
       } else if (e.type === 'text'){
         if (Math.hypot(world.x-e.x, world.y-e.y) < (e.height||3)) return e;
+      } else if (e.type === 'dimension'){
+        const dx = e.x2-e.x1, dy = e.y2-e.y1, len = Math.hypot(dx,dy) || 1;
+        const nx = -dy/len, ny = dx/len;
+        const off = ((e.ox-e.x1)*nx + (e.oy-e.y1)*ny);
+        const d1 = { x:e.x1+nx*off, y:e.y1+ny*off }, d2 = { x:e.x2+nx*off, y:e.y2+ny*off };
+        if (distToSeg(world, d1, d2) < tol || distToSeg(world, {x:e.x1,y:e.y1}, d1) < tol || distToSeg(world, {x:e.x2,y:e.y2}, d2) < tol) return e;
       } else if (e.type === 'hatch'){
         if (hitTestBoundary(world, e.boundary, tol)) return e;
       }
@@ -1053,6 +1107,7 @@
     arc: 'Arc: click center, click for radius + start angle, click again for end angle.',
     polyline: 'Polyline: click points. Press Enter or double-click to finish, Esc to cancel.',
     text: 'Text: click a location, then type your text and press Enter.',
+    dimension: 'Dimension: click the first point, then the second point, then click to place the dimension line — the measured length is added automatically.',
     move: 'Move: select entities first. Click a base point, then the destination point.',
     copy: 'Copy: select entities first. Click a base point, then one or more destination points (Enter/Esc to finish).',
     rotate: 'Rotate: select entities first. Click the base point, then drag/click to set the angle.',
@@ -1060,7 +1115,7 @@
     mirror: 'Mirror: select entities first. Click two points to define the mirror axis. Source is kept.',
     offset: 'Offset: select ONE entity, set distance in Modify Options, then click the side to offset toward.',
     array: 'Array: select entities first, set rows/cols or polar count in Modify Options, then Apply.',
-    trim: 'Trim: select ONE cutting edge first (line/rect/circle/arc/polyline), then click the piece of a line, polyline edge, circle, or arc you want removed.',
+    trim: 'Trim: select ONE cutting edge first (line/rect/circle/arc/polyline), then click the piece of a line, polyline edge, circle, arc, or rectangle you want removed.',
     extend: 'Extend: select ONE boundary first, then click near an open end of a line, polyline, or arc to stretch it to the boundary (full circles have no open end).',
     fillet: 'Fillet: select exactly 2 lines, set a radius in Modify Options, then Apply.',
     chamfer: 'Chamfer: select exactly 2 lines, set a distance in Modify Options, then Apply.',
@@ -1074,6 +1129,7 @@
     tool = t;
     drawing = null; polyPoints = [];
     lineStart = null; rectStart = null; circleCenter = null; arcStage = 0; arcTemp = {};
+    dimStage = 0; dimTemp = {};
     modifyStage = 0; modifyTemp = {}; currentOsnap = null;
     if (['trim','extend','matchprop'].includes(t)){
       modifyBoundaryId = activeSelectionIds().length === 1 ? activeSelectionIds()[0] : null;
@@ -1152,6 +1208,8 @@
   let lineStart = null;
   let rectStart = null;
   let circleCenter = null;
+  let dimStage = 0; // 0=need first point, 1=need second point, 2=need dimension-line placement
+  let dimTemp = {};
 
   function currentStyle(){
     return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5, layer: currentLayer };
@@ -1223,6 +1281,21 @@
     if (tool === 'polyline'){
       polyPoints.push(world);
       cmdPrompt('Specify next point or [Undo/Enter to finish]:');
+      return;
+    }
+    if (tool === 'dimension'){
+      if (dimStage === 0){
+        dimTemp.p1 = world; dimStage = 1;
+        cmdPrompt('Specify second extension line point:');
+      } else if (dimStage === 1){
+        dimTemp.p2 = world; dimStage = 2;
+        cmdPrompt('Specify dimension line location:');
+      } else {
+        snapshot();
+        entities.push({ id: uid(), type:'dimension', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() });
+        dimStage = 0; dimTemp = {}; drawing = null; render(); renderList();
+        cmdDone();
+      }
       return;
     }
     if (tool === 'text'){
@@ -1328,10 +1401,23 @@
       if (modifyBoundaryId == null){ flashHint('Select one cutting/boundary entity first, then ' + (tool==='trim'?'Trim.':'Extend.')); setTool('select'); return; }
       const boundary = entities.find(x => x.id === modifyBoundaryId);
       const target = hitTest(world, modifyBoundaryId);
-      const validTypes = tool === 'trim' ? ['line','polyline','circle','arc'] : ['line','polyline','arc'];
+      const validTypes = tool === 'trim' ? ['line','polyline','circle','arc','rect'] : ['line','polyline','arc'];
       if (!target || target.id === modifyBoundaryId || !validTypes.includes(target.type)){
-        const hint2 = tool==='trim' ? 'a LINE, POLYLINE edge, CIRCLE, or ARC' : 'a LINE, POLYLINE edge, or ARC (circles have no open end)';
-        flashHint('Click on ' + hint2 + ' to ' + tool + '. (Rectangles: Explode first.)'); return;
+        const hint2 = tool==='trim' ? 'a LINE, POLYLINE edge, CIRCLE, ARC, or RECTANGLE' : 'a LINE, POLYLINE edge, or ARC (circles/rectangles have no open end)';
+        flashHint('Click on ' + hint2 + ' to ' + tool + '.'); return;
+      }
+      // A rectangle target trims edge-by-edge exactly like a closed polyline, so convert
+      // it in place first — this lets Trim work on a rect the same effortless way it
+      // already works on a circle, without a separate Explode step.
+      if (tool === 'trim' && target.type === 'rect'){
+        const rx1=target.x1, ry1=target.y1, rx2=target.x2, ry2=target.y2;
+        Object.assign(target, { type:'polyline', closed:true, points:[
+          {x:Math.min(rx1,rx2), y:Math.min(ry1,ry2)},
+          {x:Math.max(rx1,rx2), y:Math.min(ry1,ry2)},
+          {x:Math.max(rx1,rx2), y:Math.max(ry1,ry2)},
+          {x:Math.min(rx1,rx2), y:Math.max(ry1,ry2)}
+        ]});
+        delete target.x1; delete target.y1; delete target.x2; delete target.y2;
       }
       const isCircular = target.type === 'circle' || target.type === 'arc';
       const ok = tool === 'trim'
@@ -1422,6 +1508,7 @@
     else if (e.type === 'circle' || e.type === 'arc'){ e.cx=o.cx+dx; e.cy=o.cy+dy; }
     else if (e.type === 'polyline'){ e.points = o.points.map(p => ({x:p.x+dx, y:p.y+dy})); }
     else if (e.type === 'text'){ e.x=o.x+dx; e.y=o.y+dy; }
+    else if (e.type === 'dimension'){ e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; e.ox=o.ox+dx; e.oy=o.oy+dy; }
     else if (e.type === 'hatch'){ e.boundary = translateBoundary(o.boundary, dx, dy); e.lines = (o.lines||[]).map(s=>({x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy})); }
   }
   function translateBoundary(b, dx, dy){
@@ -1451,6 +1538,9 @@
       e.points = o.points.map(p => rotatePt(p, base, rad));
     } else if (e.type === 'text'){
       const p = rotatePt({x:o.x,y:o.y}, base, rad); e.x=p.x; e.y=p.y;
+    } else if (e.type === 'dimension'){
+      const p1 = rotatePt({x:o.x1,y:o.y1}, base, rad), p2 = rotatePt({x:o.x2,y:o.y2}, base, rad), po = rotatePt({x:o.ox,y:o.oy}, base, rad);
+      e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
     } else if (e.type === 'hatch'){
       const b = o.boundary;
       e.boundary = b.kind==='circle' ? { kind:'circle', cx: rotatePt({x:b.cx,y:b.cy},base,rad).x, cy: rotatePt({x:b.cx,y:b.cy},base,rad).y, r:b.r }
@@ -1469,6 +1559,9 @@
       e.points = o.points.map(p => scalePt(p, base, f));
     } else if (e.type === 'text'){
       const p = scalePt({x:o.x,y:o.y}, base, f); e.x=p.x; e.y=p.y; e.height = Math.max(0.05, (o.height||3)*f);
+    } else if (e.type === 'dimension'){
+      const p1=scalePt({x:o.x1,y:o.y1},base,f), p2=scalePt({x:o.x2,y:o.y2},base,f), po=scalePt({x:o.ox,y:o.oy},base,f);
+      e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
     } else if (e.type === 'hatch'){
       const b = o.boundary;
       e.boundary = b.kind==='circle' ? { kind:'circle', cx: scalePt({x:b.cx,y:b.cy},base,f).x, cy: scalePt({x:b.cx,y:b.cy},base,f).y, r: Math.max(0.001,b.r*f) }
@@ -1500,6 +1593,9 @@
       c.points = c.points.map(p => mirrorPt(p,a,b));
     } else if (c.type === 'text'){
       const p = mirrorPt({x:c.x,y:c.y},a,b); c.x=p.x; c.y=p.y;
+    } else if (c.type === 'dimension'){
+      const p1=mirrorPt({x:c.x1,y:c.y1},a,b), p2=mirrorPt({x:c.x2,y:c.y2},a,b), po=mirrorPt({x:c.ox,y:c.oy},a,b);
+      c.x1=p1.x; c.y1=p1.y; c.x2=p2.x; c.y2=p2.y; c.ox=po.x; c.oy=po.y;
     }
     return c;
   }
@@ -1960,9 +2056,19 @@
       box.style.display = 'block';
       box.style.left = x1+'px'; box.style.top = y1+'px';
       box.style.width = (x2-x1)+'px'; box.style.height = (y2-y1)+'px';
-      // (both drag directions now select the same way — anything the box touches)
+      // Classic AutoCAD convention: dragging left→right is a WINDOW select (only fully
+      // enclosed entities), dragging right→left is a CROSSING select (anything touched).
+      box.classList.toggle('crossing', sx < selBoxStart.sx);
     }
     coordsEl.textContent = `x: ${world.x.toFixed(2)}  y: ${world.y.toFixed(2)}`;
+
+    // Keep the crosshair + status-bar readout tracking the cursor even while panning —
+    // otherwise the view content pans underneath a crosshair that appears frozen.
+    crosshairV.style.left = sx + 'px';
+    crosshairH.style.top = sy + 'px';
+    cursorBox.style.left = sx + 'px';
+    cursorBox.style.top = sy + 'px';
+    statCoords.textContent = `${world.x.toFixed(2)}, ${world.y.toFixed(2)}, 0.00`;
 
     if (panStart){
       view.offsetX = panStart.ox + (e.clientX - panStart.sx);
@@ -1994,6 +2100,8 @@
       drawing = { type:'arc', cx:arcTemp.cx, cy:arcTemp.cy, r:arcTemp.r, startAngle:arcTemp.startAngle, endAngle:ang, ...currentStyle() };
     }
     else if (tool==='polyline' && polyPoints.length) drawing = { type:'polyline', points:[...polyPoints, world], closed:false, ...currentStyle() };
+    else if (tool==='dimension' && dimStage===1) drawing = { type:'dimension', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:world.x, y2:world.y, ox:world.x, oy:world.y, ...currentStyle() };
+    else if (tool==='dimension' && dimStage===2) drawing = { type:'dimension', x1:dimTemp.p1.x, y1:dimTemp.p1.y, x2:dimTemp.p2.x, y2:dimTemp.p2.y, ox:world.x, oy:world.y, ...currentStyle() };
     else drawing = null;
 
     modifyGhosts = [];
@@ -2039,12 +2147,14 @@
       if (moved){
         const w1 = screenToWorld(Math.min(selBoxStart.sx,sx), Math.min(selBoxStart.sy,sy));
         const w2 = screenToWorld(Math.max(selBoxStart.sx,sx), Math.max(selBoxStart.sy,sy));
-        // Always select anything the box touches (not just fully-enclosed) — far more
-        // forgiving and predictable than AutoCAD's direction-dependent window/crossing rule.
+        // Dragging left→right = WINDOW select: only entities fully enclosed by the box.
+        // Dragging right→left = CROSSING select: anything the box merely touches.
+        const isWindow = sx >= selBoxStart.sx;
         const picked = entities.filter(en => {
           if (!layerVisible(en.layer) || layerLocked(en.layer)) return false;
           const bb = entityBBox(en);
           if (!bb) return false;
+          if (isWindow) return bb.minX >= w1.x && bb.maxX <= w2.x && bb.minY >= w1.y && bb.maxY <= w2.y;
           return !(bb.maxX < w1.x || bb.minX > w2.x || bb.maxY < w1.y || bb.minY > w2.y);
         });
         picked.forEach(en => selectedIds.add(en.id));
@@ -2063,6 +2173,7 @@
     if (e.type==='circle'||e.type==='arc') return { minX:e.cx-e.r, maxX:e.cx+e.r, minY:e.cy-e.r, maxY:e.cy+e.r };
     if (e.type==='polyline') return { minX:Math.min(...e.points.map(p=>p.x)), maxX:Math.max(...e.points.map(p=>p.x)), minY:Math.min(...e.points.map(p=>p.y)), maxY:Math.max(...e.points.map(p=>p.y)) };
     if (e.type==='text') return { minX:e.x, maxX:e.x+e.content.length*e.height*0.6, minY:e.y, maxY:e.y+e.height };
+    if (e.type==='dimension') return { minX:Math.min(e.x1,e.x2,e.ox), maxX:Math.max(e.x1,e.x2,e.ox), minY:Math.min(e.y1,e.y2,e.oy), maxY:Math.max(e.y1,e.y2,e.oy) };
     if (e.type==='hatch'){ const b=e.boundary; return b.kind==='circle' ? {minX:b.cx-b.r,maxX:b.cx+b.r,minY:b.cy-b.r,maxY:b.cy+b.r} : {minX:Math.min(...b.points.map(p=>p.x)),maxX:Math.max(...b.points.map(p=>p.x)),minY:Math.min(...b.points.map(p=>p.y)),maxY:Math.max(...b.points.map(p=>p.y))}; }
     return null;
   }
@@ -2233,6 +2344,7 @@
     ARC:'arc', A:'arc',
     PLINE:'polyline', PL:'polyline', POLYLINE:'polyline',
     TEXT:'text', T:'text', DT:'text',
+    DIMENSION:'dimension', DIM:'dimension', DIMLINEAR:'dimension', DLI:'dimension',
     SELECT:'select', V:'select',
     MOVE:'move', M:'move',
     COPY:'copy', CO:'copy', CP:'copy',
@@ -2269,6 +2381,8 @@
     if (tool==='circle' && circleCenter) return circleCenter;
     if (tool==='arc' && arcStage>=1) return { x: arcTemp.cx, y: arcTemp.cy };
     if (tool==='polyline' && polyPoints.length) return polyPoints[polyPoints.length-1];
+    if (tool==='dimension' && dimStage===1) return dimTemp.p1;
+    if (tool==='dimension' && dimStage===2) return dimTemp.p2;
     return null;
   }
   function parseCoordInput(str){
@@ -2297,6 +2411,7 @@
   function cancelDrawing(){
     lineStart = null; rectStart = null; circleCenter = null;
     arcStage = 0; arcTemp = {}; polyPoints = []; drawing = null;
+    dimStage = 0; dimTemp = {};
     modifyStage = 0; modifyTemp = {}; modifyGhosts = []; selBoxStart = null;
     const sb = document.getElementById('selBox'); if (sb) sb.style.display = 'none';
     render();
@@ -2370,7 +2485,7 @@
         break;
       }
       case 'HELP': case '?':
-        log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V)', 'prompt');
+        log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) DIMLINEAR(DIM) SELECT(V)', 'prompt');
         log('Modify: MOVE(M) COPY(CO) ROTATE(RO) SCALE(SC) MIRROR(MI) OFFSET(O) ARRAY(AR) TRIM(TR) EXTEND(EX) FILLET(F) CHAMFER(CHA) MATCHPROP(MA) EXPLODE(X) HATCH(H) BLOCK(B) INSERT(I)', 'prompt');
         log('Other: ERASE(E) UNDO(U) REDO ZOOM(Z) LAYER(LA) SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
         log('While drawing, type coordinates as "10,5" (absolute), "@2,0" (relative), or a plain number for distance.', 'prompt');
@@ -2465,6 +2580,13 @@
       html += row('Height', numInput('m_h', 3, 0.5));
       html += `<div class="form-row"><label>Content</label><input type="text" id="m_content" value="Label"></div>`;
       html += `<button class="formBtn" id="m_add">+ Add Text</button>`;
+    } else if (tool === 'dimension'){
+      html += row('Point 1 X', numInput('m_x1', 0));
+      html += row('Point 1 Y', numInput('m_y1', 0));
+      html += row('Point 2 X', numInput('m_x2', 10));
+      html += row('Point 2 Y', numInput('m_y2', 0));
+      html += row('Line Offset', numInput('m_off', 3, 0.1));
+      html += `<button class="formBtn" id="m_add">+ Add Dimension</button>`;
     }
     manualBody.innerHTML = html;
 
@@ -2522,6 +2644,15 @@
         const content = document.getElementById('m_content').value || 'Text';
         snapshot();
         entities.push({ id: uid(), type:'text', x,y,content,height, ...c });
+        render(); renderList(); zoomToFitIfEmpty();
+      };
+    } else if (tool === 'dimension'){
+      document.getElementById('m_add').onclick = () => {
+        const x1=gv('m_x1'), y1=gv('m_y1'), x2=gv('m_x2'), y2=gv('m_y2'), offVal=gv('m_off');
+        const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1;
+        const nx=-dy/len, ny=dx/len;
+        snapshot();
+        entities.push({ id: uid(), type:'dimension', x1,y1,x2,y2, ox:x1+nx*offVal, oy:y1+ny*offVal, ...c });
         render(); renderList(); zoomToFitIfEmpty();
       };
     }
@@ -2696,7 +2827,7 @@
 
     if (tool === 'trim' || tool === 'extend'){
       const b = modifyBoundaryId!=null ? entities.find(x=>x.id===modifyBoundaryId) : null;
-      html += b ? `<div class="empty-note">Boundary: ${b.type} #${b.id}. Click a target LINE, POLYLINE edge, CIRCLE, or ARC on canvas.</div>`
+      html += b ? `<div class="empty-note">Boundary: ${b.type} #${b.id}. Click a target LINE, POLYLINE edge, CIRCLE, ARC${tool==='trim' ? ', or RECTANGLE' : ''} on canvas.</div>`
                 : `<div class="empty-note">Select exactly one entity to use as the ${tool==='trim'?'cutting edge':'boundary'}, then re-pick this tool.</div>`;
       modifyBody.innerHTML = html;
       return;
@@ -3286,6 +3417,131 @@
     reader.readAsText(file);
     e.target.value = '';
   });
+
+  // ---------- Excel (CSV) export/import ----------
+  // A lightweight, dependency-free round-trip: exports a .csv that Excel opens directly
+  // as a table (one row per entity), and re-imports that same layout back into entities.
+  const EXCEL_COLS = ['id','type','layer','color','width','x1','y1','x2','y2','cx','cy','r','startAngle','endAngle','closed','content','height','ox','oy','points'];
+  const EXCEL_TYPES = ['line','rect','circle','arc','polyline','text','dimension'];
+  function csvEscape(v){
+    if (v === undefined || v === null) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }
+  function toExcelCsv(){
+    const rows = [EXCEL_COLS.join(',')];
+    let skipped = 0;
+    for (const e of entities){
+      if (!EXCEL_TYPES.includes(e.type)){ skipped++; continue; }
+      const row = {
+        id:e.id, type:e.type, layer:e.layer||'0', color:e.color||'', width:e.width||'',
+        x1: e.type==='text' ? e.x : e.x1, y1: e.type==='text' ? e.y : e.y1,
+        x2:e.x2, y2:e.y2, cx:e.cx, cy:e.cy, r:e.r,
+        startAngle:e.startAngle, endAngle:e.endAngle,
+        closed: e.type==='polyline' ? (e.closed?1:0) : '',
+        content: e.content||'', height:e.height, ox:e.ox, oy:e.oy,
+        points: e.type==='polyline' ? e.points.map(p=>`${p.x};${p.y}`).join('|') : ''
+      };
+      rows.push(EXCEL_COLS.map(c => csvEscape(row[c])).join(','));
+    }
+    return { csv: rows.join('\n'), skipped };
+  }
+  // Minimal RFC4180-style single-line CSV field splitter (handles quoted fields with
+  // embedded commas/escaped quotes; doesn't support embedded newlines within a field).
+  function parseCsvLine(line){
+    const out = []; let cur = ''; let inQ = false;
+    for (let i=0;i<line.length;i++){
+      const ch = line[i];
+      if (inQ){
+        if (ch === '"'){ if (line[i+1] === '"'){ cur+='"'; i++; } else inQ=false; }
+        else cur += ch;
+      } else {
+        if (ch === '"') inQ = true;
+        else if (ch === ','){ out.push(cur); cur=''; }
+        else cur += ch;
+      }
+    }
+    out.push(cur);
+    return out;
+  }
+  function parseExcelCsv(text){
+    const lines = text.split(/\r\n|\n|\r/).filter(l => l.length);
+    if (!lines.length) return { entities: [], skipped: 0 };
+    const header = parseCsvLine(lines[0]).map(h => h.trim());
+    const idx = {}; header.forEach((h,i) => idx[h]=i);
+    const num = (v) => (v === '' || v === undefined) ? undefined : parseFloat(v);
+    const out = [];
+    let skipped = 0;
+    for (let li=1; li<lines.length; li++){
+      if (!lines[li].trim()) continue;
+      const cells = parseCsvLine(lines[li]);
+      const get = (name) => idx[name] !== undefined ? cells[idx[name]] : undefined;
+      const type = (get('type')||'').trim();
+      const layer = get('layer') || '0';
+      const color = get('color') || '#4fd1c5';
+      const width = num(get('width')) ?? 1.5;
+      try {
+        if (type === 'line' || type === 'rect'){
+          out.push({ id: uid(), type, x1:num(get('x1')), y1:num(get('y1')), x2:num(get('x2')), y2:num(get('y2')), color, width, layer });
+        } else if (type === 'circle'){
+          out.push({ id: uid(), type, cx:num(get('cx')), cy:num(get('cy')), r:num(get('r')), color, width, layer });
+        } else if (type === 'arc'){
+          out.push({ id: uid(), type, cx:num(get('cx')), cy:num(get('cy')), r:num(get('r')), startAngle:num(get('startAngle')), endAngle:num(get('endAngle')), color, width, layer });
+        } else if (type === 'polyline'){
+          const points = (get('points')||'').split('|').filter(Boolean).map(pair => { const [x,y] = pair.split(';').map(parseFloat); return {x,y}; });
+          if (points.length < 2) { skipped++; continue; }
+          out.push({ id: uid(), type, points, closed: get('closed')==='1', color, width, layer });
+        } else if (type === 'text'){
+          out.push({ id: uid(), type, x:num(get('x1')), y:num(get('y1')), content: get('content')||'Text', height: num(get('height'))||3, color, width, layer });
+        } else if (type === 'dimension'){
+          out.push({ id: uid(), type, x1:num(get('x1')), y1:num(get('y1')), x2:num(get('x2')), y2:num(get('y2')), ox:num(get('ox')), oy:num(get('oy')), color, width, layer });
+        } else {
+          skipped++;
+        }
+      } catch(err){ skipped++; }
+    }
+    return { entities: out, skipped };
+  }
+  document.getElementById('exportXlsx').onclick = () => {
+    const { csv, skipped } = toExcelCsv();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'drawing.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    log('Command: (Excel export) drawing.csv', 'echo');
+    log(`Exported ${entities.length - skipped} entities to CSV.` + (skipped ? ` (${skipped} unsupported entit${skipped===1?'y':'ies'} skipped — hatch/block/insert aren't in this lightweight exporter.)` : ''), 'prompt');
+  };
+  document.getElementById('importXlsxBtn').onclick = () => document.getElementById('fileImportXlsx').click();
+  document.getElementById('fileImportXlsx').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const { entities: parsed, skipped } = parseExcelCsv(reader.result);
+        snapshot();
+        entities = entities.concat(parsed);
+        renumber();
+        zoomToFit(); renderList();
+        const msg = `Imported ${parsed.length} entities from CSV.` + (skipped ? ` (${skipped} row${skipped===1?'':'s'} skipped — unrecognized type or missing data.)` : '');
+        flashHint(msg);
+        log('Command: (Excel import) ' + file.name, 'echo');
+        log(msg, 'prompt');
+        if (parsed.length === 0 && skipped === 0){
+          log('No rows found. Expecting a header row plus one row per entity (as exported by Export Excel).', 'err');
+        }
+      } catch(err){
+        flashHint('Import failed: ' + err.message);
+        log('Command: (Excel import) ' + file.name, 'echo');
+        log('Import failed: ' + err.message, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
   function renumber(){
     for (const e of entities) if (!e.id) e.id = uid();
     nextId = entities.reduce((m,e)=>Math.max(m,e.id||0), 0) + 1;
