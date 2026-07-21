@@ -169,7 +169,7 @@
   #entityList { max-height: 220px; overflow-y: auto; margin-bottom: 16px; }
   #entityList:empty::after { content: 'No entities yet.'; color: var(--text-dim); font-style: italic; }
 
-  input#fileImport { display: none; }
+  input#fileImport, input#fileImportXlsx, input#fileImportBarge { display: none; }
 
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 4px; }
@@ -331,7 +331,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style(50-V2)</div>
+    <div class="brand">Drafting Table — AutoCAD-Style-52</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -379,6 +379,9 @@
     <button class="action" id="exportXlsx" title="Export the entity list as a .json file — full fidelity, opens/edits fine in Excel or any text/JSON tool">⬇ Export Excel</button>
     <button class="action" id="importXlsxBtn" title="Import entities from a .json file (exported from here)">⬆ Import Excel</button>
     <input type="file" id="fileImportXlsx" accept=".json">
+    <button class="action" id="importBargeBtn" title="Import a barge-project-export.json file: hull outline, tank rectangles + labels, and axle circles, each tagged so they can be exported back">⬆ Import from Barge</button>
+    <button class="action" id="exportBargeBtn" title="Export everything still tagged from a Barge import back to the same barge-project-export.json schema, with recalculated positions/sizes">⬇ Export to Barge</button>
+    <input type="file" id="fileImportBarge" accept=".json">
     <button class="action" id="sidebarToggle" title="Show/hide the Layers, Entities, Properties &amp; Modify Options panel">☰ Panel</button>
   </div>
 
@@ -602,16 +605,16 @@
   }
   async function doAutosave(){
     try {
-      await window.storage.set('cad-autosave', JSON.stringify({
+      localStorage.setItem('cad-autosave', JSON.stringify({
         entities, nextId, layers, currentLayer, blocks, groupCounter, savedAt: Date.now()
-      }), false);
+      }));
     } catch(err){ /* autosave failures stay silent — Save/Load remains available manually */ }
   }
   async function restoreAutosave(){
     try {
-      const res = await window.storage.get('cad-autosave', false);
-      if (!res) return;
-      const data = JSON.parse(res.value);
+      const raw = localStorage.getItem('cad-autosave');
+      if (!raw) return;
+      const data = JSON.parse(raw);
       if (!data || !Array.isArray(data.entities) || !data.entities.length) return;
       entities = data.entities;
       nextId = data.nextId || (entities.reduce((m,e)=>Math.max(m,e.id||0),0)+1);
@@ -3458,15 +3461,15 @@
   // ---------- Persistent project storage ----------
   document.getElementById('saveProj').onclick = async () => {
     try {
-      await window.storage.set('cad-project', JSON.stringify({ entities, nextId, layers, currentLayer, blocks }), false);
+      localStorage.setItem('cad-project', JSON.stringify({ entities, nextId, layers, currentLayer, blocks }));
       flashHint('Project saved.');
     } catch(err){ flashHint('Save failed: ' + err.message); }
   };
   document.getElementById('loadProj').onclick = async () => {
     try {
-      const res = await window.storage.get('cad-project', false);
-      if (!res){ flashHint('No saved project found.'); return; }
-      const data = JSON.parse(res.value);
+      const raw = localStorage.getItem('cad-project');
+      if (!raw){ flashHint('No saved project found.'); return; }
+      const data = JSON.parse(raw);
       snapshot();
       entities = data.entities || [];
       nextId = data.nextId || (entities.reduce((m,e)=>Math.max(m,e.id),0)+1);
@@ -3673,6 +3676,104 @@
     reader.readAsText(file);
     e.target.value = '';
   });
+
+  // ---------- Import from Barge / Export to Barge ----------
+  // Reads/writes the same schema the barge app's index.html uses:
+  //   { type:'barge-project-export', version, exportedAt,
+  //     hull:{xMin,xMax,yMin,yMax},
+  //     tanks:[{excelRow,crestRow,name,x,y,width,height,capacity}, ...] (x,y = CENTER),
+  //     trailerAxles:[{excelRow,id,x,y,load,vcg,group,groupNumber,color}, ...] (x,y = center) }
+  // Every entity created from this import carries a hidden e.meta = {source:'barge', kind, ...}
+  // so Export to Barge can find them again later, recompute live geometry, and reproduce
+  // the exact same JSON shape — even after the entities have been moved/resized/recolored.
+  const BARGE_GROUP_PALETTE = ['#4fd1c5','#e0a458','#5b9bd5','#e0685f','#8bd17c','#c792ea','#f2c94c'];
+  const BARGE_AXLE_R = 0.4; // no radius is given in the source data — a small fixed default
+  function ensureBargeLayer(name, color){
+    if (!layers.some(l => l.name === name)) layers.push({ name, color, visible:true, locked:false });
+  }
+  document.getElementById('importBargeBtn').onclick = () => document.getElementById('fileImportBarge').click();
+  document.getElementById('fileImportBarge').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!data.hull && !data.tanks && !data.trailerAxles){
+          throw new Error('Not a recognized barge-project export — expecting "hull", "tanks", and/or "trailerAxles".');
+        }
+        snapshot();
+        ensureBargeLayer('BARGE-HULL', '#4fd1c5');
+        ensureBargeLayer('BARGE-TANKS', '#5b9bd5');
+        ensureBargeLayer('BARGE-AXLES', '#e0a458');
+        const added = [];
+        if (data.hull){
+          const h = data.hull;
+          added.push({ id: uid(), type:'rect', x1:h.xMin, y1:h.yMin, x2:h.xMax, y2:h.yMax, color:'#4fd1c5', width:1.5, layer:'BARGE-HULL',
+            meta:{ source:'barge', kind:'hull' } });
+        }
+        for (const t of (data.tanks||[])){
+          const x1 = t.x - t.width/2, y1 = t.y - t.height/2, x2 = t.x + t.width/2, y2 = t.y + t.height/2;
+          added.push({ id: uid(), type:'rect', x1,y1,x2,y2, color:'#5b9bd5', width:1.2, layer:'BARGE-TANKS',
+            meta:{ source:'barge', kind:'tank', excelRow:t.excelRow, crestRow:t.crestRow, name:t.name, capacity:t.capacity } });
+          added.push({ id: uid(), type:'text', x:t.x, y:t.y, content:(t.name||'').trim(), height: Math.max(0.3, Math.min(t.width,t.height)*0.18), color:'#5b9bd5', width:1, layer:'BARGE-TANKS',
+            meta:{ source:'barge', kind:'tank-label', excelRow:t.excelRow } });
+        }
+        for (const a of (data.trailerAxles||[])){
+          const color = a.color || (a.groupNumber != null ? BARGE_GROUP_PALETTE[a.groupNumber % BARGE_GROUP_PALETTE.length] : '#e0a458');
+          added.push({ id: uid(), type:'circle', cx:a.x, cy:a.y, r:BARGE_AXLE_R, color, width:1.2, layer:'BARGE-AXLES',
+            meta:{ source:'barge', kind:'axle', excelRow:a.excelRow, id:a.id, load:a.load, vcg:a.vcg, group:a.group, groupNumber:a.groupNumber, color:a.color } });
+        }
+        entities = entities.concat(added);
+        renumber();
+        zoomToFit(); renderList(); renderLayers();
+        const msg = `Imported from Barge: ${data.hull?1:0} hull, ${(data.tanks||[]).length} tanks, ${(data.trailerAxles||[]).length} axles.`;
+        flashHint(msg);
+        log('Command: (Import from Barge) ' + file.name, 'echo');
+        log(msg, 'prompt');
+      } catch(err){
+        flashHint('Import failed: ' + err.message);
+        log('Command: (Import from Barge) ' + file.name, 'echo');
+        log('Import failed: ' + err.message, 'err');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+  document.getElementById('exportBargeBtn').onclick = () => {
+    const hullE = entities.find(en => en.meta && en.meta.kind === 'hull');
+    const tankEs = entities.filter(en => en.meta && en.meta.kind === 'tank');
+    const axleEs = entities.filter(en => en.meta && en.meta.kind === 'axle');
+    if (!hullE && !tankEs.length && !axleEs.length){
+      flashHint('No Barge-tagged entities found in this drawing — use Import from Barge first.');
+      log('Export to Barge: nothing tagged to export.', 'err');
+      return;
+    }
+    const hull = hullE ? (() => { const bb = entityBBox(hullE); return { xMin:bb.minX, xMax:bb.maxX, yMin:bb.minY, yMax:bb.maxY }; })() : { xMin:0, xMax:0, yMin:0, yMax:0 };
+    const tanks = tankEs.map(en => {
+      const bb = entityBBox(en);
+      return {
+        excelRow: en.meta.excelRow, crestRow: en.meta.crestRow, name: en.meta.name,
+        x: (bb.minX+bb.maxX)/2, y: (bb.minY+bb.maxY)/2, width: bb.maxX-bb.minX, height: bb.maxY-bb.minY,
+        capacity: en.meta.capacity
+      };
+    });
+    const trailerAxles = axleEs.map(en => ({
+      excelRow: en.meta.excelRow, id: en.meta.id, x: en.cx, y: en.cy,
+      load: en.meta.load, vcg: en.meta.vcg, group: en.meta.group, groupNumber: en.meta.groupNumber,
+      color: en.color || en.meta.color
+    }));
+    const out = { type:'barge-project-export', version:1, exportedAt: new Date().toISOString(), hull, tanks, trailerAxles };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'barge-project-export.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    const msg = `Exported to Barge: ${hullE?1:0} hull, ${tanks.length} tanks, ${trailerAxles.length} axles.`;
+    log('Command: (Export to Barge) barge-project-export.json', 'echo');
+    log(msg, 'prompt');
+  };
 
   function renumber(){
     for (const e of entities) if (!e.id) e.id = uid();
