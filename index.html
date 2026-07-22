@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-54-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-Test-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -6540,7 +6540,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             scene3d.background = new THREE.Color(skyColor);
 
             const timeLabel = getRealSunTimeLabel();
-            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel}`);
+            // TEMP DEBUG: shows the actual lat/lon/offset/UTC instant driving
+            // this calculation, to catch stale-value bugs (input box shows
+            // one thing, internal variable used is another). Remove once
+            // the real-sun timing issue is confirmed fixed.
+            const dbgOffset = Math.round((realSunLon || 0) / 15);
+            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel} | DEBUG lat=${realSunLat} lon=${realSunLon} offset=${dbgOffset}h UTC=${now.toISOString()}`);
         }
 
         // Restores ambient/directional light to their normal fixed
