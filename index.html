@@ -395,10 +395,10 @@
            existing state logic (getTankFlowState) needs no changes. */
         .tank-flow-pipe {
             position: relative;
-            width: 14px;
-            height: 20px;
+            width: 20px;
+            height: 28px;
             overflow: hidden;
-            border-radius: 2px;
+            border-radius: 3px;
         }
 
         .tank-flow-pipe.flow-fill { background: rgba(2,132,199,0.18); box-shadow: 0 0 5px rgba(56,189,248,0.75) inset; }
@@ -408,25 +408,25 @@
         .tank-flow-chevron {
             position: absolute;
             left: 50%;
-            width: 7px;
-            height: 7px;
+            width: 10px;
+            height: 10px;
             opacity: 0;
         }
         .flow-fill .tank-flow-chevron {
-            border-right: 2px solid #38bdf8;
-            border-bottom: 2px solid #38bdf8;
+            border-right: 3px solid #38bdf8;
+            border-bottom: 3px solid #38bdf8;
             transform: translateX(-50%) rotate(45deg);
             animation: chevronDown 0.5s linear infinite;
         }
         .flow-discharge .tank-flow-chevron {
-            border-right: 2px solid #f87171;
-            border-bottom: 2px solid #f87171;
+            border-right: 3px solid #f87171;
+            border-bottom: 3px solid #f87171;
             transform: translateX(-50%) rotate(225deg);
             animation: chevronUp 0.5s linear infinite;
         }
         .flow-mixed .tank-flow-chevron {
-            border-right: 2px solid #c084fc;
-            border-bottom: 2px solid #c084fc;
+            border-right: 3px solid #c084fc;
+            border-bottom: 3px solid #c084fc;
             transform: translateX(-50%) rotate(45deg);
             animation: chevronDown 0.5s linear infinite;
         }
@@ -435,39 +435,39 @@
         .tank-flow-chevron:nth-child(3) { animation-delay: 0.76s; }
 
         @keyframes chevronDown {
-            0%   { top: -8px; opacity: 0; }
+            0%   { top: -11px; opacity: 0; }
             15%  { opacity: 1; }
             80%  { opacity: 1; }
-            100% { top: 18px; opacity: 0; }
+            100% { top: 26px; opacity: 0; }
         }
         @keyframes chevronUp {
-            0%   { top: 18px; opacity: 0; }
+            0%   { top: 26px; opacity: 0; }
             15%  { opacity: 1; }
             80%  { opacity: 1; }
-            100% { top: -8px; opacity: 0; }
+            100% { top: -11px; opacity: 0; }
         }
 
         /* Small state pill (FILL / DISCHARGE / MIXED) sitting above the
            pipe — this is the "label" half of the arrow+label ask. */
         .tank-flow-state {
-            font-size: 7px;
+            font-size: 10px;
             font-weight: 800;
             letter-spacing: 0.4px;
             text-align: center;
-            border-radius: 2px 2px 0 0;
-            padding: 0 2px;
+            border-radius: 3px 3px 0 0;
+            padding: 1px 3px;
         }
         .tank-flow-state.flow-fill { background: #0284c7; color: #e0f2fe; }
         .tank-flow-state.flow-discharge { background: #b91c1c; color: #fee2e2; }
         .tank-flow-state.flow-mixed { background: #7e22ce; color: #f5f3ff; }
 
         .tank-flow-label {
-            font-size: 8px;
+            font-size: 11px;
             font-weight: 700;
             color: #f5f3ff;
             background: rgba(15,17,21,0.65);
-            padding: 0 3px;
-            border-radius: 2px;
+            padding: 1px 4px;
+            border-radius: 3px;
             white-space: nowrap;
         }
 
@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-51-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-54-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1513,6 +1513,9 @@
                 <button class="sync-btn" id="restoreViewBtn" onclick="restoreSavedView()" style="flex:1; opacity:0.4; cursor:not-allowed;" disabled>
                     ↩ Restore View
                 </button>
+                <button class="sync-btn" id="lock3DViewBtn" onclick="toggle3DViewLock()" title="Lock/unlock zoom, orbit and pan on the 3D view" style="flex:1; background:rgba(239,68,68,0.12); border-color:#ef4444; color:#ef4444;">
+                    🔒 Locked
+                </button>
                 <span id="savedViewLabel" style="font-size:10px; color:var(--text-muted); white-space:nowrap;"></span>
             </div>
             <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0; margin-top: 8px;">
@@ -1523,10 +1526,24 @@
                         <input type="checkbox" id="deck3dToggle" checked onchange="set3DDeckVisible(this.checked)">
                     </label>
                     <label class="toggle-container" style="margin:0;">
-                        <span style="font-size:11px;">Labels</span>
-                        <input type="checkbox" id="labels3dToggle" checked onchange="set3DPctPumpLabelsVisible(this.checked)">
+                        <span style="font-size:11px;">% Fill</span>
+                        <input type="checkbox" id="labels3dToggle" checked onchange="set3DPctPumpLabelsVisible(this.checked)" title="Show/hide the per-tank %-fill labels. Pump labels always show.">
                     </label>
                 </div>
+            </div>
+            <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0; margin-top: 8px;" title="When on, the sky and sunlight in the 3D view follow the real sun position for the given coordinates and the current local time, instead of the plain Day/Night toggle.">
+                <span style="font-size: 12px; color: var(--text-muted);">🌞 Real-world sun</span>
+                <label class="toggle-container" style="margin:0;">
+                    <span style="font-size:11px;">Follow time/location</span>
+                    <input type="checkbox" id="realSunToggleCheckbox" onchange="toggleRealSun3D(this.checked)">
+                </label>
+            </div>
+            <div id="realSunControls" style="display:none; gap:6px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+                <input type="number" id="sunLatInput" class="ab-weight-input" placeholder="Latitude" step="0.0001" min="-90" max="90" style="width:90px;" onchange="applyRealSunLocation()">
+                <input type="number" id="sunLonInput" class="ab-weight-input" placeholder="Longitude" step="0.0001" min="-180" max="180" style="width:90px;" onchange="applyRealSunLocation()">
+                <input type="number" id="sunHeadingInput" class="ab-weight-input" placeholder="Heading°" step="1" min="0" max="359" value="0" title="Bow (FWD) compass heading in degrees from true North — needed to align the real sun direction with the barge's FWD/AFT/PS/SB. Defaults to 0 (bow points North)." style="width:80px;" onchange="applyRealSunLocation()">
+                <button class="sync-btn" id="useMyLocationBtn" onclick="useMyLocationForSun()" style="flex:0 0 auto;">📍 Use my location</button>
+                <span id="realSunStatus" style="font-size:10px; color:var(--text-muted); white-space:nowrap;"></span>
             </div>
         </div>
 
@@ -2932,7 +2949,8 @@
                 // Pump label lives INSIDE the tank's own card, anchored to
                 // its top-right corner, so it naturally follows that
                 // tank's position/size without any separate world-space
-                // placement math.
+                // placement math. No tank name needed here — the card
+                // itself already makes that association visually.
                 const card = document.getElementById(`tank_card_${tankId}`);
                 if (!card) return;
                 const wrap = document.createElement('div');
@@ -3538,6 +3556,13 @@
                     cellTrim.load("values");
                     cellHeel.load("values");
 
+                    // Real-world sun date/time source: Load_Editor!R147
+                    // (date) and R148 (time) — see getRealSunDateTime().
+                    const cellSunDate = editorSheet.getRange("R147");
+                    const cellSunTime = editorSheet.getRange("R148");
+                    cellSunDate.load("values");
+                    cellSunTime.load("values");
+
                     // 6 barge corner/edge labels: Load_Editor!I1:I6
                     const rangeCornerLabels = editorSheet.getRange("I1:I6");
                     rangeCornerLabels.load("values");
@@ -3590,6 +3615,10 @@
                     BARGE_NAME = crestSheet.name || CREST_SHEET_NAME;
                     currentTrimDegrees = parseFloat(cellTrim.values[0][0] || 0.0);
                     currentHeelDegrees = parseFloat(cellHeel.values[0][0] || 0.0);
+                    // Real-world sun date/time — Load_Editor!R147/R148.
+                    excelSunDateRaw = cellSunDate.values[0][0];
+                    excelSunTimeRaw = cellSunTime.values[0][0];
+                    if (realSunEnabled) updateRealSun3D();
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
                     updateCurrentDeckFromLabels();
 
@@ -5629,6 +5658,11 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // without disturbing orbit rotation.
         let panOffsetX3d = 0, panOffsetY3d = 0, panOffsetZ3d = 0;
         let current3DCamera = 'iso-fwd-ps';
+        // Lock/unlock gate for the 3D viewer's mouse/touch interaction
+        // (orbit, pan, zoom). Locked = view is frozen in place; camera
+        // preset buttons and Save/Restore View still work either way.
+        // Defaults to locked on every page load.
+        let is3DViewLocked = true;
 
         const CAM_PRESETS_3D = {
             'iso-fwd-ps': { az: 45,   el: 32 },
@@ -5705,10 +5739,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // "pointing down / into the tank" (fill) with no repositioning.
         // FLOW_ARROW_LIFT_Y_3D is how high above the tank top the arrow's
         // pivot floats — kept clear of the %-fill/pump labels below it.
-        const FLOW_ARROW_SHAFT_LEN_3D = 0.55;
-        const FLOW_ARROW_HEAD_LEN_3D = 0.35;
+        const FLOW_ARROW_SHAFT_LEN_3D = 0.85;
+        const FLOW_ARROW_HEAD_LEN_3D = 0.55;
         const FLOW_ARROW_TOTAL_LEN_3D = FLOW_ARROW_SHAFT_LEN_3D + FLOW_ARROW_HEAD_LEN_3D;
-        const FLOW_ARROW_LIFT_Y_3D = 1.1;
+        const FLOW_ARROW_LIFT_Y_3D = 1.35;
         const FLOW_ARROW_BOB_AMPLITUDE_3D = 0.12; // metres of up/down travel added on top of the base lift, animated in updateTankFlowPulse3D()
         // Sea-level plane (the big flat "ocean" surface) styling — separate
         // from the per-tank ballast fill above.
@@ -5718,11 +5752,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             transparent: true
         };
 
-        // Whether the %-fill labels and pump-name labels are shown in the
-        // 3D view. AFT/FWD/PS/SB edge labels and the 6 corner labels are
-        // NOT affected by this — only per-tank %-fill text and pump-name
-        // text. Toggled by the "Labels" checkbox next to "Deck" in the 3D
-        // panel (see set3DPctPumpLabelsVisible).
+        // Whether the %-fill labels are shown in the 3D view. AFT/FWD/
+        // PS/SB edge labels, the 6 corner labels, and pump-name labels
+        // are NOT affected by this — pump labels always show; only
+        // per-tank %-fill text is gated. Toggled by the "% Fill"
+        // checkbox next to "Deck" in the 3D panel (see
+        // set3DPctPumpLabelsVisible).
         let show3DPctPumpLabels = true;
 
         function set3DPctPumpLabelsVisible(visible) {
@@ -5936,6 +5971,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
             // ---- Mouse interaction: left-drag = orbit, middle-drag = pan ----
             container.addEventListener('mousedown', (e) => {
+                if (is3DViewLocked) return; // view frozen — ignore orbit/pan start
                 if (e.button === 1) { // middle mouse button = pan
                     isPanning3d = true;
                     lastPanX3d = e.clientX; lastPanY3d = e.clientY;
@@ -5947,6 +5983,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             container.addEventListener('contextmenu', (e) => e.preventDefault());
             window.addEventListener('mouseup', () => { isDragging3d = false; isPanning3d = false; });
             window.addEventListener('mousemove', (e) => {
+                if (is3DViewLocked) return; // view frozen — ignore orbit/pan drag
                 if (isPanning3d) {
                     const dx = e.clientX - lastPanX3d, dy = e.clientY - lastPanY3d;
                     applyPan3D(dx, dy);
@@ -5961,6 +5998,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 updateCamera3DPosition();
             });
             container.addEventListener('wheel', (e) => {
+                if (is3DViewLocked) return; // view frozen — ignore zoom
                 e.preventDefault();
                 radius3d = Math.max(60, Math.min(600, radius3d + e.deltaY * 0.12));
                 updateCamera3DPosition();
@@ -5972,6 +6010,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             let lastTouchDist = null;
             let lastTouchMidX = null, lastTouchMidY = null;
             container.addEventListener('touchstart', (e) => {
+                if (is3DViewLocked) return; // view frozen — ignore touch orbit/pan/zoom start
                 if (e.touches.length === 1) {
                     isDragging3d = true; isPanning3d = false;
                     lastX3d = e.touches[0].clientX; lastY3d = e.touches[0].clientY;
@@ -5986,6 +6025,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 e.preventDefault();
             }, { passive: false });
             container.addEventListener('touchmove', (e) => {
+                if (is3DViewLocked) return; // view frozen — ignore touch orbit/pan/zoom drag
                 if (e.touches.length === 1 && isDragging3d) {
                     const dx = e.touches[0].clientX - lastX3d, dy = e.touches[0].clientY - lastY3d;
                     theta3d -= dx * 0.006;
@@ -6094,15 +6134,426 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (deckPlate3d) deckPlate3d.visible = visible;
         }
 
+        // Locks/unlocks orbit, pan and zoom interaction on the 3D viewer.
+        // Locked = view is frozen in place (no zoom/move); camera preset
+        // buttons and Save/Restore View still work regardless of lock
+        // state, since those are deliberate jumps rather than free-form
+        // dragging. Defaults to locked (see is3DViewLocked declaration).
+        function toggle3DViewLock() {
+            is3DViewLocked = !is3DViewLocked;
+            update3DViewLockUI();
+        }
+
+        function update3DViewLockUI() {
+            const btn = document.getElementById('lock3DViewBtn');
+            if (!btn) return;
+            if (is3DViewLocked) {
+                btn.textContent = '🔒 Locked';
+                btn.style.background = 'rgba(239,68,68,0.12)';
+                btn.style.borderColor = '#ef4444';
+                btn.style.color = '#ef4444';
+            } else {
+                btn.textContent = '🔓 Unlocked';
+                btn.style.background = 'rgba(16,185,129,0.12)';
+                btn.style.borderColor = '#10b981';
+                btn.style.color = '#10b981';
+            }
+        }
+
         // Sky-only day/night control, driven by the SAME header toggle
         // that switches the 2D dashboard's light/dark theme (see
         // toggleDashboardTheme()). isDay = true -> light blue sky;
         // isDay = false -> dark navy sky. All ambient/directional
         // lighting intensity and water tint are intentionally left
         // untouched here, staying at their "day" appearance always.
+        // Skipped while Real-world sun mode is on, since that mode
+        // owns the sky colour instead (see updateRealSun3D).
         function set3DSky(isDay) {
-            if (!scene3d) return;
+            if (!scene3d || realSunEnabled) return;
             scene3d.background = new THREE.Color(isDay ? SKY_DAY_COLOR : SKY_NIGHT_COLOR);
+        }
+
+        // ============================================================
+        // REAL-WORLD SUN (time + location aware lighting)
+        // When enabled, this replaces the plain Day/Night toggle for the
+        // 3D scene's sky colour and directional sunlight: given a
+        // latitude/longitude, it computes the actual sun altitude/
+        // azimuth for the CURRENT local time (recomputed every 60s)
+        // using a standard NOAA/Meeus-style low-precision solar
+        // position formula, then:
+        //   - points dirLight3d along that real sun direction
+        //   - scales its intensity/colour by how high the sun sits
+        //     (bright white near noon, warm orange low near the
+        //     horizon, dim at night)
+        //   - tints the sky background to match (blue by day, orange/
+        //     pink at sunrise & sunset, dark navy at night)
+        // Turning it off restores the ordinary Day/Night toggle and the
+        // fixed "day" ambient/directional light levels. Latitude/
+        // longitude and the enabled flag persist to localStorage.
+        // ============================================================
+        let realSunEnabled = false;
+        let realSunLat = null;
+        let realSunLon = null;
+        let realSunHeadingDeg = 0; // compass bearing of the bow (FWD) from true North; 0 = bow points North
+        let realSunIntervalId = null;
+
+        // Real-world sun's clock now follows EXCEL rather than the
+        // browser's system clock: Load_Editor!R147 (date) and R148
+        // (time), read every Excel sync in pullExcelTankData(). Raw
+        // values as returned by the Excel API — usually date/time
+        // serial numbers, occasionally a text string depending on the
+        // cell's format — converted by getRealSunDateTime() below.
+        let excelSunDateRaw = null;
+        let excelSunTimeRaw = null;
+
+        // Excel date serial (days since 1899-12-30) -> {year, month, day}.
+        // Uses UTC math throughout so it's immune to the browser's own
+        // timezone.
+        function excelSerialToYMD(serial) {
+            const utcMillis = Math.round((serial - 25569) * 86400000); // 25569 = days between 1899-12-30 and 1970-01-01
+            const d = new Date(utcMillis);
+            return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+        }
+
+        // Excel time serial (0-1, fraction of a day) -> {hours, minutes, seconds}.
+        function excelSerialToHMS(serial) {
+            const totalSeconds = Math.round((((serial % 1) + 1) % 1) * 86400);
+            return {
+                hours: Math.floor(totalSeconds / 3600),
+                minutes: Math.floor((totalSeconds % 3600) / 60),
+                seconds: totalSeconds % 60
+            };
+        }
+
+        // Combines the last-read Load_Editor!R147/R148 date+time with
+        // the CURRENT Real-world sun longitude into a single UTC-based
+        // JS Date for computeSolarPosition() to consume. R147/R148 are
+        // treated as VESSEL LOCAL date/time; longitude approximates the
+        // vessel's UTC offset (nearest whole hour) since no explicit
+        // timezone/UTC-offset cell is provided — the same simplification
+        // most simple solar calculators use, and the equation-of-time
+        // term inside computeSolarPosition corrects the small residual
+        // difference between clock time and true solar time either way.
+        // Falls back to the live system clock if Excel hasn't supplied a
+        // date/time yet (e.g. running outside Excel, or blank cells).
+        function getRealSunDateTime() {
+            if (excelSunDateRaw === null || excelSunDateRaw === undefined || excelSunDateRaw === ''
+                || excelSunTimeRaw === null || excelSunTimeRaw === undefined || excelSunTimeRaw === '') {
+                return new Date();
+            }
+            let ymd, hms;
+            if (typeof excelSunDateRaw === 'number') {
+                ymd = excelSerialToYMD(excelSunDateRaw);
+            } else {
+                const parsed = new Date(excelSunDateRaw);
+                if (isNaN(parsed.getTime())) return new Date();
+                ymd = { year: parsed.getFullYear(), month: parsed.getMonth() + 1, day: parsed.getDate() };
+            }
+            if (typeof excelSunTimeRaw === 'number') {
+                hms = excelSerialToHMS(excelSunTimeRaw);
+            } else {
+                const m = String(excelSunTimeRaw).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+                if (!m) return new Date();
+                let hh = parseInt(m[1], 10);
+                const mm = parseInt(m[2], 10);
+                const ss = m[3] ? parseInt(m[3], 10) : 0;
+                if (m[4]) {
+                    const isPM = m[4].toUpperCase() === 'PM';
+                    if (isPM && hh < 12) hh += 12;
+                    if (!isPM && hh === 12) hh = 0;
+                }
+                hms = { hours: hh, minutes: mm, seconds: ss };
+            }
+            const lon = (realSunLon !== null) ? realSunLon : 0;
+            const offsetHours = Math.round(lon / 15); // approximate vessel UTC offset from longitude
+            return new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day, hms.hours - offsetHours, hms.minutes, hms.seconds));
+        }
+
+        (function loadRealSunFromStorage() {
+            try {
+                const raw = localStorage.getItem('bargeballast_real_sun');
+                if (!raw) return;
+                const saved = JSON.parse(raw);
+                realSunLat = typeof saved.lat === 'number' ? saved.lat : null;
+                realSunLon = typeof saved.lon === 'number' ? saved.lon : null;
+                realSunHeadingDeg = typeof saved.heading === 'number' ? saved.heading : 0;
+                realSunEnabled = !!saved.enabled && realSunLat !== null && realSunLon !== null;
+                const latEl = document.getElementById('sunLatInput');
+                const lonEl = document.getElementById('sunLonInput');
+                const headingEl = document.getElementById('sunHeadingInput');
+                const toggleEl = document.getElementById('realSunToggleCheckbox');
+                const controlsEl = document.getElementById('realSunControls');
+                if (latEl && realSunLat !== null) latEl.value = realSunLat;
+                if (lonEl && realSunLon !== null) lonEl.value = realSunLon;
+                if (headingEl) headingEl.value = realSunHeadingDeg;
+                if (toggleEl) toggleEl.checked = realSunEnabled;
+                if (controlsEl) controlsEl.style.display = realSunEnabled ? 'flex' : 'none';
+            } catch (e) { /* ignore parse errors */ }
+        })();
+
+        function saveRealSunToStorage() {
+            try {
+                localStorage.setItem('bargeballast_real_sun', JSON.stringify({
+                    lat: realSunLat, lon: realSunLon, heading: realSunHeadingDeg, enabled: realSunEnabled
+                }));
+            } catch (e) {}
+        }
+
+        function setRealSunStatus(text) {
+            const el = document.getElementById('realSunStatus');
+            if (el) el.textContent = text;
+        }
+
+        function toggleRealSun3D(checked) {
+            realSunEnabled = checked && realSunLat !== null && realSunLon !== null;
+            const controlsEl = document.getElementById('realSunControls');
+            if (controlsEl) controlsEl.style.display = checked ? 'flex' : 'none';
+            if (checked && (realSunLat === null || realSunLon === null)) {
+                setRealSunStatus('Enter a latitude & longitude, or use 📍 Use my location.');
+            }
+            saveRealSunToStorage();
+            if (realSunEnabled) {
+                startRealSunClock();
+                updateRealSun3D();
+            } else {
+                stopRealSunClock();
+                // Fall back to the plain Day/Night toggle's sky and the
+                // fixed "day" lighting levels.
+                resetSunlightToDefault3D();
+                const themeChecked = document.getElementById('themeToggleCheckbox');
+                set3DSky(themeChecked ? themeChecked.checked : true);
+            }
+        }
+
+        function applyRealSunLocation() {
+            const latEl = document.getElementById('sunLatInput');
+            const lonEl = document.getElementById('sunLonInput');
+            const headingEl = document.getElementById('sunHeadingInput');
+            const lat = latEl ? parseFloat(latEl.value) : NaN;
+            const lon = lonEl ? parseFloat(lonEl.value) : NaN;
+            if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                setRealSunStatus('Enter a valid latitude (-90 to 90) & longitude (-180 to 180).');
+                return;
+            }
+            realSunLat = lat; realSunLon = lon;
+            const headingRaw = headingEl ? parseFloat(headingEl.value) : NaN;
+            realSunHeadingDeg = isNaN(headingRaw) ? 0 : ((headingRaw % 360) + 360) % 360;
+            const toggleEl = document.getElementById('realSunToggleCheckbox');
+            realSunEnabled = toggleEl ? toggleEl.checked : true;
+            saveRealSunToStorage();
+            if (realSunEnabled) {
+                startRealSunClock();
+                updateRealSun3D();
+            }
+        }
+
+        function useMyLocationForSun() {
+            if (!navigator.geolocation) {
+                setRealSunStatus('Geolocation not available in this browser.');
+                return;
+            }
+            setRealSunStatus('Locating…');
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const latEl = document.getElementById('sunLatInput');
+                    const lonEl = document.getElementById('sunLonInput');
+                    if (latEl) latEl.value = pos.coords.latitude.toFixed(4);
+                    if (lonEl) lonEl.value = pos.coords.longitude.toFixed(4);
+                    const toggleEl = document.getElementById('realSunToggleCheckbox');
+                    if (toggleEl) toggleEl.checked = true;
+                    const controlsEl = document.getElementById('realSunControls');
+                    if (controlsEl) controlsEl.style.display = 'flex';
+                    applyRealSunLocation();
+                },
+                (err) => {
+                    setRealSunStatus('Could not get your location (' + err.message + ').');
+                },
+                { enableHighAccuracy: false, timeout: 10000 }
+            );
+        }
+
+        function startRealSunClock() {
+            stopRealSunClock();
+            // Recompute every 60s — the sun's position doesn't move
+            // fast enough to need anything more frequent for a visual
+            // sky/lighting effect.
+            realSunIntervalId = setInterval(updateRealSun3D, 60000);
+        }
+
+        function stopRealSunClock() {
+            if (realSunIntervalId) { clearInterval(realSunIntervalId); realSunIntervalId = null; }
+        }
+
+        // Approximate solar position (altitude & azimuth, in degrees)
+        // for a given Date/latitude/longitude, using the standard low-
+        // precision solar coordinate formulas (NOAA/Meeus-style).
+        // Accurate to well within a degree — more than enough for a
+        // visual sky/lighting effect.
+        function computeSolarPosition(date, latDeg, lonDeg) {
+            const rad = Math.PI / 180;
+            const msPerDay = 86400000;
+            const julianDay = date.getTime() / msPerDay + 2440587.5;
+            const T = (julianDay - 2451545.0) / 36525;
+
+            const L0 = (280.46646 + T * (36000.76983 + T * 0.0003032)) % 360;
+            const M = 357.52911 + T * (35999.05029 - 0.0001537 * T);
+            const Mrad = M * rad;
+            const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T);
+            const C = Math.sin(Mrad) * (1.914602 - T * (0.004817 + 0.000014 * T))
+                + Math.sin(2 * Mrad) * (0.019993 - 0.000101 * T)
+                + Math.sin(3 * Mrad) * 0.000289;
+            const trueLong = L0 + C;
+            const omega = 125.04 - 1934.136 * T;
+            const lambda = trueLong - 0.00569 - 0.00478 * Math.sin(omega * rad);
+            const epsilon0 = 23 + (26 + (21.448 - T * (46.815 + T * (0.00059 - T * 0.001813))) / 60) / 60;
+            const epsilon = epsilon0 + 0.00256 * Math.cos(omega * rad);
+
+            const lambdaRad = lambda * rad;
+            const epsilonRad = epsilon * rad;
+            const decl = Math.asin(Math.sin(epsilonRad) * Math.sin(lambdaRad));
+
+            const y = Math.tan(epsilonRad / 2) * Math.tan(epsilonRad / 2);
+            const eqTime = 4 * (
+                y * Math.sin(2 * L0 * rad)
+                - 2 * e * Math.sin(Mrad)
+                + 4 * e * y * Math.sin(Mrad) * Math.cos(2 * L0 * rad)
+                - 0.5 * y * y * Math.sin(4 * L0 * rad)
+                - 1.25 * e * e * Math.sin(2 * Mrad)
+            ) / rad; // minutes
+
+            const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
+            let trueSolarTime = (utcMinutes + eqTime + 4 * lonDeg) % 1440;
+            if (trueSolarTime < 0) trueSolarTime += 1440;
+
+            const hourAngleDeg = trueSolarTime / 4 - 180;
+            const hourAngle = hourAngleDeg * rad;
+
+            const latRad = latDeg * rad;
+            const cosZenith = Math.sin(latRad) * Math.sin(decl) + Math.cos(latRad) * Math.cos(decl) * Math.cos(hourAngle);
+            const zenith = Math.acos(Math.max(-1, Math.min(1, cosZenith)));
+            const altitude = 90 - zenith / rad;
+
+            let azimuthRad = Math.atan2(
+                Math.sin(hourAngle),
+                Math.cos(hourAngle) * Math.sin(latRad) - Math.tan(decl) * Math.cos(latRad)
+            );
+            let azimuth = (azimuthRad / rad) + 180; // convert from south-referenced to compass (0=N)
+            azimuth = ((azimuth % 360) + 360) % 360;
+
+            return { altitude, azimuth };
+        }
+
+        // Simple RGB lerp between two 0xRRGGBB colours.
+        function lerpColor3D(c1, c2, t) {
+            t = Math.max(0, Math.min(1, t));
+            const r = ((c1 >> 16) & 0xff) + t * (((c2 >> 16) & 0xff) - ((c1 >> 16) & 0xff));
+            const g = ((c1 >> 8) & 0xff) + t * (((c2 >> 8) & 0xff) - ((c1 >> 8) & 0xff));
+            const b = (c1 & 0xff) + t * ((c2 & 0xff) - (c1 & 0xff));
+            return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+        }
+
+        const REAL_SUN_RADIUS_3D = 200; // distance the light "sits" at — direction is what matters for a directional light
+        const REAL_SUN_NIGHT_COLOR = 0x040508;
+        const REAL_SUN_TWILIGHT_COLOR = 0x2b2a4a;
+        const REAL_SUN_SUNRISE_COLOR = 0xf7a34b;
+        const REAL_SUN_DAY_COLOR = 0x8ecdf2;
+
+        // Recomputes the sun's real altitude/azimuth for right now at
+        // the stored lat/lon, then updates dirLight3d's position,
+        // intensity & colour, ambientLight3d's intensity, and the sky
+        // background to match — the visual "day/night/sunrise/sunset"
+        // vibe following real time and location.
+        // Display-only label for the status line — shows the actual
+        // Load_Editor!R148 clock time (not converted to the browser's
+        // own timezone, unlike getRealSunDateTime()'s UTC instant),
+        // so what the operator sees on screen matches what's in Excel.
+        function getRealSunTimeLabel() {
+            if (excelSunDateRaw === null || excelSunDateRaw === undefined || excelSunDateRaw === ''
+                || excelSunTimeRaw === null || excelSunTimeRaw === undefined || excelSunTimeRaw === '') {
+                return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (system clock)';
+            }
+            let hms;
+            if (typeof excelSunTimeRaw === 'number') {
+                hms = excelSerialToHMS(excelSunTimeRaw);
+            } else {
+                const m = String(excelSunTimeRaw).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+                if (!m) return '—';
+                let hh = parseInt(m[1], 10);
+                const mm = parseInt(m[2], 10);
+                if (m[4]) {
+                    const isPM = m[4].toUpperCase() === 'PM';
+                    if (isPM && hh < 12) hh += 12;
+                    if (!isPM && hh === 12) hh = 0;
+                }
+                hms = { hours: hh, minutes: mm };
+            }
+            return `${String(hms.hours).padStart(2, '0')}:${String(hms.minutes).padStart(2, '0')} (R148)`;
+        }
+
+        function updateRealSun3D() {
+            if (!realSunEnabled || realSunLat === null || realSunLon === null || !scene3d || !dirLight3d) return;
+            const now = getRealSunDateTime();
+            const { altitude, azimuth } = computeSolarPosition(now, realSunLat, realSunLon);
+
+            // Position the light along the real sun direction, rotated
+            // into the scene's own FWD/AFT/PS/SB axes using the vessel's
+            // bow heading (compass bearing of FWD from true North, see
+            // realSunHeadingDeg / the "Heading" input). Relative bearing
+            // = real azimuth − heading: 0°=dead ahead (FWD/+X), 90°=
+            // starboard, 180°=astern (AFT/-X), 270°=port — the standard
+            // view facing forward from the stern, matching the PS/SB
+            // handedness fixed by worldYToZ3D() elsewhere in this file.
+            // Heading defaults to 0° (bow points North) if not set.
+            const altRad = Math.max(altitude, -5) * Math.PI / 180;
+            const relBearingRad = (azimuth - realSunHeadingDeg) * Math.PI / 180;
+            const horizR = REAL_SUN_RADIUS_3D * Math.cos(altRad);
+            dirLight3d.position.set(
+                horizR * Math.cos(relBearingRad),
+                Math.max(REAL_SUN_RADIUS_3D * Math.sin(altRad), 5),
+                horizR * Math.sin(relBearingRad)
+            );
+
+            // Intensity & colour ramp with altitude: bright/white near
+            // noon, warm orange near the horizon, dim at night.
+            const dayT = Math.max(0, Math.min(1, altitude / 45));
+            const nightT = Math.max(0, Math.min(1, -altitude / 6));
+            dirLight3d.intensity = 0.15 + 0.85 * dayT * (1 - nightT);
+            dirLight3d.color.set(lerpColor3D(0xffd9a0, 0xffffff, dayT));
+
+            if (ambientLight3d) {
+                ambientLight3d.intensity = 0.25 + 0.45 * (1 - nightT);
+            }
+
+            // Sky colour: night -> twilight -> sunrise/sunset orange -> day blue.
+            let skyColor;
+            if (altitude <= -6) {
+                skyColor = REAL_SUN_NIGHT_COLOR;
+            } else if (altitude <= 0) {
+                skyColor = lerpColor3D(REAL_SUN_NIGHT_COLOR, REAL_SUN_TWILIGHT_COLOR, (altitude + 6) / 6);
+            } else if (altitude <= 8) {
+                skyColor = lerpColor3D(REAL_SUN_TWILIGHT_COLOR, REAL_SUN_SUNRISE_COLOR, altitude / 8);
+            } else if (altitude <= 25) {
+                skyColor = lerpColor3D(REAL_SUN_SUNRISE_COLOR, REAL_SUN_DAY_COLOR, (altitude - 8) / 17);
+            } else {
+                skyColor = REAL_SUN_DAY_COLOR;
+            }
+            scene3d.background = new THREE.Color(skyColor);
+
+            const timeLabel = getRealSunTimeLabel();
+            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel}`);
+        }
+
+        // Restores ambient/directional light to their normal fixed
+        // "day" levels (see init3DScene) when Real-world sun mode is
+        // switched back off, so lighting doesn't stay stuck wherever
+        // the sun last left it.
+        function resetSunlightToDefault3D() {
+            if (ambientLight3d) ambientLight3d.intensity = 0.65;
+            if (dirLight3d) {
+                dirLight3d.intensity = 0.9;
+                dirLight3d.color.set(0xffffff);
+                dirLight3d.position.set(40, 60, 30);
+            }
         }
 
         // Disposes every mesh currently in hull3dGroup/world3dGroup so the
@@ -6259,12 +6710,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     opacity: 0.95
                 });
                 const arrowShaft = new THREE.Mesh(
-                    new THREE.CylinderGeometry(0.055, 0.055, FLOW_ARROW_SHAFT_LEN_3D, 8),
+                    new THREE.CylinderGeometry(0.09, 0.09, FLOW_ARROW_SHAFT_LEN_3D, 8),
                     flowArrowMat
                 );
                 arrowShaft.position.y = -(FLOW_ARROW_TOTAL_LEN_3D / 2) + (FLOW_ARROW_SHAFT_LEN_3D / 2);
                 const arrowHead = new THREE.Mesh(
-                    new THREE.ConeGeometry(0.16, FLOW_ARROW_HEAD_LEN_3D, 10),
+                    new THREE.ConeGeometry(0.26, FLOW_ARROW_HEAD_LEN_3D, 10),
                     flowArrowMat
                 );
                 arrowHead.position.y = (FLOW_ARROW_TOTAL_LEN_3D / 2) - (FLOW_ARROW_HEAD_LEN_3D / 2);
@@ -6617,7 +7068,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     // Stack stacked pump labels slightly inward along Z so
                     // they don't fully overlap if a tank has multiple pumps.
                     const stackZ = cornerZ + (isPortSide ? -1 : 1) * i * 0.9;
-                    addAnchor(`pump_${tankId}_${i}`, cornerX, 0.6, stackZ, pumpName, 'pump');
+                    const pumpLabelText = `${pumpName} · ${shortenTankName(cfg.name)}`;
+                    addAnchor(`pump_${tankId}_${i}`, cornerX, 0.6, stackZ, pumpLabelText, 'pump');
                 });
             });
 
@@ -6650,12 +7102,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             let html = '';
 
             labelAnchors3d.forEach((a) => {
-                // %-fill and pump-name labels are gated by the "Labels"
-                // toggle (show3DPctPumpLabels); flow labels are gated by
+                // %-fill labels are gated by the "% Fill" toggle
+                // (show3DPctPumpLabels); pump-name labels always show
+                // regardless of that toggle; flow labels are gated by
                 // the separate "Tank Flow" toggle (showTankFlow);
                 // AFT/FWD/PS/SB and corner labels are NOT gated by
                 // either and always render.
-                if ((a.cls === 'pct' || a.cls === 'pump') && !show3DPctPumpLabels) return;
+                if (a.cls === 'pct' && !show3DPctPumpLabels) return;
                 if (a.cls === 'flow' && !showTankFlow) return;
 
                 a.obj.getWorldPosition(v);
@@ -6794,11 +7247,28 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (!container) return;
             if (!scene3d) {
                 init3DScene();
-                set3DCamera('iso-fwd-ps');
+                // Start from the saved/restored view if one exists,
+                // otherwise fall back to the default iso preset.
+                if (savedView3D) {
+                    restoreSavedView();
+                } else {
+                    set3DCamera('iso-fwd-ps');
+                }
+                // View interaction starts locked regardless of which
+                // camera state it opened with.
+                is3DViewLocked = true;
+                update3DViewLockUI();
                 // Sync initial sky color to whatever the theme toggle
                 // currently shows.
                 const themeChecked = document.getElementById('themeToggleCheckbox');
                 set3DSky(themeChecked ? themeChecked.checked : true);
+                // If Real-world sun was left on from a previous session,
+                // pick up right where it left off (overrides the plain
+                // sky set just above — see set3DSky's realSunEnabled guard).
+                if (realSunEnabled && realSunLat !== null && realSunLon !== null) {
+                    startRealSunClock();
+                    updateRealSun3D();
+                }
             }
             const signature = TANK_CONFIG.length + '|' + trailerAxles.length + '|' + pumpLocations.length;
             if (signature !== last3DSignature) {
