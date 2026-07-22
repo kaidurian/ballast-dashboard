@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-Test-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-Test2-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -6245,9 +6245,29 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (typeof excelSunDateRaw === 'number') {
                 ymd = excelSerialToYMD(excelSunDateRaw);
             } else {
-                const parsed = new Date(excelSunDateRaw);
-                if (isNaN(parsed.getTime())) return new Date();
-                ymd = { year: parsed.getFullYear(), month: parsed.getMonth() + 1, day: parsed.getDate() };
+                // Robust manual parse instead of `new Date(string)`, which
+                // is locale-dependent/ambiguous and silently returns
+                // Invalid Date for common non-US formats like "22/07/2026"
+                // (day-first) — that previously caused a SILENT fallback
+                // to the live system clock, discarding R147/R148 entirely
+                // while the status label still claimed "(R148)".
+                const s = String(excelSunDateRaw).trim();
+                let dm;
+                if ((dm = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) {
+                    // YYYY-MM-DD (ISO)
+                    ymd = { year: +dm[1], month: +dm[2], day: +dm[3] };
+                } else if ((dm = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/))) {
+                    // A/B/YYYY — ambiguous between D/M and M/D. If the
+                    // first number can't be a month (>12), treat as D/M/Y
+                    // (matches Excel's default UK/Thai-style short date).
+                    const a = +dm[1], b = +dm[2], y = +dm[3];
+                    if (a > 12) ymd = { year: y, month: b, day: a };
+                    else ymd = { year: y, month: a, day: b };
+                } else {
+                    const parsed = new Date(s);
+                    if (isNaN(parsed.getTime())) return new Date();
+                    ymd = { year: parsed.getFullYear(), month: parsed.getMonth() + 1, day: parsed.getDate() };
+                }
             }
             if (typeof excelSunTimeRaw === 'number') {
                 hms = excelSerialToHMS(excelSunTimeRaw);
@@ -6545,7 +6565,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             // one thing, internal variable used is another). Remove once
             // the real-sun timing issue is confirmed fixed.
             const dbgOffset = Math.round((realSunLon || 0) / 15);
-            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel} | DEBUG lat=${realSunLat} lon=${realSunLon} offset=${dbgOffset}h UTC=${now.toISOString()}`);
+            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel} | DEBUG lat=${realSunLat} lon=${realSunLon} offset=${dbgOffset}h UTC=${now.toISOString()} rawDate=${JSON.stringify(excelSunDateRaw)}(${typeof excelSunDateRaw}) rawTime=${JSON.stringify(excelSunTimeRaw)}(${typeof excelSunTimeRaw})`);
         }
 
         // Restores ambient/directional light to their normal fixed
