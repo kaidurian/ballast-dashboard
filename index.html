@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-54-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-55-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -5954,6 +5954,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             renderer3d = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer3d.setSize(container.clientWidth, container.clientHeight);
             renderer3d.setPixelRatio(window.devicePixelRatio || 1);
+            // Shadows: soft PCF shadow map. Cost is trivial for a single
+            // barge model at this mesh count/resolution.
+            renderer3d.shadowMap.enabled = true;
+            renderer3d.shadowMap.type = THREE.PCFSoftShadowMap;
             container.appendChild(renderer3d.domElement);
 
             // Lighting always stays at "day" levels regardless of sky toggle.
@@ -5961,7 +5965,26 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             scene3d.add(ambientLight3d);
             dirLight3d = new THREE.DirectionalLight(0xffffff, 0.9);
             dirLight3d.position.set(40, 60, 30);
+            dirLight3d.castShadow = true;
+            dirLight3d.shadow.mapSize.set(2048, 2048);
+            dirLight3d.shadow.camera.near = 1;
+            dirLight3d.shadow.camera.far = 500;
+            // Default frustum — rebuild3DGeometry() re-fits this to the
+            // actual barge length/width every time TANK_CONFIG changes,
+            // so shadows stay sharp instead of spread thin over a huge
+            // default area.
+            dirLight3d.shadow.camera.left = -80;
+            dirLight3d.shadow.camera.right = 80;
+            dirLight3d.shadow.camera.top = 60;
+            dirLight3d.shadow.camera.bottom = -60;
+            dirLight3d.shadow.bias = -0.0015; // reduce shadow acne on the flat deck/tank surfaces
             scene3d.add(dirLight3d);
+            // Shadow camera looks from the light toward this target, not
+            // toward world origin — needed since the barge isn't always
+            // centered at X=0. rebuild3DGeometry() moves this to the
+            // barge's actual center.
+            dirLight3d.target = new THREE.Object3D();
+            scene3d.add(dirLight3d.target);
 
             world3dGroup = new THREE.Group();
             scene3d.add(world3dGroup);
@@ -6923,6 +6946,48 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             // here too, since clear3DGeometry() above just wiped any
             // previous instance along with everything else.
             updateTrailerGhostVisualization3D();
+
+            // ---- Shadows ----
+            // Re-fit the sun's shadow camera to this barge's actual
+            // footprint (padded) so the shadow map resolution isn't
+            // wasted on empty space, then mark which meshes take part.
+            if (dirLight3d && dirLight3d.shadow) {
+                const shadowPad = 15;
+                const halfLen = Math.max(bargeLength3d / 2 + shadowPad, 20);
+                const halfWid = Math.max(bargeWidth3d / 2 + shadowPad, 20);
+                dirLight3d.shadow.camera.left = -halfLen;
+                dirLight3d.shadow.camera.right = halfLen;
+                dirLight3d.shadow.camera.top = halfWid;
+                dirLight3d.shadow.camera.bottom = -halfWid;
+                dirLight3d.shadow.camera.updateProjectionMatrix();
+                if (dirLight3d.target) {
+                    dirLight3d.target.position.set(bargeCenterX3d, 0, 0);
+                    dirLight3d.target.updateMatrixWorld();
+                }
+            }
+            // Solid hull/tank/axle/quay geometry casts and receives;
+            // the deck plate is thin and mostly transparent so it only
+            // receives (casting from it looks like a faint phantom
+            // line and isn't worth the shadow-map resolution); the sea
+            // plane only receives (nothing should ever shadow FROM the
+            // water's flat surface).
+            hull3dGroup.traverse((obj) => {
+                if (!obj.isMesh) return;
+                obj.castShadow = true;
+                obj.receiveShadow = true;
+            });
+            if (deckPlate3d) {
+                deckPlate3d.castShadow = false;
+                deckPlate3d.receiveShadow = true;
+            }
+            if (waterMesh3d) {
+                waterMesh3d.castShadow = false;
+                waterMesh3d.receiveShadow = true;
+            }
+            quayBody.castShadow = true;
+            quayBody.receiveShadow = true;
+            quaySlab.castShadow = true;
+            quaySlab.receiveShadow = true;
         }
 
         // Pulses the opacity of every currently-visible tank flow-glow
