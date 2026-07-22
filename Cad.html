@@ -248,6 +248,7 @@
   }
   .layer-row:hover { background: rgba(255,255,255,0.03); }
   .layer-row.current { background: rgba(91,155,213,0.14); color: var(--acad-blue); }
+  .layer-row.obj-selected { outline: 1px solid var(--amber); background: rgba(224,164,88,0.14); }
   .layer-row input[type=color] { width: 16px; height: 16px; padding: 0; }
   .layer-row .lname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .layer-row .licon { cursor: pointer; opacity: 0.75; width: 16px; text-align: center; flex-shrink:0; }
@@ -331,7 +332,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style-52</div>
+    <div class="brand">Drafting Table — AutoCAD-Style (Rev.53)</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -434,18 +435,18 @@
       </div>
       <div id="sidebarBackdrop"></div>
       <div id="sidebar">
+        <h3>Modify Options <span id="modifyTypeTag"></span></h3>
+        <div id="modifyBody"><div class="empty-note">Select entities, then pick a tool from the Modify row above.</div></div>
+
         <h3>Layers</h3>
         <div id="layerList"></div>
         <button class="formBtn secondary" id="addLayerBtn2">+ New Layer</button>
 
-        <h3>Entities</h3>
-        <div id="entityList"></div>
-
         <h3>Properties <span id="propsTypeTag"></span></h3>
         <div id="propsBody"><div class="empty-note">No entity selected. Click an entity to edit its exact values.</div></div>
 
-        <h3>Modify Options <span id="modifyTypeTag"></span></h3>
-        <div id="modifyBody"><div class="empty-note">Select entities, then pick a tool from the Modify row above.</div></div>
+        <h3>Entities</h3>
+        <div id="entityList"></div>
 
         <h3>Create by Dimensions</h3>
         <div id="manualBody"></div>
@@ -519,10 +520,16 @@
   let view = { offsetX: 0, offsetY: 0, scale: 20 }; // scale = px per unit
   let drawing = null;     // in-progress entity while drawing
   let dragging = null;    // {id, startWorld, origEntitySnapshot}
+  let gripDrag = null;    // {id, grip, part, anchor, orig} — active grip-vertex stretch/move
   let panStart = null;
   let mouseWorld = { x: 0, y: 0 };
   let selBoxStart = null; // {sx,sy,wx,wy} — rubber-band window/crossing select
   let modifyGhosts = [];  // live-preview entities while a Move/Copy/Rotate/Scale/Mirror is in progress
+
+  // Coarse-pointer (touch) devices keep the original "tap empty space to deselect"
+  // behavior. Fine-pointer (mouse) devices only deselect via Escape, and clicking
+  // another object adds to the current selection instead of replacing it.
+  const isMobileDevice = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
   // Status-bar modes (classic AutoCAD toggles)
   let modeSnap = false, modeGrid = true, modeOrtho = false, modePolar = false, modeOsnap = true;
@@ -675,42 +682,227 @@
   // Per-entity snap/grip points (endpoints, midpoints, centers, quadrants). Shared by
   // Osnap candidate-gathering and by the selected-entity grip markers, so both always
   // agree on where the "interesting" points of a shape are.
+  // Each point also carries a `grip` role used for click-and-drag grip editing:
+  //   'stretch'          — snaps that single point to the cursor (line endpoint)
+  //   'stretch-corner'   — free-drags a single rect corner independently (rect becomes a polyline)
+  //   'stretch-radius'   — keeps center fixed, sets radius to cursor distance (circle quadrant / arc bulge)
+  //   'stretch-arc-end'  — keeps center fixed, sets radius+angle to cursor (arc endpoints)
+  //   'stretch-vertex'   — snaps one polyline vertex to the cursor (adjacent segments follow)
+  //   'move'             — drags the whole entity (rigid translate)
+  //   'move-segment'     — drags one polyline segment's two vertices together (rigid translate of that portion)
+  //   null / absent      — not a drag handle (e.g. rectangle edge midpoints)
+  // Shared geometry solver for linear/aligned dimensions — computes the
+  // dimension-line endpoints (d1,d2), the measured value, and the label
+  // position along the dimension line (t=0 at d1, t=1 at d2, default 0.5).
+  // Used by rendering, hit-testing, and grip generation so all three agree.
+  function dimLineGeom(e){
+    const p1 = {x:e.x1,y:e.y1}, p2 = {x:e.x2,y:e.y2};
+    let d1, d2, measured;
+    if (e.dimType === 'linear' && e.axis === 'x'){
+      d1 = { x:p1.x, y:e.oy }; d2 = { x:p2.x, y:e.oy }; measured = Math.abs(p2.x-p1.x);
+    } else if (e.dimType === 'linear' && e.axis === 'y'){
+      d1 = { x:e.ox, y:p1.y }; d2 = { x:e.ox, y:p2.y }; measured = Math.abs(p2.y-p1.y);
+    } else {
+      const dx = p2.x-p1.x, dy = p2.y-p1.y, len = Math.hypot(dx,dy) || 1;
+      const ux = dx/len, uy = dy/len;
+      const nx = -uy, ny = ux;
+      const off = ((e.ox-p1.x)*nx + (e.oy-p1.y)*ny);
+      d1 = { x:p1.x+nx*off, y:p1.y+ny*off };
+      d2 = { x:p2.x+nx*off, y:p2.y+ny*off };
+      measured = Math.hypot(dx,dy);
+    }
+    const t = (e.labelT != null) ? e.labelT : 0.5;
+    const labelPos = { x: d1.x + (d2.x-d1.x)*t, y: d1.y + (d2.y-d1.y)*t };
+    // Extension-line start points: the drawn extension line begins this far
+    // from the endpoint vertex, leaving a gap — controlled by the manual
+    // "Ext Line Offset" field. The vertex itself and the dimension line
+    // never move; only where the line visibly starts drawing changes.
+    const gap = Math.max(0, e.extOffset || 0);
+    const mkGapStart = (from, to) => {
+      const dx = to.x-from.x, dy = to.y-from.y, len = Math.hypot(dx,dy) || 1;
+      const g = Math.min(gap, Math.max(0, len - 0.001));
+      return { x: from.x + dx/len*g, y: from.y + dy/len*g };
+    };
+    const extStart1 = mkGapStart(p1, d1);
+    const extStart2 = mkGapStart(p2, d2);
+    return { p1, p2, d1, d2, measured, labelPos, extStart1, extStart2 };
+  }
   function entitySnapPoints(e){
     const pts = [];
     if (e.type === 'line'){
-      pts.push({x:e.x1,y:e.y1,kind:'endpoint'}, {x:e.x2,y:e.y2,kind:'endpoint'});
-      pts.push({x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2, kind:'midpoint'});
+      pts.push({x:e.x1,y:e.y1,kind:'endpoint', grip:'stretch', part:'p1'}, {x:e.x2,y:e.y2,kind:'endpoint', grip:'stretch', part:'p2'});
+      pts.push({x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2, kind:'midpoint', grip:'move'});
     } else if (e.type === 'rect'){
       const corners = [[e.x1,e.y1],[e.x2,e.y1],[e.x2,e.y2],[e.x1,e.y2]];
-      corners.forEach(([x,y]) => pts.push({x,y,kind:'endpoint'}));
-      for (let i=0;i<4;i++){ const a=corners[i], b=corners[(i+1)%4]; pts.push({x:(a[0]+b[0])/2, y:(a[1]+b[1])/2, kind:'midpoint'}); }
+      corners.forEach(([x,y],i) => pts.push({x,y,kind:'endpoint', grip:'stretch-corner', part:i}));
+      // Edge midpoints are stretch handles too: dragging one slides that whole edge
+      // (only the perpendicular coordinate moves), leaving the opposite edge fixed.
+      for (let i=0;i<4;i++){ const a=corners[i], b=corners[(i+1)%4]; pts.push({x:(a[0]+b[0])/2, y:(a[1]+b[1])/2, kind:'midpoint', grip:'stretch-edge', part:i}); }
     } else if (e.type === 'circle'){
-      pts.push({x:e.cx,y:e.cy,kind:'center'});
-      [0,90,180,270].forEach(a => { const r=a*Math.PI/180; pts.push({x:e.cx+e.r*Math.cos(r), y:e.cy+e.r*Math.sin(r), kind:'quadrant'}); });
+      pts.push({x:e.cx,y:e.cy,kind:'center', grip:'move'});
+      [0,90,180,270].forEach(a => { const r=a*Math.PI/180; pts.push({x:e.cx+e.r*Math.cos(r), y:e.cy+e.r*Math.sin(r), kind:'quadrant', grip:'stretch-radius'}); });
     } else if (e.type === 'arc'){
-      pts.push({x:e.cx,y:e.cy,kind:'center'});
+      pts.push({x:e.cx,y:e.cy,kind:'center', grip:'move'});
       const sr=e.startAngle*Math.PI/180, er=e.endAngle*Math.PI/180;
-      pts.push({x:e.cx+e.r*Math.cos(sr), y:e.cy+e.r*Math.sin(sr), kind:'endpoint'});
-      pts.push({x:e.cx+e.r*Math.cos(er), y:e.cy+e.r*Math.sin(er), kind:'endpoint'});
+      pts.push({x:e.cx+e.r*Math.cos(sr), y:e.cy+e.r*Math.sin(sr), kind:'endpoint', grip:'stretch-arc-end', part:'start'});
+      pts.push({x:e.cx+e.r*Math.cos(er), y:e.cy+e.r*Math.sin(er), kind:'endpoint', grip:'stretch-arc-end', part:'end'});
       const midAng = (e.endAngle >= e.startAngle ? (e.startAngle+e.endAngle)/2 : (e.startAngle+e.endAngle+360)/2) % 360;
       const mr = midAng*Math.PI/180;
-      pts.push({x:e.cx+e.r*Math.cos(mr), y:e.cy+e.r*Math.sin(mr), kind:'midpoint'});
+      pts.push({x:e.cx+e.r*Math.cos(mr), y:e.cy+e.r*Math.sin(mr), kind:'midpoint', grip:'stretch-radius'});
     } else if (e.type === 'polyline'){
-      e.points.forEach(p => pts.push({x:p.x,y:p.y,kind:'endpoint'}));
-      for (let i=0;i<e.points.length-1;i++){ const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
-      if (e.closed && e.points.length>1){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint'}); }
+      e.points.forEach((p,i) => pts.push({x:p.x,y:p.y,kind:'endpoint', grip:'stretch-vertex', part:i}));
+      for (let i=0;i<e.points.length-1;i++){ const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint', grip:'move-segment', part:[i,i+1]}); }
+      if (e.closed && e.points.length>1){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint', grip:'move-segment', part:[e.points.length-1,0]}); }
     } else if (e.type === 'text'){
-      pts.push({x:e.x,y:e.y,kind:'endpoint'});
+      pts.push({x:e.x,y:e.y,kind:'endpoint', grip:'move'});
     } else if (e.type === 'dimension'){
       if (e.dimType === 'diameter' || e.dimType === 'radius'){
+        // Center is an osnap reference point only — not draggable, so the
+        // only way to relocate this dimension is the Move command.
         pts.push({x:e.cx,y:e.cy,kind:'center'});
         const angRad = (e.ang||0)*Math.PI/180, ld = e.labelDist||e.r*1.3;
-        pts.push({x:e.cx+ld*Math.cos(angRad), y:e.cy+ld*Math.sin(angRad), kind:'endpoint'});
+        pts.push({x:e.cx+ld*Math.cos(angRad), y:e.cy+ld*Math.sin(angRad), kind:'endpoint', grip:'dim-radial-label'});
       } else {
-        pts.push({x:e.x1,y:e.y1,kind:'endpoint'}, {x:e.x2,y:e.y2,kind:'endpoint'}, {x:e.ox,y:e.oy,kind:'midpoint'});
+        const dg = dimLineGeom(e);
+        // Extension-line definition points (where the dimension attaches to the
+        // measured geometry) — free-drag to redefine the dimension entirely.
+        pts.push({x:e.x1,y:e.y1,kind:'endpoint', grip:'dim-ext1'});
+        pts.push({x:e.x2,y:e.y2,kind:'endpoint', grip:'dim-ext2'});
+        // Arrowhead/dimension-line endpoints — dragging either one slides the
+        // whole dimension line in/out, shortening or lengthening the extension lines.
+        pts.push({x:dg.d1.x,y:dg.d1.y,kind:'endpoint', grip:'dim-arrow1'});
+        pts.push({x:dg.d2.x,y:dg.d2.y,kind:'endpoint', grip:'dim-arrow2'});
+        // Label — free to slide along the dimension line.
+        pts.push({x:dg.labelPos.x,y:dg.labelPos.y,kind:'midpoint', grip:'dim-label'});
       }
     }
     return pts;
+  }
+  // Hit-tests grip handles across ALL entities (not just already-selected ones) —
+  // clicking directly on a grip both selects that entity and starts the drag in
+  // one motion, no separate select-then-drag step required.
+  function hitTestGrip(sx, sy){
+    const tol = 10; // px, independent of zoom
+    let best = null, bestD = tol;
+    for (const en of entities){
+      // Grips only become live click-targets once their entity is already
+      // selected (and its handles are visible on screen) — this enforces a
+      // select-first-then-modify two-click flow instead of a single motion.
+      if (!(en.id === selectedId || selectedIds.has(en.id))) continue;
+      if (!layerVisible(en.layer) || layerLocked(en.layer)) continue;
+      const pts = entitySnapPoints(en);
+      for (const p of pts){
+        if (!p.grip) continue;
+        const s = worldToScreen(p.x, p.y);
+        const d = Math.hypot(s.x/devicePixelRatio - sx, s.y/devicePixelRatio - sy);
+        if (d < bestD){ bestD = d; best = { entity: en, point: p }; }
+      }
+    }
+    return best;
+  }
+  // Absolute world position of an arc's start/end point, from a plain entity snapshot.
+  function arcEndpointAbs(o, which){
+    const ang = (which === 'start' ? o.startAngle : o.endAngle) * Math.PI/180;
+    return { x: o.cx + o.r*Math.cos(ang), y: o.cy + o.r*Math.sin(ang) };
+  }
+  // Applies the live drag delta for an active grip edit. `e` is the live entity
+  // (mutated in place), `o` is the deep-cloned snapshot from drag start, `g` is
+  // the gripDrag state, and `world` is the resolved (snapped/osnapped) cursor point.
+  function applyGripDrag(e, o, g, world){
+    if (g.grip === 'move'){
+      const dx = world.x - g.anchor.x, dy = world.y - g.anchor.y;
+      translateEntity(e, o, dx, dy);
+    } else if (g.grip === 'move-segment'){
+      const dx = world.x - g.anchor.x, dy = world.y - g.anchor.y;
+      const [i,j] = g.part;
+      e.points[i] = { x: o.points[i].x + dx, y: o.points[i].y + dy };
+      e.points[j] = { x: o.points[j].x + dx, y: o.points[j].y + dy };
+    } else if (g.grip === 'stretch'){
+      if (o.type === 'line'){
+        if (g.part === 'p1'){ e.x1 = world.x; e.y1 = world.y; }
+        else { e.x2 = world.x; e.y2 = world.y; }
+      }
+    } else if (g.grip === 'stretch-corner'){
+      // Free-drag a single rectangle corner while the other three stay put.
+      // An axis-aligned rect (x1,y1)-(x2,y2) can't represent that on its own
+      // (two corners always share a coordinate), so it's converted to a
+      // closed 4-point polyline — only the dragged vertex moves.
+      const corners = [
+        { x:o.x1, y:o.y1 }, { x:o.x2, y:o.y1 }, { x:o.x2, y:o.y2 }, { x:o.x1, y:o.y2 }
+      ];
+      corners[g.part] = { x: world.x, y: world.y };
+      Object.assign(e, { type:'polyline', points: corners, closed:true });
+      delete e.x1; delete e.y1; delete e.x2; delete e.y2;
+    } else if (g.grip === 'stretch-edge'){
+      // part is the edge index (0=top y1, 1=right x2, 2=bottom y2, 3=left x1) from the
+      // same corner order used to build the grip points; only that one side moves.
+      if (o.type === 'rect'){
+        if (g.part === 0) e.y1 = world.y;
+        else if (g.part === 1) e.x2 = world.x;
+        else if (g.part === 2) e.y2 = world.y;
+        else e.x1 = world.x;
+      }
+    } else if (g.grip === 'stretch-radius'){
+      e.r = Math.max(0.001, Math.hypot(world.x - o.cx, world.y - o.cy));
+    } else if (g.grip === 'stretch-arc-end'){
+      // The two arc endpoints move fully independently of each other: the grip
+      // being dragged snaps exactly to the cursor, while the OTHER endpoint is
+      // held at its original absolute position. Center and radius are solved
+      // for afterward so the arc still passes through both points (preferring
+      // the original radius, and the center on the same side as before).
+      const which = g.part; // 'start' or 'end'
+      const other = which === 'start' ? 'end' : 'start';
+      const fixed = arcEndpointAbs(o, other);
+      const dx = world.x - fixed.x, dy = world.y - fixed.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 1e-6){
+        const r = Math.max(o.r, d/2 + 1e-6);
+        const midx = (fixed.x + world.x)/2, midy = (fixed.y + world.y)/2;
+        const ux = dx/d, uy = dy/d;
+        const px = -uy, py = ux; // perpendicular unit vector
+        const h = Math.sqrt(Math.max(0, r*r - (d/2)*(d/2)));
+        const c1 = { x: midx + px*h, y: midy + py*h };
+        const c2 = { x: midx - px*h, y: midy - py*h };
+        const d1 = Math.hypot(c1.x-o.cx, c1.y-o.cy), d2 = Math.hypot(c2.x-o.cx, c2.y-o.cy);
+        const center = d1 <= d2 ? c1 : c2;
+        let angDragged = Math.atan2(world.y-center.y, world.x-center.x) * 180/Math.PI; if (angDragged<0) angDragged += 360;
+        let angFixed = Math.atan2(fixed.y-center.y, fixed.x-center.x) * 180/Math.PI; if (angFixed<0) angFixed += 360;
+        e.cx = center.x; e.cy = center.y; e.r = r;
+        if (which === 'start'){ e.startAngle = angDragged; e.endAngle = angFixed; }
+        else { e.endAngle = angDragged; e.startAngle = angFixed; }
+      }
+    } else if (g.grip === 'stretch-vertex'){
+      e.points[g.part] = { x: world.x, y: world.y };
+    } else if (g.grip === 'dim-ext1'){
+      // Extension-line vertex — free drag to redefine the dimension's first point.
+      e.x1 = world.x; e.y1 = world.y;
+    } else if (g.grip === 'dim-ext2'){
+      // Extension-line vertex — free drag to redefine the dimension's second point.
+      e.x2 = world.x; e.y2 = world.y;
+    } else if (g.grip === 'dim-arrow1' || g.grip === 'dim-arrow2'){
+      // Arrow/dimension-line vertex — moves the dimension line in or out,
+      // shortening or lengthening both extension lines. Only the offset
+      // (perpendicular / axis) component actually matters to the geometry.
+      e.ox = world.x; e.oy = world.y;
+    } else if (g.grip === 'dim-label'){
+      // Label vertex — slides along the dimension/arrow line; project the
+      // cursor onto that line and store it as a parametric position (t).
+      const dg = dimLineGeom(e);
+      const dx = dg.d2.x-dg.d1.x, dy = dg.d2.y-dg.d1.y, len2 = dx*dx+dy*dy;
+      let t = len2 ? ((world.x-dg.d1.x)*dx + (world.y-dg.d1.y)*dy)/len2 : 0.5;
+      t = Math.max(-0.5, Math.min(1.5, t));
+      e.labelT = t;
+    } else if (g.grip === 'dim-radial-label'){
+      // Diameter/Radius label — free to swing around the (fixed) center and
+      // slide in/out along that leader; the center itself never moves.
+      const dx = world.x-e.cx, dy = world.y-e.cy, d = Math.hypot(dx,dy);
+      if (d > 1e-6){ e.ang = Math.atan2(dy,dx)*180/Math.PI; e.labelDist = d; }
+    }
+  }
+  function snapshot_after_grip_drag(){
+    history.push(JSON.stringify(entities.map(x => x.id === gripDrag.id ? gripDrag.orig : x)));
+    if (history.length>100) history.shift();
+    future = [];
   }
   function getOsnapCandidates(){
     const pts = [];
@@ -721,7 +913,8 @@
     return pts;
   }
   function resolveOsnap(sx, sy){
-    if (!modeOsnap || tool === 'select') return null;
+    if (!modeOsnap) return null;
+    if (tool === 'select' && !gripDrag && !dragging) return null;
     const cands = getOsnapCandidates();
     let best = null, bestD = 11; // px tolerance, independent of zoom
     for (const p of cands){
@@ -756,6 +949,7 @@
     infoCount.textContent = entities.length;
     infoZoom.textContent = Math.round(view.scale / 20 * 100) + '%';
     if (statZoomEl) statZoomEl.textContent = 'Zoom: ' + Math.round(view.scale / 20 * 100) + '%';
+    if (typeof highlightSelectedLayer === 'function') highlightSelectedLayer();
   }
 
   function drawOsnapMarker(p){
@@ -939,37 +1133,27 @@
           }
           break;
         }
-        const p1 = {x:e.x1,y:e.y1}, p2 = {x:e.x2,y:e.y2};
-        let d1, d2, measured;
-        if (dimType === 'linear' && e.axis === 'x'){
-          d1 = { x:p1.x, y:e.oy }; d2 = { x:p2.x, y:e.oy }; measured = Math.abs(p2.x-p1.x);
-        } else if (dimType === 'linear' && e.axis === 'y'){
-          d1 = { x:e.ox, y:p1.y }; d2 = { x:e.ox, y:p2.y }; measured = Math.abs(p2.y-p1.y);
-        } else {
-          const dx = p2.x-p1.x, dy = p2.y-p1.y, len = Math.hypot(dx,dy) || 1;
-          const ux = dx/len, uy = dy/len;      // direction along the measured line
-          const nx = -uy, ny = ux;             // perpendicular (points toward the offset)
-          const off = ((e.ox-p1.x)*nx + (e.oy-p1.y)*ny); // signed distance to the dim line
-          d1 = { x:p1.x+nx*off, y:p1.y+ny*off };
-          d2 = { x:p2.x+nx*off, y:p2.y+ny*off };
-          measured = Math.hypot(dx,dy);
-        }
-        const s1=toS(p1.x,p1.y), s2=toS(p2.x,p2.y), sd1=toS(d1.x,d1.y), sd2=toS(d2.x,d2.y);
-        // extension lines (with a small overshoot past the dimension line, AutoCAD-style)
+        const dg = dimLineGeom(e);
+        const p1 = dg.p1, p2 = dg.p2, d1 = dg.d1, d2 = dg.d2, measured = dg.measured;
+        const sd1=toS(d1.x,d1.y), sd2=toS(d2.x,d2.y);
+        // extension lines: start with a gap from the endpoint vertex (per the
+        // manual Ext Line Offset field), with a small overshoot past the
+        // dimension line at the far end, AutoCAD-style.
+        const sGap1 = toS(dg.extStart1.x, dg.extStart1.y), sGap2 = toS(dg.extStart2.x, dg.extStart2.y);
         const over = 3;
-        const eux = sd1.x-s1.x, euy = sd1.y-s1.y, elen = Math.hypot(eux,euy) || 1;
-        ctx.beginPath(); ctx.moveTo(s1.x,s1.y); ctx.lineTo(sd1.x+eux/elen*over, sd1.y+euy/elen*over); ctx.stroke();
-        const eux2 = sd2.x-s2.x, euy2 = sd2.y-s2.y, elen2 = Math.hypot(eux2,euy2) || 1;
-        ctx.beginPath(); ctx.moveTo(s2.x,s2.y); ctx.lineTo(sd2.x+eux2/elen2*over, sd2.y+euy2/elen2*over); ctx.stroke();
+        const eux = sd1.x-sGap1.x, euy = sd1.y-sGap1.y, elen = Math.hypot(eux,euy) || 1;
+        ctx.beginPath(); ctx.moveTo(sGap1.x,sGap1.y); ctx.lineTo(sd1.x+eux/elen*over, sd1.y+euy/elen*over); ctx.stroke();
+        const eux2 = sd2.x-sGap2.x, euy2 = sd2.y-sGap2.y, elen2 = Math.hypot(eux2,euy2) || 1;
+        ctx.beginPath(); ctx.moveTo(sGap2.x,sGap2.y); ctx.lineTo(sd2.x+eux2/elen2*over, sd2.y+euy2/elen2*over); ctx.stroke();
         // dimension line
         ctx.beginPath(); ctx.moveTo(sd1.x,sd1.y); ctx.lineTo(sd2.x,sd2.y); ctx.stroke();
         // arrowheads
         drawArrow(sd1, sd2);
         drawArrow(sd2, sd1);
-        // measured length text, centered on the dimension line
-        const mid = { x:(sd1.x+sd2.x)/2, y:(sd1.y+sd2.y)/2 };
+        // measured length text, positioned along the dimension line (draggable)
+        const sLabelPos = toS(dg.labelPos.x, dg.labelPos.y);
         const ang = Math.atan2(sd2.y-sd1.y, sd2.x-sd1.x);
-        drawDimText(mid, ang, measured.toFixed(2));
+        drawDimText(sLabelPos, ang, measured.toFixed(2));
         break;
       }
     }
@@ -984,7 +1168,7 @@
     ctx.fillStyle = '#e0a458';
     ctx.strokeStyle = '#e0a458';
     ctx.lineWidth = 1.4;
-    const pts = getHandlePoints(e);
+    const pts = getHandlePoints(e).filter(p => p.grip);
     for (const p of pts){
       const s = toS(p.x, p.y);
       if (p.kind === 'midpoint' || p.kind === 'quadrant'){
@@ -1046,16 +1230,8 @@
           const labelPt = { x:e.cx+ld*Math.cos(angRad), y:e.cy+ld*Math.sin(angRad) };
           if (distToSeg(world, {x:e.cx,y:e.cy}, labelPt) < tol) return e;
         } else {
-          let d1, d2;
-          if (e.dimType === 'linear' && e.axis === 'x'){ d1={x:e.x1,y:e.oy}; d2={x:e.x2,y:e.oy}; }
-          else if (e.dimType === 'linear' && e.axis === 'y'){ d1={x:e.ox,y:e.y1}; d2={x:e.ox,y:e.y2}; }
-          else {
-            const dx = e.x2-e.x1, dy = e.y2-e.y1, len = Math.hypot(dx,dy) || 1;
-            const nx = -dy/len, ny = dx/len;
-            const off = ((e.ox-e.x1)*nx + (e.oy-e.y1)*ny);
-            d1 = { x:e.x1+nx*off, y:e.y1+ny*off }; d2 = { x:e.x2+nx*off, y:e.y2+ny*off };
-          }
-          if (distToSeg(world, d1, d2) < tol || distToSeg(world, {x:e.x1,y:e.y1}, d1) < tol || distToSeg(world, {x:e.x2,y:e.y2}, d2) < tol) return e;
+          const dg = dimLineGeom(e);
+          if (distToSeg(world, dg.d1, dg.d2) < tol || distToSeg(world, {x:e.x1,y:e.y1}, dg.d1) < tol || distToSeg(world, {x:e.x2,y:e.y2}, dg.d2) < tol) return e;
         }
       } else if (e.type === 'hatch'){
         if (hitTestBoundary(world, e.boundary, tol)) return e;
@@ -1117,9 +1293,22 @@
         <span class="licon ${l.visible?'':'off'}" data-act="vis" title="Toggle visibility">${l.visible?'👁':'🚫'}</span>
         <span class="licon ${l.locked?'':'off'}" data-act="lock" title="Toggle lock">${l.locked?'🔒':'🔓'}</span>
         <input type="color" data-act="color" value="${l.color}" title="Layer color (organizational)">
-        <span class="lname" data-act="pick" title="Set as current layer">${l.name}${l.name===currentLayer?' (current)':''}</span>
+        <span class="lname" data-act="pick" title="Click: apply to selected objects. Double-click: set as current layer.">${l.name}${l.name===currentLayer?' (current)':''}</span>
         <span class="ldel" data-act="del" title="Delete layer">✕</span>`;
-      row.querySelector('[data-act=pick]').onclick = () => { currentLayer = l.name; renderLayers(); syncLayerSelect(); scheduleAutosave(); };
+      // Single click: if objects are selected, move them onto this layer. Double click:
+      // set this as the current (active) layer new shapes are drawn on.
+      row.querySelector('[data-act=pick]').onclick = () => {
+        const ids = activeSelectionIds();
+        if (ids.length){
+          snapshot();
+          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en) { en.layer = l.name; en.color = l.color; } });
+          render(); renderList(); buildPropsForm();
+          log(`${ids.length} entit${ids.length===1?'y':'ies'} moved to layer "${l.name}".`, 'prompt');
+        } else {
+          flashHint('Select objects first to move them to a layer, or double-click a layer to make it current.');
+        }
+      };
+      row.querySelector('[data-act=pick]').ondblclick = () => { currentLayer = l.name; renderLayers(); syncLayerSelect(); scheduleAutosave(); };
       row.querySelector('[data-act=vis]').onclick = (ev) => { ev.stopPropagation(); l.visible = !l.visible; renderLayers(); render(); renderList(); scheduleAutosave(); };
       row.querySelector('[data-act=lock]').onclick = (ev) => { ev.stopPropagation(); l.locked = !l.locked; renderLayers(); scheduleAutosave(); };
       row.querySelector('[data-act=color]').addEventListener('input', (ev) => { l.color = ev.target.value; renderLayers(); scheduleAutosave(); });
@@ -1136,6 +1325,20 @@
       };
       layerListEl.appendChild(row);
     }
+    highlightSelectedLayer();
+  }
+  // Highlights whichever layer row the currently-selected object(s) live on, so picking
+  // an entity on canvas (or in the entity list) shows you its layer at a glance.
+  // Cheap: just toggles a class on the existing rows rather than rebuilding them.
+  function highlightSelectedLayer(){
+    const ids = activeSelectionIds();
+    let layerName = null;
+    if (ids.length){
+      const names = new Set(ids.map(id => { const en = entities.find(x=>x.id===id); return en ? en.layer : null; }).filter(Boolean));
+      if (names.size === 1) layerName = [...names][0];
+    }
+    const rows = layerListEl.children;
+    layers.forEach((l, i) => { const row = rows[i]; if (row) row.classList.toggle('obj-selected', l.name === layerName); });
   }
   function syncLayerSelect(){
     layerSelectEl.innerHTML = layers.map(l => `<option value="${l.name}" ${l.name===currentLayer?'selected':''}>${l.name}</option>`).join('');
@@ -1201,7 +1404,7 @@
   function setTool(t){
     tool = t;
     drawing = null; polyPoints = [];
-    lineStart = null; rectStart = null; circleCenter = null; arcStage = 0; arcTemp = {};
+    lineStart = null; rectStart = null; rectSubMode = null; rectPending = { area:null, length:null, width:null, rot:0 }; circleCenter = null; arcStage = 0; arcTemp = {};
     dimStage = 0; dimTemp = {}; dimTarget = null;
     modifyStage = 0; modifyTemp = {}; currentOsnap = null;
     if (t === 'dimbaseline' || t === 'dimcontinue'){
@@ -1255,6 +1458,11 @@
     if (e.key === 'Escape') {
       cancelDrawing();
       if (tool !== 'select') setTool('select');
+      if (selectedIds.size || selectedId != null){
+        selectedIds = new Set();
+        selectedId = null;
+        render(); renderList(); buildPropsForm(); buildModifyForm();
+      }
       log('*Cancel*', 'prompt');
       return;
     }
@@ -1298,6 +1506,12 @@
   let arcTemp = {};
   let lineStart = null;
   let rectStart = null;
+  // Command-line RECTANG sub-flow (Area/Dimension/Rotation), AutoCAD-style:
+  // rectSubMode: null (normal drag) | 'area' | 'length' | 'width' | 'rotation' (awaiting a
+  // typed number for that field) | 'flip' (length+width known — moving the mouse
+  // picks which of the 4 quadrants around rectStart the rectangle sits in; click finishes).
+  let rectSubMode = null;
+  let rectPending = { area:null, length:null, width:null, rot:0 };
   let circleCenter = null;
   let dimStage = 0; // 0=need first point, 1=need second point, 2=need dimension-line placement
   let dimTemp = {};
@@ -1307,6 +1521,24 @@
 
   function currentStyle(){
     return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5, layer: currentLayer };
+  }
+
+  // Given a fixed length/width/rotation (rectPending) anchored at rectStart, picks which
+  // of the 4 quadrants around rectStart the rectangle sits in based on the cursor's
+  // position (in the rectangle's own rotated frame), so the user can "flip" it left,
+  // right, up, or down just by moving the mouse before clicking to finish.
+  function rectFlipCorners(mouseWorld){
+    const rot = (rectPending.rot||0) * Math.PI/180;
+    const dxw = mouseWorld.x - rectStart.x, dyw = mouseWorld.y - rectStart.y;
+    const localX = dxw*Math.cos(-rot) - dyw*Math.sin(-rot);
+    const localY = dxw*Math.sin(-rot) + dyw*Math.cos(-rot);
+    const w = (rectPending.length||0) * (localX >= 0 ? 1 : -1);
+    const h = (rectPending.width||0) * (localY >= 0 ? 1 : -1);
+    const pts = [ {x:0,y:0}, {x:w,y:0}, {x:w,y:h}, {x:0,y:h} ];
+    return pts.map(p => ({
+      x: rectStart.x + p.x*Math.cos(rot) - p.y*Math.sin(rot),
+      y: rectStart.y + p.x*Math.sin(rot) + p.y*Math.cos(rot)
+    }));
   }
 
   function finishPolyline(){
@@ -1332,11 +1564,26 @@
       return;
     }
     if (tool === 'rect'){
-      if (!rectStart){ rectStart = world; cmdPrompt('Specify opposite corner:'); }
-      else {
+      if (!rectStart){ rectStart = world; cmdPrompt('Specify opposite corner, or [Area/Dimension/Rotation]:'); buildManualForm(); }
+      else if (rectSubMode === 'flip'){
+        const pts = rectFlipCorners(world);
+        snapshot();
+        if (Math.abs((rectPending.rot||0) % 360) < 1e-6){
+          entities.push({ id: uid(), type:'rect', x1:pts[0].x, y1:pts[0].y, x2:pts[2].x, y2:pts[2].y, ...currentStyle() });
+        } else {
+          entities.push({ id: uid(), type:'polyline', points: pts, closed:true, ...currentStyle() });
+        }
+        rectStart = null; rectSubMode = null; rectPending = { area:null, length:null, width:null, rot:0 };
+        drawing = null; render(); renderList();
+        buildManualForm();
+        cmdDone();
+      } else if (rectSubMode){
+        flashHint('Finish typing the value in the command line, or press Esc to cancel.');
+      } else {
         snapshot();
         entities.push({ id: uid(), type:'rect', x1:rectStart.x, y1:rectStart.y, x2:world.x, y2:world.y, ...currentStyle() });
         rectStart = null; drawing = null; render(); renderList();
+        buildManualForm();
         cmdDone();
       }
       return;
@@ -1450,8 +1697,8 @@
 
     // ---- Modify tools ----
     if (tool === 'move' || tool === 'copy'){
-      const ids = activeSelectionIds();
-      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Move/Copy.'); setTool('select'); return; }
+      const ids = ensureModifySelection(world, null, tool==='copy'?'Copy':'Move');
+      if (!ids) return;
       if (modifyStage === 0){
         modifyTemp.base = world;
         modifyTemp.orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
@@ -1477,8 +1724,8 @@
     }
 
     if (tool === 'rotate'){
-      const ids = activeSelectionIds();
-      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Rotate.'); setTool('select'); return; }
+      const ids = ensureModifySelection(world, null, 'Rotate');
+      if (!ids) return;
       if (modifyStage === 0){
         modifyTemp.base = world;
         modifyTemp.orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
@@ -1494,8 +1741,8 @@
     }
 
     if (tool === 'scale'){
-      const ids = activeSelectionIds();
-      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Scale.'); setTool('select'); return; }
+      const ids = ensureModifySelection(world, null, 'Scale');
+      if (!ids) return;
       if (modifyStage === 0){
         modifyTemp.base = world;
         modifyTemp.orig = ids.map(id => JSON.parse(JSON.stringify(entities.find(x=>x.id===id))));
@@ -1511,8 +1758,8 @@
     }
 
     if (tool === 'mirror'){
-      const ids = activeSelectionIds();
-      if (!ids.length){ flashHint('Nothing selected. Select entities first, then Mirror.'); setTool('select'); return; }
+      const ids = ensureModifySelection(world, null, 'Mirror');
+      if (!ids) return;
       if (modifyStage === 0){
         modifyTemp.p1 = world; modifyStage = 1;
         cmdPrompt('Specify second point of mirror axis:');
@@ -1527,8 +1774,9 @@
     }
 
     if (tool === 'offset'){
-      const ids = activeSelectionIds();
-      if (ids.length !== 1){ flashHint('Select exactly one entity, then Offset.'); setTool('select'); return; }
+      const ids = ensureModifySelection(world, null, 'Offset');
+      if (!ids) return;
+      if (ids.length !== 1){ flashHint('Select exactly one entity, then Offset.'); return; }
       const src = entities.find(x=>x.id===ids[0]);
       const dist = Math.max(0.0001, parseFloat(document.getElementById('mo_dist')?.value) || 1);
       const copy = offsetEntity(src, dist, world);
@@ -1637,6 +1885,33 @@
     if (selectedIds.size) return [...selectedIds];
     if (selectedId != null) return [selectedId];
     return [];
+  }
+  // Lets a Modify tool (Move/Copy/Rotate/Scale/Mirror/Offset) be clicked BEFORE anything
+  // is selected — AutoCAD-style "command first, then pick objects". If nothing is
+  // selected yet, this consumes the click as a selection click (hit entity → add it,
+  // shift-click toggles, miss → hint) and returns null so the caller just returns.
+  // Once something is selected, it returns the id list unchanged so existing
+  // base-point / destination logic runs exactly as before.
+  function ensureModifySelection(world, e, label){
+    let ids = activeSelectionIds();
+    if (ids.length) return ids;
+    const hitE = hitTest(world);
+    if (hitE){
+      const members = groupMembers(hitE.id);
+      if (e && e.shiftKey){
+        const allIn = members.every(id => selectedIds.has(id));
+        if (allIn) members.forEach(id => selectedIds.delete(id)); else members.forEach(id => selectedIds.add(id));
+      } else {
+        members.forEach(id => selectedIds.add(id));
+      }
+      selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+      render(); renderList(); buildPropsForm(); buildModifyForm();
+      ids = activeSelectionIds();
+      if (ids.length) cmdPrompt(`${ids.length} selected for ${label}. Click more to add, or click again to continue.`);
+      return null;
+    }
+    flashHint(`Click an entity to select it for ${label}, then click again to continue.`);
+    return null;
   }
   function finishModify(msg){
     modifyStage = 0; modifyTemp = {};
@@ -2169,6 +2444,24 @@
     if (e.button !== 0) return;
 
     if (tool === 'select'){
+      // Grip handles are only live click-targets on entities that are ALREADY
+      // selected (see hitTestGrip) — so the flow is: first click selects the
+      // entity and reveals its vertex handles, then a second click on one of
+      // those handles starts the stretch/move drag.
+      const gh = hitTestGrip(sx, sy);
+      if (gh){
+        const en = gh.entity, p = gh.point;
+        if (!selectedIds.has(en.id)){
+          const members = groupMembers(en.id);
+          if (isMobileDevice) selectedIds = new Set(members);
+          else members.forEach(id => selectedIds.add(id));
+          selectedId = en.id;
+          render(); renderList(); buildPropsForm(); buildModifyForm();
+        }
+        gripDrag = { id: en.id, grip: p.grip, part: p.part, anchor: {x:p.x, y:p.y}, orig: JSON.parse(JSON.stringify(en)) };
+        return;
+      }
+
       const hitE = hitTest(world);
       if (hitE){
         const members = groupMembers(hitE.id);
@@ -2179,18 +2472,36 @@
           selectedId = selectedIds.size === 1 ? [...selectedIds][0] : (selectedIds.has(hitE.id) ? hitE.id : null);
           render(); renderList(); buildPropsForm(); buildModifyForm();
         } else {
-          if (!(selectedIds.has(hitE.id) && selectedIds.size > 1)){
-            selectedIds = new Set(members);
+          if (isMobileDevice){
+            if (!(selectedIds.has(hitE.id) && selectedIds.size > 1)){
+              selectedIds = new Set(members);
+            }
+          } else {
+            // Desktop: clicking another object ADDS it to the current selection
+            // instead of replacing it. Selection is only cleared with Escape.
+            members.forEach(id => selectedIds.add(id));
           }
           selectedId = hitE.id;
           render(); renderList(); buildPropsForm(); buildModifyForm();
-          const ids = [...selectedIds];
-          dragging = { ids, startWorld: world, origMap: Object.fromEntries(ids.map(id => [id, JSON.parse(JSON.stringify(entities.find(x=>x.id===id)))])) };
+          // Whole-entity click-drag-to-move only remains for entity types not
+          // covered by the grip system. Line/rect/circle/arc/polyline can only
+          // be relocated with the Move command, or by dragging their dedicated
+          // "move" grip (line midpoint, circle/arc center, polyline segment).
+          // Dimensions are deliberately excluded too — every point on a
+          // dimension is now a purpose-built grip (extension/arrow/label), so
+          // the only way to relocate the whole dimension is the Move command.
+          const bodyMoveTypes = ['text','hatch'];
+          if (bodyMoveTypes.includes(hitE.type)){
+            const ids = [...selectedIds];
+            dragging = { ids, startWorld: world, origMap: Object.fromEntries(ids.map(id => [id, JSON.parse(JSON.stringify(entities.find(x=>x.id===id)))])) };
+          }
         }
         return;
       }
-      // empty space: start a rubber-band select (unless shift, which just clears nothing extra)
-      if (!e.shiftKey) { selectedIds = new Set(); selectEntity(null); }
+      // empty space: mobile clears the selection (tap-away-to-deselect); desktop
+      // keeps the current selection — it's only cleared with Escape — but still
+      // allows a rubber-band drag to add more entities to it.
+      if (!e.shiftKey && isMobileDevice) { selectedIds = new Set(); selectEntity(null); }
       selBoxStart = { sx, sy, wx: world.x, wy: world.y };
       return;
     }
@@ -2240,6 +2551,13 @@
       return;
     }
 
+    if (gripDrag){
+      const en = entities.find(x => x.id === gripDrag.id);
+      if (en) applyGripDrag(en, gripDrag.orig, gripDrag, world);
+      render();
+      return;
+    }
+
     if (dragging){
       const dx = world.x - dragging.startWorld.x;
       const dy = world.y - dragging.startWorld.y;
@@ -2254,7 +2572,8 @@
 
     // live preview of in-progress draw
     if (tool==='line' && lineStart) { const w2 = applyOrtho(lineStart, world); drawing = { type:'line', x1:lineStart.x,y1:lineStart.y,x2:w2.x,y2:w2.y, ...currentStyle() }; }
-    else if (tool==='rect' && rectStart) drawing = { type:'rect', x1:rectStart.x,y1:rectStart.y,x2:world.x,y2:world.y, ...currentStyle() };
+    else if (tool==='rect' && rectStart && rectSubMode==='flip') drawing = { type:'polyline', points: rectFlipCorners(world), closed:true, ...currentStyle() };
+    else if (tool==='rect' && rectStart && !rectSubMode) drawing = { type:'rect', x1:rectStart.x,y1:rectStart.y,x2:world.x,y2:world.y, ...currentStyle() };
     else if (tool==='circle' && circleCenter) drawing = { type:'circle', cx:circleCenter.x,cy:circleCenter.y, r:Math.hypot(world.x-circleCenter.x, world.y-circleCenter.y), ...currentStyle() };
     else if (tool==='arc' && arcStage===1) drawing = { type:'circle', cx:arcTemp.cx, cy:arcTemp.cy, r:Math.hypot(world.x-arcTemp.cx, world.y-arcTemp.cy), ...currentStyle() };
     else if (tool==='arc' && arcStage===2) {
@@ -2315,6 +2634,8 @@
   });
 
   window.addEventListener('mouseup', (e) => {
+    if (gripDrag){ snapshot_after_grip_drag(); buildPropsForm(); renderList(); }
+    gripDrag = null;
     if (dragging){ snapshot_after_drag(); buildPropsForm(); }
     dragging = null;
     panStart = null;
@@ -2441,7 +2762,7 @@
         lastTapInfo = { time: now, x: p.x, y: p.y };
       }
     } else if (e.touches.length === 2){
-      dragging = null; selBoxStart = null; // a second finger cancels any single-finger drag/select-box in progress
+      dragging = null; gripDrag = null; selBoxStart = null; // a second finger cancels any single-finger drag/select-box in progress
       touchAnchorEl.style.display = 'none';
       touchGesture = { dist: touchDist(e.touches), mid: touchMidScreen(e.touches, rect) };
     }
@@ -2482,7 +2803,7 @@
     }
     e.preventDefault();
   }, { passive:false });
-  canvas.addEventListener('touchcancel', () => { touchGesture = null; dragging = null; selBoxStart = null; touchAnchorEl.style.display = 'none'; }, { passive:true });
+  canvas.addEventListener('touchcancel', () => { touchGesture = null; dragging = null; gripDrag = null; selBoxStart = null; touchAnchorEl.style.display = 'none'; }, { passive:true });
 
   // ---------- Text input popup ----------
   const textPrompt = document.getElementById('textPrompt');
@@ -2605,10 +2926,11 @@
     return null;
   }
   function cancelDrawing(){
-    lineStart = null; rectStart = null; circleCenter = null;
+    lineStart = null; rectStart = null; rectSubMode = null; rectPending = { area:null, length:null, width:null, rot:0 }; circleCenter = null;
     arcStage = 0; arcTemp = {}; polyPoints = []; drawing = null;
     dimStage = 0; dimTemp = {}; dimTarget = null; dimChain = null;
     modifyStage = 0; modifyTemp = {}; modifyGhosts = []; selBoxStart = null;
+    dragging = null; gripDrag = null;
     const sb = document.getElementById('selBox'); if (sb) sb.style.display = 'none';
     render();
   }
@@ -2627,6 +2949,54 @@
       if (lastCommand) processCommand(lastCommand);
       return;
     }
+
+    // ---- RECTANG Area/Dimension/Rotation sub-flow (command line) ----
+    // Once the 1st corner is placed, typing A/D/R starts a short stepped prompt
+    // (matching classic AutoCAD RECTANG options) instead of dragging for the 2nd corner.
+    if (tool === 'rect' && rectStart){
+      if (rectSubMode === 'area' || rectSubMode === 'length' || rectSubMode === 'width' || rectSubMode === 'rotation'){
+        const val = parseFloat(trimmed);
+        if (isNaN(val)){ log('Enter a number.', 'err'); return; }
+        if (rectSubMode === 'area'){
+          rectPending.area = val;
+          rectSubMode = 'length';
+          cmdPrompt('Input length for rectangle:');
+        } else if (rectSubMode === 'length'){
+          rectPending.length = Math.abs(val) || 0.0001;
+          if (rectPending.area != null){
+            rectPending.width = rectPending.area / rectPending.length;
+            rectSubMode = 'flip';
+            cmdPrompt('Move the mouse to flip the rectangle, then click to finish:');
+          } else {
+            rectSubMode = 'width';
+            cmdPrompt('Input width for rectangle:');
+          }
+        } else if (rectSubMode === 'width'){
+          rectPending.width = Math.abs(val) || 0.0001;
+          rectSubMode = 'flip';
+          cmdPrompt('Move the mouse to flip the rectangle, then click to finish:');
+        } else if (rectSubMode === 'rotation'){
+          rectPending.rot = val;
+          rectSubMode = null;
+          cmdPrompt('Specify opposite corner, or [Area/Dimension/Rotation]:');
+        }
+        render();
+        return;
+      }
+      if (/^A(REA)?$/i.test(trimmed)){
+        rectSubMode = 'area'; rectPending.area = null; rectPending.length = null; rectPending.width = null;
+        cmdPrompt('Input area for rectangle:'); return;
+      }
+      if (/^D(IM(ENSION)?)?$/i.test(trimmed)){
+        rectSubMode = 'length'; rectPending.area = null; rectPending.length = null; rectPending.width = null;
+        cmdPrompt('Input length for rectangle:'); return;
+      }
+      if (/^R(OT(ATION)?)?$/i.test(trimmed)){
+        rectSubMode = 'rotation';
+        cmdPrompt('Input rotation angle for rectangle:'); return;
+      }
+    }
+
     const anchor = currentAnchor();
     if (anchor || (tool==='polyline' && polyPoints.length)){
       if (/^u(ndo)?$/i.test(trimmed)){
@@ -2745,6 +3115,16 @@
         html += row('Angle (°)', numInput('m_ang', 0, 1));
       }
       html += `<button class="formBtn" id="m_add">+ Add Line</button>`;
+    } else if (tool === 'rect' && rectStart){
+      // First corner already picked on canvas — sub-menu to finish the rectangle by
+      // exact area, width/height, or rotation instead of dragging to the 2nd corner.
+      html += `<div class="empty-note">1st corner: (${rectStart.x.toFixed(2)}, ${rectStart.y.toFixed(2)}). Set size below or click the opposite corner on canvas.</div>`;
+      html += row('Width', numInput('m_rw', 10, 0.1));
+      html += row('Height', numInput('m_rh', 6, 0.1));
+      html += row('Area', numInput('m_rarea', 60, 0.1));
+      html += row('Rotation (°)', numInput('m_rrot', 0, 1));
+      html += `<button class="formBtn" id="m_addrect2">+ Place Rectangle</button>`;
+      html += `<button class="formBtn secondary" id="m_cancelrect">Cancel</button>`;
     } else if (tool === 'rect'){
       html += row('Corner X', numInput('m_x1', 0));
       html += row('Corner Y', numInput('m_y1', 0));
@@ -2799,6 +3179,46 @@
         entities.push({ id: uid(), type:'line', x1,y1,x2,y2, ...c });
         render(); renderList(); zoomToFitIfEmpty();
       };
+    } else if (tool === 'rect' && rectStart){
+      // Builds the 4 corners for width w / height h anchored at rectStart, rotated by
+      // rot degrees about that same first corner, then previews or commits the shape.
+      const cornersFor = (w, h, rot) => {
+        const pts = [ {x:0,y:0}, {x:w,y:0}, {x:w,y:h}, {x:0,y:h} ];
+        const rad = rot * Math.PI/180;
+        return pts.map(p => ({
+          x: rectStart.x + p.x*Math.cos(rad) - p.y*Math.sin(rad),
+          y: rectStart.y + p.x*Math.sin(rad) + p.y*Math.cos(rad)
+        }));
+      };
+      const wEl = document.getElementById('m_rw'), hEl = document.getElementById('m_rh'),
+            aEl = document.getElementById('m_rarea'), rEl = document.getElementById('m_rrot');
+      const preview = () => {
+        const w = parseFloat(wEl.value)||0, h = parseFloat(hEl.value)||0, rot = parseFloat(rEl.value)||0;
+        const pts = cornersFor(w, h, rot);
+        drawing = { type:'polyline', points:pts, closed:true, ...currentStyle() };
+        render();
+      };
+      wEl.addEventListener('input', () => { aEl.value = ((parseFloat(wEl.value)||0)*(parseFloat(hEl.value)||0)).toFixed(2); preview(); });
+      hEl.addEventListener('input', () => { aEl.value = ((parseFloat(wEl.value)||0)*(parseFloat(hEl.value)||0)).toFixed(2); preview(); });
+      aEl.addEventListener('input', () => {
+        const w = parseFloat(wEl.value)||0.0001;
+        hEl.value = ((parseFloat(aEl.value)||0)/w).toFixed(3);
+        preview();
+      });
+      rEl.addEventListener('input', preview);
+      preview();
+      document.getElementById('m_addrect2').onclick = () => {
+        const w = Math.max(0.0001, parseFloat(wEl.value)||0), h = Math.max(0.0001, parseFloat(hEl.value)||0), rot = parseFloat(rEl.value)||0;
+        snapshot();
+        if (Math.abs(rot % 360) < 1e-6){
+          entities.push({ id: uid(), type:'rect', x1:rectStart.x, y1:rectStart.y, x2:rectStart.x+w, y2:rectStart.y+h, ...c });
+        } else {
+          entities.push({ id: uid(), type:'polyline', points: cornersFor(w,h,rot), closed:true, ...c });
+        }
+        rectStart = null; drawing = null;
+        render(); renderList(); zoomToFitIfEmpty(); buildManualForm();
+      };
+      document.getElementById('m_cancelrect').onclick = () => { rectStart = null; drawing = null; render(); buildManualForm(); };
     } else if (tool === 'rect'){
       document.getElementById('m_add').onclick = () => {
         const x1=gv('m_x1'), y1=gv('m_y1'), w=gv('m_w'), h=gv('m_h');
@@ -2883,6 +3303,15 @@
   }
 
   function buildModifyForm(){
+    buildModifyFormImpl();
+    // The Modify Options panel sits at the top of the sidebar — whenever it
+    // actually shows tool-specific inputs (not just the placeholder note),
+    // scroll the sidebar up so it's immediately visible without hunting for it.
+    if (!modifyBody.querySelector('.empty-note')){
+      sidebarEl.scrollTop = 0;
+    }
+  }
+  function buildModifyFormImpl(){
     const ids = activeSelectionIds();
     modifyTypeTag.textContent = ids.length ? `— ${ids.length} selected` : '';
     let html = '';
@@ -3296,6 +3725,14 @@
       html += row('Height', numInput('p_h', e.height));
     } else if (e.type === 'hatch'){
       html += `<div class="empty-note">Hatch boundary: ${e.boundary.kind}. Use Explode-style tools aren't available for hatch — delete and re-hatch to change spacing/angle.</div>`;
+    } else if (e.type === 'dimension'){
+      if (e.dimType === 'diameter' || e.dimType === 'radius'){
+        html += row('Center X', numInput('p_cx', e.cx));
+        html += row('Center Y', numInput('p_cy', e.cy));
+        html += row('Radius', numInput('p_r', e.r));
+      } else {
+        html += row('Ext Line Offset', numInput('p_extoff', (e.extOffset||0).toFixed(3), 0.01));
+      }
     }
 
     html += `<div class="divider-thin"></div>`;
@@ -3363,6 +3800,18 @@
       bind('p_x', el => e.x = parseFloat(el.value)||0);
       bind('p_y', el => e.y = parseFloat(el.value)||0);
       bind('p_h', el => e.height = Math.max(0.1, parseFloat(el.value)||0.1));
+    } else if (e.type === 'dimension'){
+      if (e.dimType === 'diameter' || e.dimType === 'radius'){
+        bind('p_cx', el => e.cx = parseFloat(el.value)||0);
+        bind('p_cy', el => e.cy = parseFloat(el.value)||0);
+        bind('p_r', el => e.r = Math.max(0.01, parseFloat(el.value)||0.01));
+      } else {
+        // Manually typed extension-line offset (gap): how far the drawn
+        // extension line starts from its endpoint vertex. The vertex stays
+        // snapped to the object and the dimension line doesn't move at all —
+        // only the visible gap at the start of the extension line changes.
+        bind('p_extoff', el => e.extOffset = Math.max(0, parseFloat(el.value)||0));
+      }
     }
 
     bind('p_color', el => e.color = el.value);
