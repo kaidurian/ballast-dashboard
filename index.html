@@ -5686,11 +5686,20 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
         let ambientLight3d, dirLight3d, waterMesh3d;
 
-        // Sky color targets — ambient/directional lighting and water tint
-        // ALWAYS stay at their "day" values (see set3DSky below); only the
-        // scene background (sky) color swaps between these two.
+        // Sky color targets — the scene background (sky) color swaps
+        // between these two (see set3DSky below).
         const SKY_DAY_COLOR = 0x8ecdf2;    // light blue sky
         const SKY_NIGHT_COLOR = 0x040508;  // dark navy sky
+
+        // Ambient/directional lighting levels for the plain Day/Night
+        // toggle (mirrors the day/night extremes used by the Real-world
+        // sun mode) — so switching to night also darkens the barge
+        // hull, tank shells and water fill to match the night sky,
+        // instead of leaving them lit as if it were still day.
+        const DAY_DIR_LIGHT_INTENSITY_3D = 0.9;
+        const NIGHT_DIR_LIGHT_INTENSITY_3D = 0.15;
+        const DAY_AMBIENT_LIGHT_INTENSITY_3D = 0.65;
+        const NIGHT_AMBIENT_LIGHT_INTENSITY_3D = 0.25;
 
         // *** HOW TO CHANGE AXLE / WATER LEVEL COLOR & TRANSPARENCY (3D) ***
         // These two style objects are the SINGLE source of truth for the
@@ -6183,17 +6192,25 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             }
         }
 
-        // Sky-only day/night control, driven by the SAME header toggle
-        // that switches the 2D dashboard's light/dark theme (see
-        // toggleDashboardTheme()). isDay = true -> light blue sky;
-        // isDay = false -> dark navy sky. All ambient/directional
-        // lighting intensity and water tint are intentionally left
-        // untouched here, staying at their "day" appearance always.
-        // Skipped while Real-world sun mode is on, since that mode
-        // owns the sky colour instead (see updateRealSun3D).
+        // Day/night control, driven by the SAME header toggle that
+        // switches the 2D dashboard's light/dark theme (see
+        // toggleDashboardTheme()). isDay = true -> light blue sky +
+        // day-level lighting; isDay = false -> dark navy sky + dimmed
+        // ambient/directional lighting, so the barge hull, tank shells
+        // and water fill visibly shift into a darker "night" shade
+        // along with the sky, instead of staying lit as if it were
+        // still day. Skipped while Real-world sun mode is on, since
+        // that mode owns the sky colour AND lighting instead (see
+        // updateRealSun3D).
         function set3DSky(isDay) {
             if (!scene3d || realSunEnabled) return;
             scene3d.background = new THREE.Color(isDay ? SKY_DAY_COLOR : SKY_NIGHT_COLOR);
+            if (dirLight3d) {
+                dirLight3d.intensity = isDay ? DAY_DIR_LIGHT_INTENSITY_3D : NIGHT_DIR_LIGHT_INTENSITY_3D;
+            }
+            if (ambientLight3d) {
+                ambientLight3d.intensity = isDay ? DAY_AMBIENT_LIGHT_INTENSITY_3D : NIGHT_AMBIENT_LIGHT_INTENSITY_3D;
+            }
         }
 
         // ============================================================
@@ -6965,8 +6982,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     dirLight3d.target.updateMatrixWorld();
                 }
             }
-            // Solid hull/tank/axle/quay geometry casts and receives;
-            // the deck plate is thin and mostly transparent so it only
+            // Solid hull/axle/quay geometry casts and receives; the
+            // deck plate is thin and mostly transparent so it only
             // receives (casting from it looks like a faint phantom
             // line and isn't worth the shadow-map resolution); the sea
             // plane only receives (nothing should ever shadow FROM the
@@ -6984,6 +7001,25 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 waterMesh3d.castShadow = false;
                 waterMesh3d.receiveShadow = true;
             }
+            // Tank shells + ballast (water fill) sit INSIDE the barge,
+            // under the deck — they never see direct sunlight and
+            // aren't shadowed by anything above them in reality, so
+            // shadow casting/receiving is switched off for them here
+            // (overriding the blanket hull3dGroup.traverse above).
+            // Without this, the sun's shadow map projects faint/odd
+            // shadow bands onto the (semi-transparent) tank shells and
+            // the water surface, which reads as a lighting glitch since
+            // there's nothing overhead inside the hull to cast them.
+            tankMeshes3d.forEach((tm) => {
+                if (tm.shell) {
+                    tm.shell.castShadow = false;
+                    tm.shell.receiveShadow = false;
+                }
+                if (tm.ballast) {
+                    tm.ballast.castShadow = false;
+                    tm.ballast.receiveShadow = false;
+                }
+            });
             quayBody.castShadow = true;
             quayBody.receiveShadow = true;
             quaySlab.castShadow = true;
