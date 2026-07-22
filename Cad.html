@@ -332,7 +332,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style (Rev.53)</div>
+    <div class="brand">Drafting Table — AutoCAD-Style (Rev.54)</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -3941,71 +3941,134 @@
   function toDxf(){
     const lines = [];
     const add = (code, val) => { lines.push(String(code), String(val)); };
+
+    // R2000 (AC1015) was tried and rejected by real AutoCAD ("Error in APPID
+    // Table ... drawing discarded") because the modern format requires a full
+    // set of symbol tables (VPORT, LTYPE, LAYER, STYLE, VIEW, UCS, APPID,
+    // DIMSTYLE) plus BLOCK_RECORD/handle bookkeeping — a lenient DXF library
+    // will fill in the gaps, but real AutoCAD won't. Rather than hand-build
+    // all of that scaffolding, this now targets plain DXF R12 (AC1009), which
+    // needs the same 8 symbol tables but none of the subclass markers, owner
+    // handles, or BLOCK_RECORD table that R13+ requires — much less to get
+    // wrong. Entity-wise: LWPOLYLINE (R14+) is replaced with old-style
+    // POLYLINE/VERTEX/SEQEND, and HATCH (not present in R12 at all) is
+    // replaced by exporting the hatch's own precomputed fill-line segments
+    // (e.lines, already used to draw it on screen) as plain LINE entities —
+    // visually identical, no fragile boundary-path encoding required.
+    let handleCounter = 0x10;
+    const nextHandle = () => (handleCounter++).toString(16).toUpperCase();
+
     add(0,'SECTION'); add(2,'HEADER');
     add(9,'$ACADVER'); add(1,'AC1009');
+    add(9,'$HANDLING'); add(70,1); // tells readers that handle (group 5) codes are present below
     add(0,'ENDSEC');
 
     add(0,'SECTION'); add(2,'TABLES');
-    add(0,'TABLE'); add(2,'LAYER'); add(70,layers.length);
-    for (const l of layers){
-      add(0,'LAYER'); add(2,l.name); add(70, l.locked?4:0); add(62, l.visible?7:-7); add(6,'CONTINUOUS');
+
+    // All 8 of these symbol tables must be present (even ones we don't
+    // otherwise use, like VIEW/UCS) or AutoCAD reports the file as invalid
+    // and discards it entirely — this is what "Error in APPID Table" meant.
+    add(0,'TABLE'); add(2,'VPORT'); add(70,1);
+    add(0,'VPORT'); add(5,nextHandle()); add(2,'*Active'); add(70,0);
+    add(10,0.0); add(20,0.0); add(11,1.0); add(21,1.0);
+    add(12,0.0); add(22,0.0); add(13,0.0); add(23,0.0);
+    add(14,0.5); add(24,0.5); add(15,0.5); add(25,0.5);
+    add(16,0.0); add(26,0.0); add(36,1.0);
+    add(17,0.0); add(27,0.0); add(37,0.0);
+    add(40,1000.0); add(41,1.34); add(42,50.0); add(43,0.0); add(44,0.0);
+    add(50,0.0); add(51,0.0); add(71,0); add(72,1000); add(73,1); add(74,3);
+    add(75,0); add(76,0); add(77,0); add(78,0);
+    add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'LTYPE'); add(70,3);
+    for (const name of ['ByBlock','ByLayer','Continuous']){
+      add(0,'LTYPE'); add(5,nextHandle()); add(2,name); add(70,0); add(3,''); add(72,65); add(73,0); add(40,0.0);
     }
     add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'LAYER'); add(70,layers.length);
+    for (const l of layers){
+      add(0,'LAYER'); add(5,nextHandle()); add(2,l.name); add(70, l.locked?4:0); add(62, l.visible?7:-7); add(6,'CONTINUOUS');
+    }
+    add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'STYLE'); add(70,1);
+    add(0,'STYLE'); add(5,nextHandle()); add(2,'STANDARD'); add(70,0); add(40,0.0); add(41,1.0); add(50,0.0); add(71,0); add(42,2.5); add(3,'txt'); add(4,'');
+    add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'VIEW'); add(70,0);
+    add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'UCS'); add(70,0);
+    add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'APPID'); add(70,1);
+    add(0,'APPID'); add(5,nextHandle()); add(2,'ACAD'); add(70,0);
+    add(0,'ENDTAB');
+
+    add(0,'TABLE'); add(2,'DIMSTYLE'); add(70,1);
+    add(0,'DIMSTYLE'); add(105,nextHandle()); add(2,'STANDARD'); add(70,0);
+    add(3,''); add(4,''); add(5,''); add(6,''); add(7,'');
+    add(40,1.0); add(41,2.5); add(42,0.625); add(43,3.75); add(44,1.25);
+    add(45,0.0); add(46,0.0); add(47,0.0); add(48,0.0);
+    add(140,2.5); add(141,2.5); add(142,0.0); add(143,0.03937007874); add(144,1.0); add(145,0.0); add(146,1.0); add(147,0.625);
+    add(71,0); add(72,0); add(73,0); add(74,0); add(75,0); add(76,0); add(77,1); add(78,8);
+    add(170,0); add(171,3); add(172,1); add(173,0); add(174,0); add(175,0); add(176,0); add(177,0); add(178,0);
+    add(0,'ENDTAB');
+
     add(0,'ENDSEC');
+
+    add(0,'SECTION'); add(2,'BLOCKS');
+    add(0,'BLOCK'); add(5,nextHandle()); add(8,'0'); add(2,'$Model_Space'); add(70,0); add(10,0.0); add(20,0.0); add(30,0.0); add(3,'$Model_Space'); add(1,'');
+    add(0,'ENDBLK'); add(5,nextHandle()); add(8,'0');
+    add(0,'BLOCK'); add(5,nextHandle()); add(8,'0'); add(2,'$Paper_Space'); add(70,0); add(10,0.0); add(20,0.0); add(30,0.0); add(3,'$Paper_Space'); add(1,'');
+    add(0,'ENDBLK'); add(5,nextHandle()); add(8,'0');
+    add(0,'ENDSEC');
+
+    const writePolyline = (points, closed, lyr) => {
+      add(0,'POLYLINE'); add(5,nextHandle()); add(8,lyr); add(66,1);
+      add(10,0.0); add(20,0.0); add(30,0.0); add(70, closed?1:0);
+      for (const p of points){
+        add(0,'VERTEX'); add(5,nextHandle()); add(8,lyr);
+        add(10,p.x); add(20,p.y); add(30,0.0); add(70,0);
+      }
+      add(0,'SEQEND'); add(5,nextHandle()); add(8,lyr);
+    };
 
     add(0,'SECTION'); add(2,'ENTITIES');
     for (const e of entities){
       const lyr = e.layer || '0';
       if (e.type === 'line'){
-        add(0,'LINE'); add(8,lyr);
+        add(0,'LINE'); add(5,nextHandle()); add(8,lyr);
         add(10,e.x1); add(20,e.y1); add(30,0);
         add(11,e.x2); add(21,e.y2); add(31,0);
       } else if (e.type === 'rect'){
         const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2);
         const y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
-        add(0,'LWPOLYLINE'); add(8,lyr); add(90,4); add(70,1);
-        add(10,x1); add(20,y1);
-        add(10,x2); add(20,y1);
-        add(10,x2); add(20,y2);
-        add(10,x1); add(20,y2);
+        writePolyline([{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}], true, lyr);
       } else if (e.type === 'circle'){
-        add(0,'CIRCLE'); add(8,lyr);
+        add(0,'CIRCLE'); add(5,nextHandle()); add(8,lyr);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
       } else if (e.type === 'arc'){
-        add(0,'ARC'); add(8,lyr);
+        add(0,'ARC'); add(5,nextHandle()); add(8,lyr);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
         add(50,e.startAngle); add(51,e.endAngle);
       } else if (e.type === 'polyline'){
-        add(0,'LWPOLYLINE'); add(8,lyr); add(90,e.points.length); add(70, e.closed?1:0);
-        for (const p of e.points){ add(10,p.x); add(20,p.y); }
+        writePolyline(e.points, !!e.closed, lyr);
       } else if (e.type === 'text'){
-        add(0,'TEXT'); add(8,lyr);
+        add(0,'TEXT'); add(5,nextHandle()); add(8,lyr);
         add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
         add(1, e.content);
       } else if (e.type === 'hatch'){
-        const b = e.boundary;
-        add(0,'HATCH'); add(8,lyr);
-        add(2,'ANSI31'); // pattern name (informational)
-        add(70,0);       // 0 = pattern fill (not solid)
-        add(71,0);       // not associative
-        add(91,1);       // 1 boundary path
-        if (b.kind === 'circle'){
-          add(92,0); add(93,1);          // edge-type boundary, 1 edge
-          add(72,2);                     // edge type 2 = circular arc
-          add(10,b.cx); add(20,b.cy); add(40,b.r); add(50,0); add(51,360); add(73,1);
-        } else {
-          add(92,2);                     // polyline boundary
-          add(93,b.points.length);
-          for (const p of b.points){ add(10,p.x); add(20,p.y); add(42,0); }
+        for (const seg of (e.lines||[])){
+          add(0,'LINE'); add(5,nextHandle()); add(8,lyr);
+          add(10,seg.x1); add(20,seg.y1); add(30,0);
+          add(11,seg.x2); add(21,seg.y2); add(31,0);
         }
-        add(97,0);                       // 0 source boundary objects
-        add(75,0); add(76,1);
-        add(52,0); add(41,1);
-        add(78,1);                       // 1 pattern definition line
-        add(53,45); add(43,0); add(44,0); add(45,0); add(46, Math.max(0.3, e.width||2)); add(79,0);
-        add(47, Math.max(0.05, (b.kind==='circle'?b.r:10)/40)); // pixel size hint
-        add(98,0);                       // 0 seed points
       }
+      // Note: 'dimension' entities are not exported yet — they're currently
+      // dropped silently on export. Say the word if you'd like those written
+      // out too (e.g. as plain LINE/TEXT geometry approximating the dimension).
     }
     add(0,'ENDSEC');
     add(0,'EOF');
