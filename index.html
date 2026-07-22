@@ -1428,7 +1428,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-Test2-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-54-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -6205,6 +6205,11 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // cell's format — converted by getRealSunDateTime() below.
         let excelSunDateRaw = null;
         let excelSunTimeRaw = null;
+        // Set by getRealSunDateTime() when R147 had no year in it (e.g. a
+        // "24th Jan" style dropdown label) and the current year was
+        // assumed instead — surfaced in the status line so this guess
+        // is visible rather than silent.
+        let lastSunDateYearAssumed = false;
 
         // Excel date serial (days since 1899-12-30) -> {year, month, day}.
         // Uses UTC math throughout so it's immune to the browser's own
@@ -6237,11 +6242,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // Falls back to the live system clock if Excel hasn't supplied a
         // date/time yet (e.g. running outside Excel, or blank cells).
         function getRealSunDateTime() {
+            lastSunDateYearAssumed = false;
             if (excelSunDateRaw === null || excelSunDateRaw === undefined || excelSunDateRaw === ''
                 || excelSunTimeRaw === null || excelSunTimeRaw === undefined || excelSunTimeRaw === '') {
                 return new Date();
             }
             let ymd, hms;
+            let ymdAssumedYear = false;
             if (typeof excelSunDateRaw === 'number') {
                 ymd = excelSerialToYMD(excelSunDateRaw);
             } else {
@@ -6253,6 +6260,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 // while the status label still claimed "(R148)".
                 const s = String(excelSunDateRaw).trim();
                 let dm;
+                const MONTH_NAMES = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
                 if ((dm = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) {
                     // YYYY-MM-DD (ISO)
                     ymd = { year: +dm[1], month: +dm[2], day: +dm[3] };
@@ -6263,6 +6271,25 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const a = +dm[1], b = +dm[2], y = +dm[3];
                     if (a > 12) ymd = { year: y, month: b, day: a };
                     else ymd = { year: y, month: a, day: b };
+                } else if ((dm = s.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,})/i))) {
+                    // Text-label dropdown style, e.g. "24th Jan", "1st Feb",
+                    // "22 Dec" — day + month name, NO YEAR supplied at all.
+                    // We have no way to know the intended year from this
+                    // string alone, so we assume the CURRENT year (flagged
+                    // via ymdAssumedYear so the status line can show it
+                    // instead of silently guessing). If R147 is meant to
+                    // schedule a date in a different year, this dropdown
+                    // needs to be changed to emit a real Excel date/year —
+                    // see chat notes on the R147 data-validation source.
+                    const monKey = dm[2].slice(0, 3).toLowerCase();
+                    const month = MONTH_NAMES[monKey];
+                    if (month) {
+                        ymd = { year: new Date().getFullYear(), month: month, day: +dm[1] };
+                        ymdAssumedYear = true;
+                    } else {
+                        lastSunDateYearAssumed = false;
+                        return new Date();
+                    }
                 } else {
                     const parsed = new Date(s);
                     if (isNaN(parsed.getTime())) return new Date();
@@ -6286,6 +6313,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             }
             const lon = (realSunLon !== null) ? realSunLon : 0;
             const offsetHours = Math.round(lon / 15); // approximate vessel UTC offset from longitude
+            lastSunDateYearAssumed = ymdAssumedYear;
             return new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day, hms.hours - offsetHours, hms.minutes, hms.seconds));
         }
 
@@ -6564,8 +6592,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             // this calculation, to catch stale-value bugs (input box shows
             // one thing, internal variable used is another). Remove once
             // the real-sun timing issue is confirmed fixed.
-            const dbgOffset = Math.round((realSunLon || 0) / 15);
-            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel} | DEBUG lat=${realSunLat} lon=${realSunLon} offset=${dbgOffset}h UTC=${now.toISOString()} rawDate=${JSON.stringify(excelSunDateRaw)}(${typeof excelSunDateRaw}) rawTime=${JSON.stringify(excelSunTimeRaw)}(${typeof excelSunTimeRaw})`);
+            const yearNote = lastSunDateYearAssumed ? ` · ⚠ year assumed (${new Date().getFullYear()}, no year in R147)` : '';
+            setRealSunStatus(`☀ alt ${altitude.toFixed(0)}° · az ${azimuth.toFixed(0)}° · ${timeLabel}${yearNote}`);
         }
 
         // Restores ambient/directional light to their normal fixed
