@@ -76,6 +76,29 @@
 
   /* Main area */
   #main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #blockEditBar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; background: var(--statusbar-on); border-bottom: 1px solid #111;
+    font-size: 12px; color: #fff;
+  }
+  #blockEditBar span { flex: 1; }
+  #blockEditBar strong { color: var(--amber); }
+  #blockEditBar button.action { font-size: 11px; padding: 5px 10px; }
+  #blockEditBar button.action.danger { border-color: var(--danger); color: var(--danger); }
+
+  /* Right-click shortcut menu (desktop only) */
+  #ctxMenu {
+    position: fixed; z-index: 50; display: none;
+    background: var(--panel-2); border: 1px solid var(--panel-border); border-radius: 3px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    min-width: 170px; padding: 4px 0; font-size: 12px; font-family: var(--mono);
+  }
+  #ctxMenu .ctxItem {
+    padding: 6px 14px; color: var(--text); cursor: pointer; white-space: nowrap;
+  }
+  #ctxMenu .ctxItem:hover { background: var(--statusbar-on); color: #fff; }
+  #ctxMenu .ctxItem.danger:hover { background: var(--danger); color: #fff; }
+  #ctxMenu .ctxSep { height: 1px; background: var(--panel-border); margin: 4px 0; }
   #workArea { flex: 1; display: flex; min-height: 0; }
   #canvasWrap { flex: 1; position: relative; }
   canvas { display: block; width: 100%; height: 100%; cursor: none; background: var(--bg); }
@@ -332,7 +355,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style (Rev.54)</div>
+    <div class="brand">Drafting Table — AutoCAD-Style (Rev.55)</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -411,6 +434,11 @@
   </div>
 
   <div id="main">
+    <div id="blockEditBar" style="display:none;">
+      <span>✎ Editing Block: <strong id="blockEditName"></strong> — changes apply to every placed copy on Save</span>
+      <button class="action" id="blockEditSave">✓ Save Block</button>
+      <button class="action danger" id="blockEditCancel">✕ Cancel</button>
+    </div>
     <div id="workArea">
       <div id="canvasWrap">
         <canvas id="cv"></canvas>
@@ -426,6 +454,7 @@
           <text x="32" y="38" fill="#c0392b" font-size="9" font-family="monospace">X</text>
         </svg>
         <div id="hint">Select tool active. Click an entity to select and drag to move.</div>
+        <div id="ctxMenu"></div>
         <div id="coords">x: 0.00  y: 0.00</div>
         <div id="textPrompt">
           <input type="text" id="textInput" placeholder="Text content" autofocus>
@@ -477,7 +506,7 @@
       <div id="cmdLog"></div>
       <div id="cmdInputRow">
         <span class="cmdLabel">Command:</span>
-        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Type a command — LINE, REC, CIRCLE, ARC, PLINE, TEXT, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, ARRAY, TRIM, EXTEND, FILLET, CHAMFER, MATCHPROP, EXPLODE, HATCH, BLOCK, INSERT, LAYER, UNDO, ZOOM, HELP — then Enter">
+        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Type a command — LINE, REC, CIRCLE, ARC, PLINE, TEXT, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, ARRAY, TRIM, EXTEND, FILLET, CHAMFER, MATCHPROP, EXPLODE, HATCH, BLOCK, INSERT, BEDIT, LAYER, UNDO, ZOOM, HELP — then Enter">
       </div>
     </div>
 
@@ -728,6 +757,17 @@
     return { p1, p2, d1, d2, measured, labelPos, extStart1, extStart2 };
   }
   function entitySnapPoints(e){
+    // Block members show (and can only be grabbed by) ONE grip — the block's
+    // base point — carried on the group's representative entity as
+    // `e.basePoint`. Every other member of the same block group contributes
+    // no grips at all, so individual lines/vertices inside a block can never
+    // be grabbed and stretched on their own; the whole block only moves,
+    // copies, rotates, scales, mirrors, or arrays as one unit (via the Modify
+    // tools, which already act on the full group selection).
+    if (e.blockName){
+      if (e.basePoint) return [{ x: e.basePoint.x, y: e.basePoint.y, kind:'base', grip:'block-move' }];
+      return [];
+    }
     const pts = [];
     if (e.type === 'line'){
       pts.push({x:e.x1,y:e.y1,kind:'endpoint', grip:'stretch', part:'p1'}, {x:e.x2,y:e.y2,kind:'endpoint', grip:'stretch', part:'p2'});
@@ -900,7 +940,11 @@
     }
   }
   function snapshot_after_grip_drag(){
-    history.push(JSON.stringify(entities.map(x => x.id === gripDrag.id ? gripDrag.orig : x)));
+    if (gripDrag.groupMove){
+      history.push(JSON.stringify(entities.map(x => gripDrag.origMap[x.id] || x)));
+    } else {
+      history.push(JSON.stringify(entities.map(x => x.id === gripDrag.id ? gripDrag.orig : x)));
+    }
     if (history.length>100) history.shift();
     future = [];
   }
@@ -1171,7 +1215,13 @@
     const pts = getHandlePoints(e).filter(p => p.grip);
     for (const p of pts){
       const s = toS(p.x, p.y);
-      if (p.kind === 'midpoint' || p.kind === 'quadrant'){
+      if (p.kind === 'base'){
+        // Block base-point grip: a diamond, drawn larger so it reads clearly
+        // as "the one handle for this whole block" rather than a vertex grip.
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y-6); ctx.lineTo(s.x+6, s.y); ctx.lineTo(s.x, s.y+6); ctx.lineTo(s.x-6, s.y);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      } else if (p.kind === 'midpoint' || p.kind === 'quadrant'){
         ctx.beginPath(); ctx.arc(s.x, s.y, 3.2, 0, Math.PI*2); ctx.fill();
       } else {
         ctx.fillRect(s.x-3, s.y-3, 6, 6);
@@ -1480,8 +1530,7 @@
     }
 
     if (e.key === 'Enter') {
-      if (tool === 'polyline' && polyPoints.length >= 2) { finishPolyline(); return; }
-      if (tool === 'copy' && modifyStage === 1) { finishModify(`Copy finished.`); return; }
+      handleEnterAction();
       return;
     }
 
@@ -1711,8 +1760,9 @@
           ids.forEach((id,i) => translateEntity(entities.find(x=>x.id===id), modifyTemp.orig[i], dx, dy));
           finishModify(`Moved ${ids.length} entit${ids.length===1?'y':'ies'}.`);
         } else {
-          const newIds = [];
-          modifyTemp.orig.forEach(o => { const c = JSON.parse(JSON.stringify(o)); c.id = uid(); delete c.groupId; translateEntity(c, o, dx, dy); entities.push(c); newIds.push(c.id); });
+          const newIds = [], newEnts = [];
+          modifyTemp.orig.forEach(o => { const c = JSON.parse(JSON.stringify(o)); c.id = uid(); translateEntity(c, o, dx, dy); entities.push(c); newIds.push(c.id); newEnts.push(c); });
+          regroupCopies(newEnts);
           log(`Copied ${ids.length} entit${ids.length===1?'y':'ies'}.`, 'prompt');
           render(); renderList();
           // COPY supports multiple placements — stay active for another destination click
@@ -1765,8 +1815,9 @@
         cmdPrompt('Specify second point of mirror axis:');
       } else {
         snapshot();
-        const newIds = [];
-        ids.forEach(id => { const src = entities.find(x=>x.id===id); const c = mirrorEntityCopy(src, modifyTemp.p1, world); c.id = uid(); delete c.groupId; entities.push(c); newIds.push(c.id); });
+        const newIds = [], newEnts = [];
+        ids.forEach(id => { const src = entities.find(x=>x.id===id); const c = mirrorEntityCopy(src, modifyTemp.p1, world); c.id = uid(); entities.push(c); newIds.push(c.id); newEnts.push(c); });
+        regroupCopies(newEnts);
         selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
         finishModify(`Mirrored ${ids.length} entit${ids.length===1?'y':'ies'} (source kept).`);
       }
@@ -1857,10 +1908,20 @@
     snapshot();
     const gid = newGroupId();
     const newIds = [];
-    blocks[name].forEach(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); c.groupId = gid; translateEntity(c, c, at.x, at.y); entities.push(c); newIds.push(c.id); });
+    blocks[name].forEach((rel, i) => {
+      const c = JSON.parse(JSON.stringify(rel));
+      c.id = uid(); c.groupId = gid; c.blockName = name;
+      translateEntity(c, c, at.x, at.y);
+      // Every member of a block instance can't be edited/moved on its own —
+      // only the FIRST member carries the base-point grip (entitySnapPoints
+      // shows nothing for the rest), and that single grip drags the whole
+      // group, exactly like the Move command.
+      if (i === 0) c.basePoint = { x: at.x, y: at.y };
+      entities.push(c); newIds.push(c.id);
+    });
     selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
     render(); renderList(); buildPropsForm(); buildModifyForm();
-    log(`Inserted block "${name}" at ${at.x.toFixed ? at.x.toFixed(2) : at.x},${at.y.toFixed ? at.y.toFixed(2) : at.y} (grouped).`, 'prompt');
+    log(`Inserted block "${name}" at ${at.x.toFixed ? at.x.toFixed(2) : at.x},${at.y.toFixed ? at.y.toFixed(2) : at.y} (grouped — only the base point can be grabbed; use Move/Copy/Rotate/etc. to edit the whole block).`, 'prompt');
   }
 
   // Defines a reusable block from the given entities, AND groups those same
@@ -1868,18 +1929,126 @@
   function createBlockFromSelection(ids, name, basePt){
     snapshot();
     const gid = newGroupId();
-    blocks[name] = ids.map(id => {
+    blocks[name] = ids.map((id, i) => {
       const src = entities.find(x=>x.id===id);
       src.groupId = gid; // group the ORIGINAL entities too
+      src.blockName = name; // marks it as a block member: no individual grips/edits
+      if (i === 0) src.basePoint = { x: basePt.x, y: basePt.y };
+      else delete src.basePoint;
       const c = JSON.parse(JSON.stringify(src));
-      delete c.id; delete c.groupId; // the stored definition itself stays ungrouped; grouping happens fresh per-insert
+      delete c.id; delete c.groupId; delete c.blockName; delete c.basePoint; // the stored definition itself stays plain — grouping/tagging happens fresh per-insert
       translateEntity(c, c, -basePt.x, -basePt.y);
       return c;
     });
     selectedIds = new Set(ids); selectedId = ids.length===1?ids[0]:null;
     flashHint(`Block "${name}" defined (${ids.length} entities, grouped).`);
-    log(`Block "${name}" created from ${ids.length} entities, base point ${basePt.x.toFixed(2)},${basePt.y.toFixed(2)}. Source entities are now grouped.`, 'prompt');
+    log(`Block "${name}" created from ${ids.length} entities, base point ${basePt.x.toFixed(2)},${basePt.y.toFixed(2)}. Source entities are now grouped — only the base point can be grabbed; use Move/Copy/Rotate/etc. to edit the whole block.`, 'prompt');
     render(); renderList(); buildPropsForm(); buildModifyForm();
+  }
+
+  // ---------- Block Editor (BEDIT) ----------
+  // Opens a block's definition in an isolated editing session: the main
+  // drawing's `entities`/`history`/selection are stashed away, and `entities`
+  // is temporarily swapped for a fresh, plain (ungrouped) copy of the block's
+  // member entities — so every existing tool (draw + modify) just works on
+  // them unmodified. Saving re-derives the block definition from whatever is
+  // left, then rebuilds every placed instance of that block in the main
+  // drawing at its recorded base point (per-instance rotate/scale applied
+  // separately from Move/Rotate/Scale is not preserved — the rebuilt
+  // instance is a fresh, un-rotated/un-scaled placement, same as a new Insert).
+  let blockEditSession = null;
+  const blockEditBar = document.getElementById('blockEditBar');
+  const blockEditNameEl = document.getElementById('blockEditName');
+
+  function openBlockEditor(name){
+    if (blockEditSession || !blocks[name]) return;
+    blockEditSession = {
+      name,
+      mainEntities: entities, mainHistory: history, mainFuture: future,
+      mainSelectedIds: selectedIds, mainSelectedId: selectedId
+    };
+    entities = blocks[name].map(rel => { const c = JSON.parse(JSON.stringify(rel)); c.id = uid(); return c; });
+    history = []; future = [];
+    selectedIds = new Set(); selectedId = null;
+    setTool('select');
+    blockEditNameEl.textContent = name;
+    blockEditBar.style.display = 'flex';
+    flashHint(`Editing block "${name}" — add, move, or delete objects, then Save.`);
+    log(`*Block Editor* — editing "${name}". Save to update every placed copy, or Cancel to discard.`, 'prompt');
+    render(); renderList(); buildPropsForm(); buildModifyForm();
+  }
+
+  function closeBlockEditor(){
+    if (!blockEditSession) return;
+    entities = blockEditSession.mainEntities;
+    history = blockEditSession.mainHistory; future = blockEditSession.mainFuture;
+    selectedIds = blockEditSession.mainSelectedIds; selectedId = blockEditSession.mainSelectedId;
+    blockEditSession = null;
+    blockEditBar.style.display = 'none';
+    setTool('select');
+    render(); renderList(); buildPropsForm(); buildModifyForm();
+  }
+
+  function saveBlockEditor(){
+    if (!blockEditSession) return;
+    const { name } = blockEditSession;
+    // The edited entities (in whatever arrangement the user left them) become
+    // the new block definition, stored relative to the origin (0,0) — since
+    // the editor never applies an offset, this IS already "relative".
+    const newDef = entities.map(e => { const c = JSON.parse(JSON.stringify(e)); delete c.id; return c; });
+    blocks[name] = newDef;
+
+    // Restore the main drawing, then rebuild every placed instance of this
+    // block at its recorded base point using the fresh definition.
+    const editedCount = entities.length;
+    entities = blockEditSession.mainEntities;
+    history = blockEditSession.mainHistory; future = blockEditSession.mainFuture;
+    selectedIds = blockEditSession.mainSelectedIds; selectedId = blockEditSession.mainSelectedId;
+    blockEditSession = null;
+    blockEditBar.style.display = 'none';
+
+    snapshot();
+    const groupIds = new Set(entities.filter(e => e.blockName === name).map(e => e.groupId).filter(Boolean));
+    let rebuilt = 0;
+    groupIds.forEach(gid => {
+      const members = entities.filter(e => e.groupId === gid);
+      const rep = members.find(m => m.basePoint) || members[0];
+      const base = rep && rep.basePoint ? rep.basePoint : { x:0, y:0 };
+      entities = entities.filter(e => e.groupId !== gid);
+      newDef.forEach((rel, i) => {
+        const c = JSON.parse(JSON.stringify(rel));
+        c.id = uid(); c.groupId = gid; c.blockName = name;
+        translateEntity(c, c, base.x, base.y);
+        if (i === 0) c.basePoint = { x: base.x, y: base.y };
+        entities.push(c);
+      });
+      rebuilt++;
+    });
+    setTool('select');
+    log(`Block "${name}" saved (${editedCount} entities) — ${rebuilt} placed cop${rebuilt===1?'y':'ies'} updated.`, 'prompt');
+    flashHint(`Block "${name}" saved.`);
+    render(); renderList(); buildPropsForm(); buildModifyForm();
+  }
+
+  blockEditBar.querySelector('#blockEditSave').addEventListener('click', saveBlockEditor);
+  blockEditBar.querySelector('#blockEditCancel').addEventListener('click', () => {
+    if (confirm('Discard changes to this block?')) closeBlockEditor();
+  });
+
+
+  // "Group Selected" or a Block instance). Each duplicated BATCH should stay
+  // grouped together as its own independent unit (so a copied block is still
+  // a single block, with its own base-point grip) rather than merging into
+  // the original group or losing grouping entirely. Call once per batch of
+  // freshly-created copies (their .groupId/.blockName/.basePoint are still
+  // copied straight from the originals at this point).
+  function regroupCopies(copies){
+    const map = {};
+    copies.forEach(c => {
+      if (!c.groupId) return;
+      if (!map[c.groupId]) map[c.groupId] = newGroupId();
+      c.groupId = map[c.groupId]; // basePoint (if any) travels along automatically via the clone + transform already applied
+    });
   }
   function activeSelectionIds(){
     if (selectedIds.size) return [...selectedIds];
@@ -1932,6 +2101,7 @@
       else { e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; e.ox=o.ox+dx; e.oy=o.oy+dy; }
     }
     else if (e.type === 'hatch'){ e.boundary = translateBoundary(o.boundary, dx, dy); e.lines = (o.lines||[]).map(s=>({x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy})); }
+    if (o.basePoint) e.basePoint = { x: o.basePoint.x + dx, y: o.basePoint.y + dy };
   }
   function translateBoundary(b, dx, dy){
     if (b.kind === 'circle') return { kind:'circle', cx:b.cx+dx, cy:b.cy+dy, r:b.r };
@@ -1973,6 +2143,7 @@
                                       : { kind:'polygon', points: b.points.map(p=>rotatePt(p,base,rad)) };
       e.lines = (o.lines||[]).map(s => { const a=rotatePt({x:s.x1,y:s.y1},base,rad), c=rotatePt({x:s.x2,y:s.y2},base,rad); return {x1:a.x,y1:a.y,x2:c.x,y2:c.y}; });
     }
+    if (o.basePoint) e.basePoint = rotatePt(o.basePoint, base, rad);
   }
   function scalePt(p, base, f){ return { x: base.x + (p.x-base.x)*f, y: base.y + (p.y-base.y)*f }; }
   function scaleEntity(e, o, base, f){
@@ -1998,6 +2169,7 @@
                                       : { kind:'polygon', points: b.points.map(p=>scalePt(p,base,f)) };
       e.lines = (o.lines||[]).map(s => { const a=scalePt({x:s.x1,y:s.y1},base,f), c=scalePt({x:s.x2,y:s.y2},base,f); return {x1:a.x,y1:a.y,x2:c.x,y2:c.y}; });
     }
+    if (o.basePoint) e.basePoint = scalePt(o.basePoint, base, f);
   }
   function mirrorPt(p, a, b){
     const dx=b.x-a.x, dy=b.y-a.y; const len2=dx*dx+dy*dy || 1;
@@ -2035,6 +2207,7 @@
         c.x1=p1.x; c.y1=p1.y; c.x2=p2.x; c.y2=p2.y; c.ox=po.x; c.oy=po.y;
       }
     }
+    if (c.basePoint) c.basePoint = mirrorPt(c.basePoint, a, b);
     return c;
   }
 
@@ -2451,12 +2624,24 @@
       const gh = hitTestGrip(sx, sy);
       if (gh){
         const en = gh.entity, p = gh.point;
+        const members = groupMembers(en.id);
         if (!selectedIds.has(en.id)){
-          const members = groupMembers(en.id);
           if (isMobileDevice) selectedIds = new Set(members);
           else members.forEach(id => selectedIds.add(id));
           selectedId = en.id;
           render(); renderList(); buildPropsForm(); buildModifyForm();
+        }
+        if (p.grip === 'block-move'){
+          // Dragging a block's base-point grip moves every member of the
+          // block together — the same as the Move command — rather than
+          // editing any single entity's geometry.
+          gripDrag = {
+            groupMove: true,
+            anchor: { x:p.x, y:p.y },
+            memberIds: members,
+            origMap: Object.fromEntries(members.map(id => [id, JSON.parse(JSON.stringify(entities.find(x=>x.id===id)))]))
+          };
+          return;
         }
         gripDrag = { id: en.id, grip: p.grip, part: p.part, anchor: {x:p.x, y:p.y}, orig: JSON.parse(JSON.stringify(en)) };
         return;
@@ -2552,6 +2737,16 @@
     }
 
     if (gripDrag){
+      if (gripDrag.groupMove){
+        const dx = world.x - gripDrag.anchor.x, dy = world.y - gripDrag.anchor.y;
+        gripDrag.memberIds.forEach(id => {
+          const en = entities.find(x => x.id === id);
+          const o = gripDrag.origMap[id];
+          if (en && o) translateEntity(en, o, dx, dy);
+        });
+        render();
+        return;
+      }
       const en = entities.find(x => x.id === gripDrag.id);
       if (en) applyGripDrag(en, gripDrag.orig, gripDrag, world);
       render();
@@ -2694,7 +2889,77 @@
     future = [];
   }
 
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // ---------- Right-click (desktop only) ----------
+  // AutoCAD convention: nothing selected & no command running -> repeat the
+  // last command; something selected -> shortcut menu; a command is mid-flight
+  // -> right-click acts as Enter. Right-click-to-pan (mousedown handler above)
+  // still works for an actual press-and-drag; this fires on release/context.
+  const ctxMenuEl = document.getElementById('ctxMenu');
+  function hideShortcutMenu(){ ctxMenuEl.style.display = 'none'; }
+  function showShortcutMenu(clientX, clientY, ids){
+    const blockIds = ids.filter(id => entities.find(x=>x.id===id)?.blockName);
+    const blockNames = new Set(blockIds.map(id => entities.find(x=>x.id===id).blockName));
+    const items = [];
+    items.push({ label:'✛ Move', action:()=>setTool('move') });
+    items.push({ label:'⧉ Copy', action:()=>setTool('copy') });
+    items.push({ label:'↻ Rotate', action:()=>setTool('rotate') });
+    items.push({ label:'⤢ Scale', action:()=>setTool('scale') });
+    items.push({ label:'⇌ Mirror', action:()=>setTool('mirror') });
+    items.push({ label:'▦ Array', action:()=>setTool('array') });
+    items.push({ sep:true });
+    items.push({ label:'▤ Match Properties', action:()=>setTool('matchprop') });
+    if (blockNames.size === 1){
+      const bn = [...blockNames][0];
+      items.push({ label:`✎ Edit Block "${bn}"`, action:()=>openBlockEditor(bn) });
+    } else if (!blockIds.length){
+      items.push({ label:'⬒ Make Block', action:()=>setTool('block') });
+    }
+    items.push({ sep:true });
+    items.push({ label:'✕ Erase', danger:true, action:()=>{
+      snapshot();
+      entities = entities.filter(x => !ids.includes(x.id));
+      selectedIds = new Set(); selectedId = null;
+      render(); renderList(); buildPropsForm(); buildModifyForm();
+      log(`${ids.length} entit${ids.length===1?'y':'ies'} erased.`, 'prompt');
+    }});
+    items.push({ label:'Deselect All', action:()=>{
+      selectedIds = new Set(); selectedId = null;
+      render(); renderList(); buildPropsForm(); buildModifyForm();
+    }});
+
+    ctxMenuEl.innerHTML = items.map((it,i) => it.sep
+      ? `<div class="ctxSep"></div>`
+      : `<div class="ctxItem${it.danger?' danger':''}" data-i="${i}">${it.label}</div>`
+    ).join('');
+    ctxMenuEl.querySelectorAll('.ctxItem').forEach(el => {
+      el.addEventListener('click', () => {
+        const it = items[parseInt(el.dataset.i,10)];
+        hideShortcutMenu();
+        it.action();
+      });
+    });
+    ctxMenuEl.style.left = clientX + 'px';
+    ctxMenuEl.style.top = clientY + 'px';
+    ctxMenuEl.style.display = 'block';
+    requestAnimationFrame(() => {
+      const r = ctxMenuEl.getBoundingClientRect();
+      if (r.right > window.innerWidth) ctxMenuEl.style.left = Math.max(4, window.innerWidth - r.width - 8) + 'px';
+      if (r.bottom > window.innerHeight) ctxMenuEl.style.top = Math.max(4, window.innerHeight - r.height - 8) + 'px';
+    });
+  }
+  window.addEventListener('mousedown', (e) => {
+    if (ctxMenuEl.style.display === 'block' && !ctxMenuEl.contains(e.target)) hideShortcutMenu();
+  });
+
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (isMobileDevice) return; // right-click has no equivalent on touch — desktop only
+    hideShortcutMenu();
+    if (commandInProgress()){ handleEnterAction(); return; }
+    const ids = activeSelectionIds();
+    if (ids.length){ showShortcutMenu(e.clientX, e.clientY, ids); return; }
+    if (lastCommand) processCommand(lastCommand); // repeat last command
+  });
 
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -2935,6 +3200,30 @@
     render();
   }
 
+  // True while a multi-step command is mid-flight and waiting on more input
+  // (a partially-drawn line/rect/circle/arc/polyline/dimension, or a Move/
+  // Copy/Rotate/Scale/Mirror waiting on its destination/angle/factor click,
+  // or a pending Text entry). Used so right-click can act as Enter in this
+  // state, exactly like AutoCAD's right-click-during-a-command convention.
+  function commandInProgress(){
+    if (awaitingCmdText) return true;
+    if (tool === 'line' && lineStart) return true;
+    if (tool === 'rect' && rectStart) return true;
+    if (tool === 'circle' && circleCenter) return true;
+    if (tool === 'arc' && arcStage > 0) return true;
+    if (tool === 'polyline' && polyPoints.length > 0) return true;
+    if ((tool === 'dimension' || tool === 'dimlinear') && dimStage > 0) return true;
+    if ((tool === 'dimdiameter' || tool === 'dimradius') && dimStage > 0) return true;
+    if (['move','copy','rotate','scale','mirror'].includes(tool) && modifyStage > 0) return true;
+    return false;
+  }
+  // Same effect as pressing Enter — factored out so a right-click during an
+  // in-progress command can trigger it too.
+  function handleEnterAction(){
+    if (tool === 'polyline' && polyPoints.length >= 2) { finishPolyline(); return; }
+    if (tool === 'copy' && modifyStage === 1) { finishModify(`Copy finished.`); return; }
+  }
+
   function processCommand(raw){
     const trimmed = raw.trim();
     if (awaitingCmdText){
@@ -3013,6 +3302,24 @@
     const firstWord = upper.split(/\s+/)[0];
     lastCommand = trimmed;
 
+    if (firstWord === 'BEDIT' || firstWord === 'EB'){
+      const rest = trimmed.slice(firstWord.length).trim();
+      const names = Object.keys(blocks);
+      if (!names.length){ log('No blocks defined yet.', 'err'); return; }
+      let name = rest || null;
+      if (name && !blocks[name]){
+        const match = names.find(n => n.toUpperCase() === name.toUpperCase());
+        name = match || null;
+      }
+      if (!name){
+        const sel = activeSelectionIds().map(id => entities.find(x=>x.id===id)?.blockName).find(Boolean);
+        name = sel || (names.length === 1 ? names[0] : null);
+      }
+      if (!name){ log(`Specify a block name: BEDIT <name>. Defined blocks: ${names.join(', ')}`, 'err'); return; }
+      openBlockEditor(name);
+      return;
+    }
+
     if (cmdMap[firstWord]){
       setTool(cmdMap[firstWord]);
       log(hints[cmdMap[firstWord]] || 'Select tool active.', 'prompt');
@@ -3053,7 +3360,7 @@
       case 'HELP': case '?':
         log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V)', 'prompt');
         log('Dimension: DIMALIGNED(DIM) DIMLINEAR(DLI) DIMDIAMETER(DDI) DIMRADIUS(DRA) DIMBASELINE(DBA) DIMCONTINUE(DCO)', 'prompt');
-        log('Modify: MOVE(M) COPY(CO) ROTATE(RO) SCALE(SC) MIRROR(MI) OFFSET(O) ARRAY(AR) TRIM(TR) EXTEND(EX) FILLET(F) CHAMFER(CHA) MATCHPROP(MA) EXPLODE(X) HATCH(H) BLOCK(B) INSERT(I)', 'prompt');
+        log('Modify: MOVE(M) COPY(CO) ROTATE(RO) SCALE(SC) MIRROR(MI) OFFSET(O) ARRAY(AR) TRIM(TR) EXTEND(EX) FILLET(F) CHAMFER(CHA) MATCHPROP(MA) EXPLODE(X) HATCH(H) BLOCK(B) INSERT(I) BEDIT(EB)', 'prompt');
         log('Other: ERASE(E) UNDO(U) REDO ZOOM(Z) LAYER(LA) SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
         log('While drawing, type coordinates as "10,5" (absolute), "@2,0" (relative), or a plain number for distance.', 'prompt');
         break;
@@ -3336,7 +3643,9 @@
           const count = Math.max(1, Math.round(parseFloat(document.getElementById('mo_count').value)||1));
           const newIds = [];
           for (let k=1;k<=count;k++){
-            orig.forEach(o => { const c=JSON.parse(JSON.stringify(o)); c.id=uid(); delete c.groupId; translateEntity(c,o,dx*k,dy*k); entities.push(c); newIds.push(c.id); });
+            const passEnts = [];
+            orig.forEach(o => { const c=JSON.parse(JSON.stringify(o)); c.id=uid(); translateEntity(c,o,dx*k,dy*k); entities.push(c); newIds.push(c.id); passEnts.push(c); });
+            regroupCopies(passEnts);
           }
           selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
         }
@@ -3387,8 +3696,9 @@
         const p1 = {x:parseFloat(document.getElementById('mo_x1').value)||0, y:parseFloat(document.getElementById('mo_y1').value)||0};
         const p2 = {x:parseFloat(document.getElementById('mo_x2').value)||0, y:parseFloat(document.getElementById('mo_y2').value)||0};
         snapshot();
-        const newIds = [];
-        ids.forEach(id => { const c = mirrorEntityCopy(entities.find(x=>x.id===id), p1, p2); c.id = uid(); delete c.groupId; entities.push(c); newIds.push(c.id); });
+        const newIds = [], newEnts = [];
+        ids.forEach(id => { const c = mirrorEntityCopy(entities.find(x=>x.id===id), p1, p2); c.id = uid(); entities.push(c); newIds.push(c.id); newEnts.push(c); });
+        regroupCopies(newEnts);
         selectedIds = new Set(newIds); selectedId = newIds.length===1?newIds[0]:null;
         render(); renderList(); buildPropsForm();
         log(`Mirrored ${ids.length} entit${ids.length===1?'y':'ies'}.`, 'prompt');
@@ -3432,7 +3742,9 @@
           const rsp=gv('mo_rsp'), csp=gv('mo_csp');
           for (let r=0;r<rows;r++) for (let c2=0;c2<cols;c2++){
             if (r===0 && c2===0) continue;
-            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); delete cl.groupId; translateEntity(cl,o,c2*csp,r*rsp); entities.push(cl); newIds.push(cl.id); });
+            const passEnts = [];
+            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); translateEntity(cl,o,c2*csp,r*rsp); entities.push(cl); newIds.push(cl.id); passEnts.push(cl); });
+            regroupCopies(passEnts);
           }
           log(`Rectangular array: ${rows}×${cols}.`, 'prompt');
         } else {
@@ -3441,7 +3753,9 @@
           const step = fill/count;
           for (let k=1;k<count;k++){
             const ang = step*k;
-            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); delete cl.groupId; rotateEntity(cl,o,center,ang); entities.push(cl); newIds.push(cl.id); });
+            const passEnts = [];
+            orig.forEach(o => { const cl=JSON.parse(JSON.stringify(o)); cl.id=uid(); rotateEntity(cl,o,center,ang); entities.push(cl); newIds.push(cl.id); passEnts.push(cl); });
+            regroupCopies(passEnts);
           }
           log(`Polar array: ${count} items over ${fill}°.`, 'prompt');
         }
@@ -3559,6 +3873,7 @@
       html += row('At X', numInput('mo_ipx', 0));
       html += row('At Y', numInput('mo_ipy', 0));
       html += `<button class="formBtn" id="mo_apply">⬓ Insert Block</button>`;
+      html += `<button class="formBtn secondary" id="mo_editblock2">✎ Edit This Block</button>`;
       html += `<div class="empty-note">Or tap the canvas to place it exactly where you tap.</div>`;
       modifyBody.innerHTML = html;
       document.getElementById('mo_apply').onclick = () => {
@@ -3566,12 +3881,21 @@
         const at = { x: gv('mo_ipx'), y: gv('mo_ipy') };
         insertBlockAt(name, at);
       };
+      document.getElementById('mo_editblock2').onclick = () => {
+        openBlockEditor(document.getElementById('mo_blockpick').value);
+      };
       return;
     }
 
     if (tool === 'select' && ids.length){
       const groupIdsHere = new Set(ids.map(id => entities.find(x=>x.id===id)?.groupId).filter(Boolean));
-      if (groupIdsHere.size){
+      const blockNamesHere = new Set(ids.map(id => entities.find(x=>x.id===id)?.blockName).filter(Boolean));
+      if (blockNamesHere.size === 1){
+        const bn = [...blockNamesHere][0];
+        html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected — Block "${bn}". Individual objects inside a block can't be edited — use Move/Copy/Rotate/Scale/Mirror/Array on the whole block, or Edit Block to change its definition (updates every placed copy).</div>`;
+        html += `<button class="formBtn" id="mo_editblock">✎ Edit Block "${bn}"</button>`;
+        html += `<button class="formBtn secondary" id="mo_ungroup">⛓️‍💥 Ungroup (detach from block)</button>`;
+      } else if (groupIdsHere.size){
         html += `<div class="empty-note">${ids.length} entit${ids.length===1?'y':'ies'} selected — includes ${groupIdsHere.size} group${groupIdsHere.size===1?'':'s'}.</div>`;
         html += `<button class="formBtn secondary" id="mo_ungroup">⛓️‍💥 Ungroup</button>`;
       } else if (ids.length > 1){
@@ -3588,10 +3912,12 @@
           log(`Grouped ${ids.length} entities.`, 'prompt');
           buildModifyForm();
         };
+        const eBtn = document.getElementById('mo_editblock');
+        if (eBtn) eBtn.onclick = () => openBlockEditor([...blockNamesHere][0]);
         const uBtn = document.getElementById('mo_ungroup');
         if (uBtn) uBtn.onclick = () => {
           snapshot();
-          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en) delete en.groupId; });
+          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en){ delete en.groupId; delete en.blockName; delete en.basePoint; } });
           log(`Ungrouped selection.`, 'prompt');
           buildModifyForm();
         };
@@ -3688,6 +4014,29 @@
     }
     propsTypeTag.textContent = `— ${e.type} #${e.id}`;
     let html = '';
+
+    if (e.blockName){
+      // Block members can't be edited or moved individually — geometry fields
+      // and per-entity Delete/Duplicate are hidden; Move/Copy/Rotate/Scale/
+      // Mirror/Array (which operate on the whole group) or Edit Block (which
+      // edits the shared definition) are the only ways to change one.
+      propsTypeTag.textContent = `— Block "${e.blockName}"`;
+      html += `<div class="empty-note">This entity is part of Block "${e.blockName}". It can't be edited or moved individually — select it and use Move, Copy, Rotate, Scale, Mirror, or Array to transform the whole block, or Edit Block to change its definition (updates every placed copy).</div>`;
+      html += `<button class="formBtn" id="p_editblock">✎ Edit Block "${e.blockName}"</button>`;
+      html += `<div class="divider-thin"></div>`;
+      html += `<div class="form-row"><label>Layer</label><select id="p_layer">${layers.map(l=>`<option value="${l.name}" ${l.name===(e.layer||'0')?'selected':''}>${l.name}</option>`).join('')}</select></div>`;
+      propsBody.innerHTML = html;
+      const eb = document.getElementById('p_editblock');
+      if (eb) eb.onclick = () => openBlockEditor(e.blockName);
+      const layerSel = document.getElementById('p_layer');
+      if (layerSel) layerSel.addEventListener('change', () => {
+        ensurePropsSnapshot();
+        const gid = e.groupId;
+        entities.forEach(en => { if (en.groupId === gid) en.layer = layerSel.value; });
+        render(); renderList(); scheduleAutosave();
+      });
+      return;
+    }
 
     if (e.type === 'line'){
       html += row('Start X', numInput('p_x1', e.x1));
@@ -3941,134 +4290,71 @@
   function toDxf(){
     const lines = [];
     const add = (code, val) => { lines.push(String(code), String(val)); };
-
-    // R2000 (AC1015) was tried and rejected by real AutoCAD ("Error in APPID
-    // Table ... drawing discarded") because the modern format requires a full
-    // set of symbol tables (VPORT, LTYPE, LAYER, STYLE, VIEW, UCS, APPID,
-    // DIMSTYLE) plus BLOCK_RECORD/handle bookkeeping — a lenient DXF library
-    // will fill in the gaps, but real AutoCAD won't. Rather than hand-build
-    // all of that scaffolding, this now targets plain DXF R12 (AC1009), which
-    // needs the same 8 symbol tables but none of the subclass markers, owner
-    // handles, or BLOCK_RECORD table that R13+ requires — much less to get
-    // wrong. Entity-wise: LWPOLYLINE (R14+) is replaced with old-style
-    // POLYLINE/VERTEX/SEQEND, and HATCH (not present in R12 at all) is
-    // replaced by exporting the hatch's own precomputed fill-line segments
-    // (e.lines, already used to draw it on screen) as plain LINE entities —
-    // visually identical, no fragile boundary-path encoding required.
-    let handleCounter = 0x10;
-    const nextHandle = () => (handleCounter++).toString(16).toUpperCase();
-
     add(0,'SECTION'); add(2,'HEADER');
     add(9,'$ACADVER'); add(1,'AC1009');
-    add(9,'$HANDLING'); add(70,1); // tells readers that handle (group 5) codes are present below
     add(0,'ENDSEC');
 
     add(0,'SECTION'); add(2,'TABLES');
-
-    // All 8 of these symbol tables must be present (even ones we don't
-    // otherwise use, like VIEW/UCS) or AutoCAD reports the file as invalid
-    // and discards it entirely — this is what "Error in APPID Table" meant.
-    add(0,'TABLE'); add(2,'VPORT'); add(70,1);
-    add(0,'VPORT'); add(5,nextHandle()); add(2,'*Active'); add(70,0);
-    add(10,0.0); add(20,0.0); add(11,1.0); add(21,1.0);
-    add(12,0.0); add(22,0.0); add(13,0.0); add(23,0.0);
-    add(14,0.5); add(24,0.5); add(15,0.5); add(25,0.5);
-    add(16,0.0); add(26,0.0); add(36,1.0);
-    add(17,0.0); add(27,0.0); add(37,0.0);
-    add(40,1000.0); add(41,1.34); add(42,50.0); add(43,0.0); add(44,0.0);
-    add(50,0.0); add(51,0.0); add(71,0); add(72,1000); add(73,1); add(74,3);
-    add(75,0); add(76,0); add(77,0); add(78,0);
-    add(0,'ENDTAB');
-
-    add(0,'TABLE'); add(2,'LTYPE'); add(70,3);
-    for (const name of ['ByBlock','ByLayer','Continuous']){
-      add(0,'LTYPE'); add(5,nextHandle()); add(2,name); add(70,0); add(3,''); add(72,65); add(73,0); add(40,0.0);
-    }
-    add(0,'ENDTAB');
-
     add(0,'TABLE'); add(2,'LAYER'); add(70,layers.length);
     for (const l of layers){
-      add(0,'LAYER'); add(5,nextHandle()); add(2,l.name); add(70, l.locked?4:0); add(62, l.visible?7:-7); add(6,'CONTINUOUS');
+      add(0,'LAYER'); add(2,l.name); add(70, l.locked?4:0); add(62, l.visible?7:-7); add(6,'CONTINUOUS');
     }
     add(0,'ENDTAB');
-
-    add(0,'TABLE'); add(2,'STYLE'); add(70,1);
-    add(0,'STYLE'); add(5,nextHandle()); add(2,'STANDARD'); add(70,0); add(40,0.0); add(41,1.0); add(50,0.0); add(71,0); add(42,2.5); add(3,'txt'); add(4,'');
-    add(0,'ENDTAB');
-
-    add(0,'TABLE'); add(2,'VIEW'); add(70,0);
-    add(0,'ENDTAB');
-
-    add(0,'TABLE'); add(2,'UCS'); add(70,0);
-    add(0,'ENDTAB');
-
-    add(0,'TABLE'); add(2,'APPID'); add(70,1);
-    add(0,'APPID'); add(5,nextHandle()); add(2,'ACAD'); add(70,0);
-    add(0,'ENDTAB');
-
-    add(0,'TABLE'); add(2,'DIMSTYLE'); add(70,1);
-    add(0,'DIMSTYLE'); add(105,nextHandle()); add(2,'STANDARD'); add(70,0);
-    add(3,''); add(4,''); add(5,''); add(6,''); add(7,'');
-    add(40,1.0); add(41,2.5); add(42,0.625); add(43,3.75); add(44,1.25);
-    add(45,0.0); add(46,0.0); add(47,0.0); add(48,0.0);
-    add(140,2.5); add(141,2.5); add(142,0.0); add(143,0.03937007874); add(144,1.0); add(145,0.0); add(146,1.0); add(147,0.625);
-    add(71,0); add(72,0); add(73,0); add(74,0); add(75,0); add(76,0); add(77,1); add(78,8);
-    add(170,0); add(171,3); add(172,1); add(173,0); add(174,0); add(175,0); add(176,0); add(177,0); add(178,0);
-    add(0,'ENDTAB');
-
     add(0,'ENDSEC');
-
-    add(0,'SECTION'); add(2,'BLOCKS');
-    add(0,'BLOCK'); add(5,nextHandle()); add(8,'0'); add(2,'$Model_Space'); add(70,0); add(10,0.0); add(20,0.0); add(30,0.0); add(3,'$Model_Space'); add(1,'');
-    add(0,'ENDBLK'); add(5,nextHandle()); add(8,'0');
-    add(0,'BLOCK'); add(5,nextHandle()); add(8,'0'); add(2,'$Paper_Space'); add(70,0); add(10,0.0); add(20,0.0); add(30,0.0); add(3,'$Paper_Space'); add(1,'');
-    add(0,'ENDBLK'); add(5,nextHandle()); add(8,'0');
-    add(0,'ENDSEC');
-
-    const writePolyline = (points, closed, lyr) => {
-      add(0,'POLYLINE'); add(5,nextHandle()); add(8,lyr); add(66,1);
-      add(10,0.0); add(20,0.0); add(30,0.0); add(70, closed?1:0);
-      for (const p of points){
-        add(0,'VERTEX'); add(5,nextHandle()); add(8,lyr);
-        add(10,p.x); add(20,p.y); add(30,0.0); add(70,0);
-      }
-      add(0,'SEQEND'); add(5,nextHandle()); add(8,lyr);
-    };
 
     add(0,'SECTION'); add(2,'ENTITIES');
     for (const e of entities){
       const lyr = e.layer || '0';
       if (e.type === 'line'){
-        add(0,'LINE'); add(5,nextHandle()); add(8,lyr);
+        add(0,'LINE'); add(8,lyr);
         add(10,e.x1); add(20,e.y1); add(30,0);
         add(11,e.x2); add(21,e.y2); add(31,0);
       } else if (e.type === 'rect'){
         const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2);
         const y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
-        writePolyline([{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}], true, lyr);
+        add(0,'LWPOLYLINE'); add(8,lyr); add(90,4); add(70,1);
+        add(10,x1); add(20,y1);
+        add(10,x2); add(20,y1);
+        add(10,x2); add(20,y2);
+        add(10,x1); add(20,y2);
       } else if (e.type === 'circle'){
-        add(0,'CIRCLE'); add(5,nextHandle()); add(8,lyr);
+        add(0,'CIRCLE'); add(8,lyr);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
       } else if (e.type === 'arc'){
-        add(0,'ARC'); add(5,nextHandle()); add(8,lyr);
+        add(0,'ARC'); add(8,lyr);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
         add(50,e.startAngle); add(51,e.endAngle);
       } else if (e.type === 'polyline'){
-        writePolyline(e.points, !!e.closed, lyr);
+        add(0,'LWPOLYLINE'); add(8,lyr); add(90,e.points.length); add(70, e.closed?1:0);
+        for (const p of e.points){ add(10,p.x); add(20,p.y); }
       } else if (e.type === 'text'){
-        add(0,'TEXT'); add(5,nextHandle()); add(8,lyr);
+        add(0,'TEXT'); add(8,lyr);
         add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
         add(1, e.content);
       } else if (e.type === 'hatch'){
-        for (const seg of (e.lines||[])){
-          add(0,'LINE'); add(5,nextHandle()); add(8,lyr);
-          add(10,seg.x1); add(20,seg.y1); add(30,0);
-          add(11,seg.x2); add(21,seg.y2); add(31,0);
+        const b = e.boundary;
+        add(0,'HATCH'); add(8,lyr);
+        add(2,'ANSI31'); // pattern name (informational)
+        add(70,0);       // 0 = pattern fill (not solid)
+        add(71,0);       // not associative
+        add(91,1);       // 1 boundary path
+        if (b.kind === 'circle'){
+          add(92,0); add(93,1);          // edge-type boundary, 1 edge
+          add(72,2);                     // edge type 2 = circular arc
+          add(10,b.cx); add(20,b.cy); add(40,b.r); add(50,0); add(51,360); add(73,1);
+        } else {
+          add(92,2);                     // polyline boundary
+          add(93,b.points.length);
+          for (const p of b.points){ add(10,p.x); add(20,p.y); add(42,0); }
         }
+        add(97,0);                       // 0 source boundary objects
+        add(75,0); add(76,1);
+        add(52,0); add(41,1);
+        add(78,1);                       // 1 pattern definition line
+        add(53,45); add(43,0); add(44,0); add(45,0); add(46, Math.max(0.3, e.width||2)); add(79,0);
+        add(47, Math.max(0.05, (b.kind==='circle'?b.r:10)/40)); // pixel size hint
+        add(98,0);                       // 0 seed points
       }
-      // Note: 'dimension' entities are not exported yet — they're currently
-      // dropped silently on export. Say the word if you'd like those written
-      // out too (e.g. as plain LINE/TEXT geometry approximating the dimension).
     }
     add(0,'ENDSEC');
     add(0,'EOF');
