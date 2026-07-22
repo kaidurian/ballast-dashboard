@@ -5691,15 +5691,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const SKY_DAY_COLOR = 0x8ecdf2;    // light blue sky
         const SKY_NIGHT_COLOR = 0x040508;  // dark navy sky
 
-        // Ambient/directional lighting levels for the plain Day/Night
-        // toggle (mirrors the day/night extremes used by the Real-world
-        // sun mode) — so switching to night also darkens the barge
-        // hull, tank shells and water fill to match the night sky,
-        // instead of leaving them lit as if it were still day.
+        // Fixed "day" lighting levels used at all times — the plain
+        // Day/Night toggle (and Real-world sun mode's night state)
+        // only swap the sky background colour; ambient/directional
+        // light intensity stays at these day levels so the barge
+        // hull, tank shells and water fill remain lit as if it were
+        // still day.
         const DAY_DIR_LIGHT_INTENSITY_3D = 0.9;
-        const NIGHT_DIR_LIGHT_INTENSITY_3D = 0.15;
         const DAY_AMBIENT_LIGHT_INTENSITY_3D = 0.65;
-        const NIGHT_AMBIENT_LIGHT_INTENSITY_3D = 0.25;
 
         // *** HOW TO CHANGE AXLE / WATER LEVEL COLOR & TRANSPARENCY (3D) ***
         // These two style objects are the SINGLE source of truth for the
@@ -6194,39 +6193,32 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
         // Day/night control, driven by the SAME header toggle that
         // switches the 2D dashboard's light/dark theme (see
-        // toggleDashboardTheme()). isDay = true -> light blue sky +
-        // day-level lighting; isDay = false -> dark navy sky + dimmed
-        // ambient/directional lighting, so the barge hull, tank shells
-        // and water fill visibly shift into a darker "night" shade
-        // along with the sky, instead of staying lit as if it were
-        // still day. Skipped while Real-world sun mode is on, since
-        // that mode owns the sky colour AND lighting instead (see
-        // updateRealSun3D).
+        // toggleDashboardTheme()). isDay = true -> light blue sky;
+        // isDay = false -> dark navy sky. Only the sky background
+        // colour swaps — ambient/directional lighting stays fixed at
+        // day levels, so the barge hull, tank shells and water fill
+        // stay lit as if it were still day. Skipped while Real-world
+        // sun mode is on, since that mode owns the sky colour instead
+        // (see updateRealSun3D).
         function set3DSky(isDay) {
             if (!scene3d || realSunEnabled) return;
             scene3d.background = new THREE.Color(isDay ? SKY_DAY_COLOR : SKY_NIGHT_COLOR);
-            if (dirLight3d) {
-                dirLight3d.intensity = isDay ? DAY_DIR_LIGHT_INTENSITY_3D : NIGHT_DIR_LIGHT_INTENSITY_3D;
-            }
-            if (ambientLight3d) {
-                ambientLight3d.intensity = isDay ? DAY_AMBIENT_LIGHT_INTENSITY_3D : NIGHT_AMBIENT_LIGHT_INTENSITY_3D;
-            }
         }
 
         // ============================================================
-        // REAL-WORLD SUN (time + location aware lighting)
+        // REAL-WORLD SUN (time + location aware sky colour)
         // When enabled, this replaces the plain Day/Night toggle for the
-        // 3D scene's sky colour and directional sunlight: given a
-        // latitude/longitude, it computes the actual sun altitude/
-        // azimuth for the CURRENT local time (recomputed every 60s)
-        // using a standard NOAA/Meeus-style low-precision solar
-        // position formula, then:
+        // 3D scene's sky colour: given a latitude/longitude, it computes
+        // the actual sun altitude/azimuth for the CURRENT local time
+        // (recomputed every 60s) using a standard NOAA/Meeus-style
+        // low-precision solar position formula, then:
         //   - points dirLight3d along that real sun direction
-        //   - scales its intensity/colour by how high the sun sits
-        //     (bright white near noon, warm orange low near the
-        //     horizon, dim at night)
         //   - tints the sky background to match (blue by day, orange/
         //     pink at sunrise & sunset, dark navy at night)
+        // Ambient/directional lighting intensity and colour stay fixed
+        // at day levels throughout (see updateRealSun3D), so the barge
+        // hull, tank shells and water fill stay lit as if it were still
+        // day — matching the plain Day/Night toggle's behaviour.
         // Turning it off restores the ordinary Day/Night toggle and the
         // fixed "day" ambient/directional light levels. Latitude/
         // longitude and the enabled flag persist to localStorage.
@@ -6601,15 +6593,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 horizR * Math.sin(relBearingRad)
             );
 
-            // Intensity & colour ramp with altitude: bright/white near
-            // noon, warm orange near the horizon, dim at night.
-            const dayT = Math.max(0, Math.min(1, altitude / 45));
-            const nightT = Math.max(0, Math.min(1, -altitude / 6));
-            dirLight3d.intensity = 0.15 + 0.85 * dayT * (1 - nightT);
-            dirLight3d.color.set(lerpColor3D(0xffd9a0, 0xffffff, dayT));
+            // Lighting stays fixed at day levels regardless of sun
+            // altitude — only the sky background colour (below) follows
+            // the sun, so the barge hull, tank shells and water fill
+            // stay lit as if it were still day, matching the plain
+            // Day/Night toggle's behaviour.
+            dirLight3d.intensity = DAY_DIR_LIGHT_INTENSITY_3D;
+            dirLight3d.color.set(0xffffff);
 
             if (ambientLight3d) {
-                ambientLight3d.intensity = 0.25 + 0.45 * (1 - nightT);
+                ambientLight3d.intensity = DAY_AMBIENT_LIGHT_INTENSITY_3D;
             }
 
             // Sky colour: night -> twilight -> sunrise/sunset orange -> day blue.
