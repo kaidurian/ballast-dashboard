@@ -170,6 +170,75 @@
             flex-grow: 1;
         }
 
+        /* ---- 2D plan / 3D viewer layout row ----
+           Default: stacked (3D panel below 2D panel), same as before.
+           .side-by-side: 3D panel sits beside the 2D panel instead of
+           underneath it. See toggleSideBySideLayout(). */
+        .view-2d-3d-row {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .view-2d-3d-row.side-by-side {
+            flex-direction: row;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .view-2d-3d-row.side-by-side > .tank-grid-container {
+            flex: 1 1 480px;
+            min-width: 420px;
+        }
+
+        /* Draggable splitter between the 2D and 3D panels — only shown
+           (and only functional) while side-by-side is active. Dragging
+           sets an explicit pixel flex-basis on the 2D panel via JS; the
+           3D panel fills whatever space remains. Double-click resets
+           to the default 50/50-ish split. */
+        .view-2d-3d-resizer {
+            display: none;
+            flex: 0 0 10px;
+            align-self: stretch;
+            cursor: col-resize;
+            position: relative;
+            touch-action: none;
+        }
+
+        .view-2d-3d-row.side-by-side .view-2d-3d-resizer {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .view-2d-3d-resizer::before {
+            content: "";
+            width: 4px;
+            height: 100%;
+            min-height: 60px;
+            border-radius: 3px;
+            background: var(--panel-border);
+            transition: background 0.15s ease;
+        }
+
+        .view-2d-3d-resizer:hover::before,
+        .view-2d-3d-resizer.dragging::before {
+            background: var(--accent-blue);
+        }
+
+        .view-2d-3d-resizer.dragging {
+            cursor: col-resize;
+        }
+
+        /* On narrow viewports the row wraps back to stacked (see
+           flex-wrap above); hide the horizontal-drag handle then since
+           there's nothing meaningful to drag. */
+        @media (max-width: 900px) {
+            .view-2d-3d-row.side-by-side .view-2d-3d-resizer {
+                display: none;
+            }
+        }
+
         /* Compact trim/heel mini-graphics, now living inside the tank grid
            panel's header row instead of a separate bottom panel. */
         .grid-attitude-mini {
@@ -1428,7 +1497,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-55-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-56-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1462,6 +1531,10 @@
                 <span>💧 Tank Flow</span>
                 <input type="checkbox" id="tankFlowToggleCheckbox" checked onchange="toggleTankFlowOverlay()">
             </div>
+            <div class="toggle-container" title="Show the 3D barge view beside the 2D plan view instead of underneath it">
+                <span>⛶ 3D beside 2D</span>
+                <input type="checkbox" id="sideBySideToggleCheckbox" onchange="toggleSideBySideLayout(this.checked)">
+            </div>
             <div id="connectionStatus" style="font-size: 10px; color: var(--text-muted);">Status: <span style="color: #ef4444;">● Offline</span></div>
             <button class="sync-btn" onclick="pullExcelTankData()">↻ Sync</button>
             <button class="sync-btn" title="Export tanks, trailer axles &amp; hull outline as a .json file for the CAD editor" onclick="exportProjectForCAD()">⬇ Export to CAD</button>
@@ -1470,7 +1543,8 @@
         </div>
     </header>
     <div class="main-layout">
-        <div class="tank-grid-container">
+        <div class="view-2d-3d-row" id="view2d3dRow">
+        <div class="tank-grid-container" id="view2dPanel">
             <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0;">
                 <div style="width: 1px;"><!-- spacer so the attitude block stays visually centered --></div>
                 <div class="grid-attitude-mini">
@@ -1491,11 +1565,27 @@
                 <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
             </div>
         </div>
-        <div class="tank-grid-container" id="view3dPanel">
+        <div class="view-2d-3d-resizer" id="view2d3dResizer" title="Drag to resize · double-click to reset"></div>
+        <div class="tank-grid-container" id="view3dCanvasPanel">
             <div style="position:relative; width:100%; height:420px;">
                 <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
                 <div id="labels3d" style="position:absolute; inset:0; pointer-events:none;"></div>
             </div>
+        </div>
+        </div>
+        <!-- /view-2d-3d-row -->
+
+        <!-- ============================================================
+             3D VIEW CONTROLS — camera presets, save/restore/lock,
+             deck/fill toggles, real-sun controls. Deliberately kept
+             OUTSIDE view-2d-3d-row: these buttons stay at their
+             original full-width stacked position underneath both
+             panels no matter whether the 3D canvas above is shown
+             stacked or beside the 2D plan — only the canvas itself
+             moves, so the button grid never gets squeezed into a
+             narrow side column.
+             ============================================================ -->
+        <div class="tank-grid-container" id="view3dControlsPanel">
             <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
                 <button class="sync-btn" onclick="set3DCamera('iso-fwd-ps')" id="cam3d-iso-fwd-ps">FWD-PS iso</button>
                 <button class="sync-btn" onclick="set3DCamera('iso-fwd-sb')" id="cam3d-iso-fwd-sb">FWD-SB iso</button>
@@ -1546,6 +1636,7 @@
                 <span id="realSunStatus" style="font-size:10px; color:var(--text-muted); white-space:nowrap;"></span>
             </div>
         </div>
+
 
         <!-- ============================================================
              AUTO BALLAST PANEL
@@ -3071,6 +3162,133 @@
             pumpOnlyInput = checked;
             applyPumpInputRestriction();
         }
+
+        // ============================================================
+        // 3d. 2D/3D LAYOUT TOGGLE + DRAGGABLE SPLITTER
+        //     Default: 3D viewer panel stacked below the 2D plan view
+        //     (unchanged from before). When ON, the 3D panel moves
+        //     beside the 2D panel instead, so both are visible
+        //     side-by-side, and a drag handle between them lets the
+        //     user resize the split (i.e. shrink the 3D panel to make
+        //     more room for the 2D plan, or vice versa). Both the
+        //     on/off preference and the chosen split width persist
+        //     across sessions via localStorage. Since the 3D viewer's
+        //     canvas size depends on its container's pixel size,
+        //     resize3DViewer() must run after any layout/width change
+        //     (the browser doesn't fire a 'resize' event just because
+        //     a flex container reflowed).
+        // ============================================================
+        const SIDE_BY_SIDE_STORAGE_KEY = 'bargeballast_side_by_side_3d';
+        const VIEW_SPLIT_STORAGE_KEY = 'bargeballast_view_split_px';
+
+        function toggleSideBySideLayout(checked) {
+            const row = document.getElementById('view2d3dRow');
+            const panel2d = document.getElementById('view2dPanel');
+            const panel3d = document.getElementById('view3dCanvasPanel');
+            if (!row) return;
+            row.classList.toggle('side-by-side', !!checked);
+
+            if (checked) {
+                // Re-apply any previously dragged split width.
+                let savedWidth = null;
+                try { savedWidth = localStorage.getItem(VIEW_SPLIT_STORAGE_KEY); } catch (e) {}
+                if (panel2d) panel2d.style.flex = savedWidth ? `0 0 ${savedWidth}px` : '';
+                if (panel3d) panel3d.style.flex = '';
+            } else {
+                // Back to stacked — clear any inline split widths so
+                // each panel reverts to its natural full-width layout.
+                if (panel2d) panel2d.style.flex = '';
+                if (panel3d) panel3d.style.flex = '';
+            }
+
+            try { localStorage.setItem(SIDE_BY_SIDE_STORAGE_KEY, checked ? '1' : '0'); } catch (e) {}
+            // Let the browser finish reflowing the row before measuring
+            // the (now resized) 3D container, then a couple more times
+            // to catch late transition/layout settling.
+            requestAnimationFrame(() => {
+                resize3DViewer();
+                setTimeout(resize3DViewer, 150);
+            });
+        }
+
+        function restoreSideBySideLayoutPreference() {
+            let saved = '0';
+            try { saved = localStorage.getItem(SIDE_BY_SIDE_STORAGE_KEY) || '0'; } catch (e) {}
+            const checkbox = document.getElementById('sideBySideToggleCheckbox');
+            if (checkbox) checkbox.checked = saved === '1';
+            toggleSideBySideLayout(saved === '1');
+        }
+
+        // ---- Drag-to-resize splitter between the 2D and 3D panels ----
+        (function setupView2d3dResizer() {
+            const resizer = document.getElementById('view2d3dResizer');
+            const row = document.getElementById('view2d3dRow');
+            const panel2d = document.getElementById('view2dPanel');
+            const panel3d = document.getElementById('view3dCanvasPanel');
+            if (!resizer || !row || !panel2d || !panel3d) return;
+
+            const MIN_PANEL_PX = 320; // keep both panels usable
+            let dragging = false;
+
+            function pointerX(e) {
+                return (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+            }
+
+            function onDragStart(e) {
+                if (!row.classList.contains('side-by-side')) return; // nothing to drag when stacked
+                dragging = true;
+                resizer.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            }
+
+            function onDragMove(e) {
+                if (!dragging) return;
+                const rowRect = row.getBoundingClientRect();
+                const resizerWidth = resizer.getBoundingClientRect().width || 10;
+                let newWidth = pointerX(e) - rowRect.left;
+                const maxWidth = rowRect.width - resizerWidth - MIN_PANEL_PX;
+                newWidth = Math.max(MIN_PANEL_PX, Math.min(newWidth, maxWidth));
+                panel2d.style.flex = `0 0 ${newWidth}px`;
+                panel3d.style.flex = '1 1 auto';
+                resize3DViewer();
+                e.preventDefault();
+            }
+
+            function onDragEnd() {
+                if (!dragging) return;
+                dragging = false;
+                resizer.classList.remove('dragging');
+                document.body.style.userSelect = '';
+                const m = /^0 0 ([\d.]+)px$/.exec(panel2d.style.flex || '');
+                try {
+                    if (m) localStorage.setItem(VIEW_SPLIT_STORAGE_KEY, m[1]);
+                } catch (e) {}
+                requestAnimationFrame(() => {
+                    resize3DViewer();
+                    setTimeout(resize3DViewer, 150);
+                });
+            }
+
+            resizer.addEventListener('mousedown', onDragStart);
+            window.addEventListener('mousemove', onDragMove);
+            window.addEventListener('mouseup', onDragEnd);
+
+            resizer.addEventListener('touchstart', onDragStart, { passive: false });
+            window.addEventListener('touchmove', onDragMove, { passive: false });
+            window.addEventListener('touchend', onDragEnd);
+
+            // Double-click resets to the default (roughly even) split.
+            resizer.addEventListener('dblclick', () => {
+                panel2d.style.flex = '';
+                panel3d.style.flex = '';
+                try { localStorage.removeItem(VIEW_SPLIT_STORAGE_KEY); } catch (e) {}
+                requestAnimationFrame(() => {
+                    resize3DViewer();
+                    setTimeout(resize3DViewer, 150);
+                });
+            });
+        })();
 
         // ============================================================
         // 4. ATTITUDE CANVASES
@@ -5107,6 +5325,7 @@
         // on its own if Firebase is empty or unreachable.
         window.addEventListener('load', () => {
             if (!isOfficeInitialized && !firebaseStarted) startFirebaseMode();
+            restoreSideBySideLayoutPreference();
         });
     </script>
     <script>
@@ -5952,6 +6171,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             hull3dGroup.add(trailerGhostGroup3d);
         }
 
+        function resize3DViewer() {
+            const container = document.getElementById('viewer3d');
+            if (!container || !container.clientWidth || !camera3d || !renderer3d) return;
+            camera3d.aspect = container.clientWidth / Math.max(container.clientHeight, 1);
+            camera3d.updateProjectionMatrix();
+            renderer3d.setSize(container.clientWidth, container.clientHeight);
+        }
+
         function init3DScene() {
             const container = document.getElementById('viewer3d');
             if (!container || scene3d) return; // already initialized
@@ -6085,12 +6312,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 else if (e.touches.length === 1) { isPanning3d = false; lastTouchDist = null; }
             });
 
-            window.addEventListener('resize', () => {
-                if (!container.clientWidth) return;
-                camera3d.aspect = container.clientWidth / Math.max(container.clientHeight, 1);
-                camera3d.updateProjectionMatrix();
-                renderer3d.setSize(container.clientWidth, container.clientHeight);
-            });
+            window.addEventListener('resize', resize3DViewer);
 
             function animate3d() {
                 requestAnimationFrame(animate3d);
