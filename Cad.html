@@ -355,7 +355,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style (Rev.55)</div>
+    <div class="brand">Drafting Table — AutoCAD-Style (Rev.57)</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -387,6 +387,7 @@
     <select id="layerSelect" title="Current layer — new entities are placed on this layer"></select>
 
     <div class="divider"></div>
+    <button class="action" id="newDrawingBtn" title="Start a brand-new drawing — resets entities, layers, blocks, and undo history">🆕 New</button>
     <button class="action" id="undoBtn" title="Undo (Ctrl+Z)">↶ Undo</button>
     <button class="action" id="redoBtn" title="Redo (Ctrl+Y)">↷ Redo</button>
     <button class="action danger" id="clearBtn" title="Clear all">🗑 Clear</button>
@@ -506,7 +507,7 @@
       <div id="cmdLog"></div>
       <div id="cmdInputRow">
         <span class="cmdLabel">Command:</span>
-        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Type a command — LINE, REC, CIRCLE, ARC, PLINE, TEXT, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, ARRAY, TRIM, EXTEND, FILLET, CHAMFER, MATCHPROP, EXPLODE, HATCH, BLOCK, INSERT, BEDIT, LAYER, UNDO, ZOOM, HELP — then Enter">
+        <input type="text" id="cmdInput" autocomplete="off" spellcheck="false" placeholder="Type a command — LINE, REC, CIRCLE, ARC, PLINE, TEXT, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, ARRAY, TRIM, EXTEND, FILLET, CHAMFER, MATCHPROP, EXPLODE, HATCH, BLOCK, INSERT, BEDIT, LAYER, UNDO, ZOOM, NEW, HELP — then Enter">
       </div>
     </div>
 
@@ -572,6 +573,8 @@
 
   // ---------- Blocks (BLOCK / INSERT) ----------
   let blocks = {}; // name -> [{...entity relative to base, no id}]
+  let hatchPickMode = false;   // true while waiting for a Pick Point click
+  let hatchPickedBoundary = null; // boundary found via Pick Point, takes priority over selection-based chaining
 
   // ---------- Groups ----------
   // Entities can carry a shared `groupId` (set when a Block is created from a
@@ -1392,8 +1395,13 @@
   }
   function syncLayerSelect(){
     layerSelectEl.innerHTML = layers.map(l => `<option value="${l.name}" ${l.name===currentLayer?'selected':''}>${l.name}</option>`).join('');
+    // New objects default to the CURRENT layer's color ("ByLayer") — keep the
+    // color swatch in the toolbar in sync whenever the current layer changes,
+    // so a freshly-drawn object matches its layer unless explicitly overridden.
+    const cl = layers.find(l => l.name === currentLayer);
+    if (cl) colorPicker.value = cl.color;
   }
-  layerSelectEl.addEventListener('change', () => { currentLayer = layerSelectEl.value; renderLayers(); scheduleAutosave(); });
+  layerSelectEl.addEventListener('change', () => { currentLayer = layerSelectEl.value; renderLayers(); syncLayerSelect(); scheduleAutosave(); });
 
   function addLayer(){
     let base = 'Layer', n = 1;
@@ -1457,6 +1465,7 @@
     lineStart = null; rectStart = null; rectSubMode = null; rectPending = { area:null, length:null, width:null, rot:0 }; circleCenter = null; arcStage = 0; arcTemp = {};
     dimStage = 0; dimTemp = {}; dimTarget = null;
     modifyStage = 0; modifyTemp = {}; currentOsnap = null;
+    if (t !== 'hatch'){ hatchPickMode = false; hatchPickedBoundary = null; }
     if (t === 'dimbaseline' || t === 'dimcontinue'){
       const src = lastDimEntity;
       if (!src){
@@ -1484,6 +1493,10 @@
     toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === t));
     hint.textContent = hints[t] || '';
     if (statToolEl) statToolEl.textContent = 'Tool: ' + t.toUpperCase();
+    // Right-click "repeat last command" should work for toolbar clicks too,
+    // not only commands typed into the command line — 'select' itself isn't
+    // a repeatable command (matches AutoCAD: picking doesn't count).
+    if (t !== 'select') lastCommand = t;
     render();
     buildManualForm();
     buildModifyForm();
@@ -1536,6 +1549,16 @@
 
     if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); undo(); return; }
     if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
+    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a'){
+      e.preventDefault();
+      const selectable = entities.filter(en => layerVisible(en.layer) && !layerLocked(en.layer));
+      if (!selectable.length){ flashHint('Nothing to select.'); return; }
+      selectedIds = new Set(selectable.map(en => en.id));
+      selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+      render(); renderList(); buildPropsForm(); buildModifyForm();
+      log(`${selectedIds.size} entit${selectedIds.size===1?'y':'ies'} selected.`, 'prompt');
+      return;
+    }
 
     // Type-anywhere: any plain printable key, pressed while nothing is focused
     // (over the canvas, sidebar, toolbar — anywhere in the dashboard), is routed
@@ -1880,6 +1903,23 @@
       target.color = src.color; target.width = src.width; target.layer = src.layer;
       render(); renderList(); buildPropsForm();
       log(`Properties matched onto ${target.type} #${target.id}. Click more targets, Esc to finish.`, 'prompt');
+      return;
+    }
+
+    if (tool === 'hatch'){
+      if (hatchPickMode){
+        const boundary = buildPickPointBoundary(world);
+        if (boundary){
+          hatchPickedBoundary = boundary;
+          hatchPickMode = false;
+          flashHint('Boundary found — set spacing/angle and Apply Hatch.');
+          log('Pick Point found a closed boundary.', 'prompt');
+        } else {
+          flashHint('No closed area there — click inside a fully-enclosed region.');
+          log('Pick Point: no closed boundary at that point.', 'err');
+        }
+        buildModifyForm();
+      }
       return;
     }
 
@@ -2533,6 +2573,207 @@
     if (e.type === 'polyline' && e.closed && e.points.length>=3) return { type:'polygon', kind:'polygon', points: e.points };
     return null;
   }
+  // A line/polyline/arc's endpoint-to-endpoint chain of points, used to stitch
+  // several separate entities (e.g. what Trim leaves behind) into one closed
+  // boundary for Hatch — without this, a hatch boundary could only ever be a
+  // single circle/rect/closed-polyline.
+  function entityChainPoints(e){
+    if (e.type === 'line') return [{x:e.x1,y:e.y1},{x:e.x2,y:e.y2}];
+    if (e.type === 'polyline' && e.points && e.points.length>=2) return e.points.slice();
+    if (e.type === 'arc'){
+      const segs = 24;
+      let a0 = e.startAngle, a1 = e.endAngle;
+      if (a1 <= a0) a1 += 360; // arcs sweep CCW, increasing angle
+      const pts = [];
+      for (let i=0;i<=segs;i++){
+        const a = (a0 + (a1-a0)*(i/segs)) * Math.PI/180;
+        pts.push({ x: e.cx + e.r*Math.cos(a), y: e.cy + e.r*Math.sin(a) });
+      }
+      return pts;
+    }
+    return null;
+  }
+  function chainEntitiesToBoundary(ids, tol=1e-3){
+    const segs = ids.map(id => entities.find(x=>x.id===id))
+      .filter(Boolean)
+      .map(en => ({ pts: entityChainPoints(en) }))
+      .filter(s => s.pts && s.pts.length>=2);
+    if (segs.length < 2) return null;
+    const close = (a,b) => Math.hypot(a.x-b.x, a.y-b.y) < tol;
+    const used = new Set([0]);
+    let chain = segs[0].pts.slice();
+    let progress = true;
+    while (used.size < segs.length && progress){
+      progress = false;
+      for (let i=0;i<segs.length;i++){
+        if (used.has(i)) continue;
+        const pts = segs[i].pts;
+        const head = chain[0], tail = chain[chain.length-1];
+        if (close(tail, pts[0])){ chain = chain.concat(pts.slice(1)); used.add(i); progress = true; break; }
+        if (close(tail, pts[pts.length-1])){ chain = chain.concat(pts.slice(0,-1).reverse()); used.add(i); progress = true; break; }
+        if (close(head, pts[pts.length-1])){ chain = pts.slice(0,-1).concat(chain); used.add(i); progress = true; break; }
+        if (close(head, pts[0])){ chain = pts.slice(1).reverse().concat(chain); used.add(i); progress = true; break; }
+      }
+    }
+    if (used.size !== segs.length) return null; // not every selected entity connects into one chain
+    if (!close(chain[0], chain[chain.length-1])) return null; // ends don't meet — not a closed loop
+    const points = chain.slice(0, -1);
+    if (points.length < 3) return null;
+    return { type:'polygon', kind:'polygon', points };
+  }
+  // Entry point used by the Hatch tool: a single closed shape works as before;
+  // two or more selected entities (lines/arcs/open polylines) are chained
+  // end-to-end into a closed loop if their endpoints connect.
+  function buildHatchBoundaryFromIds(ids){
+    if (ids.length === 1){
+      const single = buildHatchBoundary(entities.find(x=>x.id===ids[0]));
+      if (single) return single;
+    }
+    if (ids.length >= 2) return chainEntitiesToBoundary(ids);
+    return null;
+  }
+
+  // ---------- Hatch "Pick Point" boundary detection ----------
+  // Like AutoCAD's Pick Points hatch mode: click inside any closed area and
+  // this finds the boundary from EVERY visible entity on the drawing — not
+  // just what's currently selected — so a closed polyline mixed in with
+  // loose trimmed lines (which don't chain into one single loop together)
+  // still works, and you don't have to hand-pick the exact right set of
+  // entities at all.
+  function collectHatchCandidateSegments(){
+    const segs = [];
+    for (const e of entities){
+      if (!layerVisible(e.layer)) continue;
+      if (e.type === 'line') segs.push([{x:e.x1,y:e.y1},{x:e.x2,y:e.y2}]);
+      else if (e.type === 'rect'){
+        const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2), y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
+        const c=[{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}];
+        for (let i=0;i<4;i++) segs.push([c[i], c[(i+1)%4]]);
+      } else if (e.type === 'circle'){
+        const n=48, c=[];
+        for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; c.push({x:e.cx+e.r*Math.cos(a), y:e.cy+e.r*Math.sin(a)}); }
+        for (let i=0;i<n;i++) segs.push([c[i], c[(i+1)%n]]);
+      } else if (e.type === 'arc'){
+        const pts = entityChainPoints(e);
+        for (let i=0;i<pts.length-1;i++) segs.push([pts[i], pts[i+1]]);
+      } else if (e.type === 'polyline'){
+        const pts = e.points;
+        for (let i=0;i<pts.length-1;i++) segs.push([pts[i], pts[i+1]]);
+        if (e.closed && pts.length>=3) segs.push([pts[pts.length-1], pts[0]]);
+      }
+    }
+    return segs;
+  }
+  function hatchSegIntersect(a, b, c, d){
+    const d1x=b.x-a.x, d1y=b.y-a.y, d2x=d.x-c.x, d2y=d.y-c.y;
+    const denom = d1x*d2y - d1y*d2x;
+    if (Math.abs(denom) < 1e-12) return null;
+    const t = ((c.x-a.x)*d2y - (c.y-a.y)*d2x) / denom;
+    const u = ((c.x-a.x)*d1y - (c.y-a.y)*d1x) / denom;
+    if (t < -1e-9 || t > 1+1e-9 || u < -1e-9 || u > 1+1e-9) return null;
+    return { t: Math.min(1,Math.max(0,t)), u: Math.min(1,Math.max(0,u)) };
+  }
+  function buildPickPointBoundary(pt){
+    const rawSegs = collectHatchCandidateSegments();
+    if (rawSegs.length < 2) return null;
+
+    // Split every segment at every intersection with every other segment so
+    // the result is a clean planar graph (nodes = endpoints + crossings).
+    const splitTs = rawSegs.map(() => new Set([0,1]));
+    for (let i=0;i<rawSegs.length;i++){
+      for (let j=i+1;j<rawSegs.length;j++){
+        const hit = hatchSegIntersect(rawSegs[i][0], rawSegs[i][1], rawSegs[j][0], rawSegs[j][1]);
+        if (hit){ splitTs[i].add(hit.t); splitTs[j].add(hit.u); }
+      }
+    }
+
+    const nodeKey = (p) => Math.round(p.x*1000)+'_'+Math.round(p.y*1000);
+    const nodeMap = new Map();
+    const nodeList = [];
+    const getNode = (p) => {
+      const k = nodeKey(p);
+      let n = nodeMap.get(k);
+      if (!n){ n = { x:p.x, y:p.y, id: nodeList.length }; nodeMap.set(k, n); nodeList.push(n); }
+      return n;
+    };
+    const adj = [];
+    let edgeCounter = 0;
+    for (let i=0;i<rawSegs.length;i++){
+      const [a,b] = rawSegs[i];
+      const ts = [...splitTs[i]].sort((x,y)=>x-y);
+      for (let k=0;k<ts.length-1;k++){
+        const t0=ts[k], t1=ts[k+1];
+        if (t1-t0 < 1e-7) continue;
+        const n0 = getNode({ x:a.x+(b.x-a.x)*t0, y:a.y+(b.y-a.y)*t0 });
+        const n1 = getNode({ x:a.x+(b.x-a.x)*t1, y:a.y+(b.y-a.y)*t1 });
+        if (n0.id === n1.id) continue;
+        while (adj.length <= Math.max(n0.id,n1.id)) adj.push([]);
+        const eid = edgeCounter++;
+        adj[n0.id].push({ to:n1.id, edgeId:eid });
+        adj[n1.id].push({ to:n0.id, edgeId:eid });
+      }
+    }
+
+    // Ray-cast +X from the click point to find the nearest crossing edge.
+    let bestDist = Infinity, bestEdge = null;
+    for (let n0id=0; n0id<adj.length; n0id++){
+      for (const { to, edgeId } of adj[n0id]){
+        if (to < n0id) continue; // each undirected edge appears twice; test once
+        const A = nodeList[n0id], B = nodeList[to];
+        if ((A.y > pt.y) === (B.y > pt.y)) continue;
+        const t = (pt.y - A.y) / (B.y - A.y);
+        const x = A.x + (B.x-A.x)*t;
+        if (x < pt.x - 1e-9) continue;
+        const dist = x - pt.x;
+        if (dist < bestDist){ bestDist = dist; bestEdge = { a:n0id, b:to }; }
+      }
+    }
+    if (!bestEdge) return null; // nothing enclosing this point
+
+    // Orient so the click point is on the LEFT of the starting directed edge.
+    const A = nodeList[bestEdge.a], B = nodeList[bestEdge.b];
+    const cross = (B.x-A.x)*(pt.y-A.y) - (B.y-A.y)*(pt.x-A.x);
+    const startU = cross > 0 ? bestEdge.a : bestEdge.b;
+    const startV = cross > 0 ? bestEdge.b : bestEdge.a;
+    const startEdge = adj[startU].find(e => e.to === startV);
+
+    // Trace the face boundary: at each vertex, take the outgoing edge that
+    // makes the tightest CLOCKWISE turn from the direction just arrived from
+    // — the standard "hug the interior" rule for extracting an enclosing loop
+    // from a planar line graph.
+    let u = startU, v = startV, curEdgeId = startEdge.edgeId;
+    const loopNodeIds = [u];
+    let closed = false;
+    for (let guard=0; guard<2000; guard++){
+      loopNodeIds.push(v);
+      if (v === startU){ closed = true; break; }
+      const Au = nodeList[u], Av = nodeList[v];
+      const refAngle = Math.atan2(Au.y-Av.y, Au.x-Av.x);
+      let best = null, bestDelta = Infinity;
+      for (const edge of adj[v]){
+        if (edge.edgeId === curEdgeId) continue;
+        const W = nodeList[edge.to];
+        const outAngle = Math.atan2(W.y-Av.y, W.x-Av.x);
+        let delta = refAngle - outAngle;
+        while (delta < 0) delta += Math.PI*2;
+        while (delta >= Math.PI*2) delta -= Math.PI*2;
+        if (delta < bestDelta - 1e-9){ bestDelta = delta; best = edge; }
+      }
+      if (!best){
+        const back = adj[v].find(edge => edge.to === u); // dead end — backtrack
+        if (!back) return null;
+        best = back;
+      }
+      u = v; v = best.to; curEdgeId = best.edgeId;
+    }
+    if (!closed) return null;
+
+    const points = loopNodeIds.slice(0, -1).map(id => ({ x:nodeList[id].x, y:nodeList[id].y }));
+    if (points.length < 3) return null;
+    if (!pointInPolygon(pt, points)) return null; // sanity check
+    return { type:'polygon', kind:'polygon', points };
+  }
+
   function clipLineToPolygon(a, b, pts){
     // Exact clip: find every real crossing of (a,b) with the polygon's finite edges,
     // sort those crossing points along the line, then keep whichever runs between
@@ -2956,9 +3197,35 @@
     if (isMobileDevice) return; // right-click has no equivalent on touch — desktop only
     hideShortcutMenu();
     if (commandInProgress()){ handleEnterAction(); return; }
-    const ids = activeSelectionIds();
-    if (ids.length){ showShortcutMenu(e.clientX, e.clientY, ids); return; }
-    if (lastCommand) processCommand(lastCommand); // repeat last command
+
+    // Decide by what's actually under the cursor, not by whatever selection
+    // happens to be lingering from earlier (desktop selection persists until
+    // Escape) — otherwise right-clicking empty space after any earlier pick
+    // would always show the shortcut menu instead of repeating the last command.
+    const rect = wrap.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const world = resolveWorldPoint(sx, sy);
+    const hitE = hitTest(world);
+
+    if (hitE){
+      // Right-clicking an object selects it (adding to the group, like a
+      // normal click) if it wasn't already part of the current selection.
+      if (!selectedIds.has(hitE.id)){
+        const members = groupMembers(hitE.id);
+        selectedIds = new Set(members);
+        selectedId = hitE.id;
+        render(); renderList(); buildPropsForm(); buildModifyForm();
+      }
+      showShortcutMenu(e.clientX, e.clientY, activeSelectionIds());
+      return;
+    }
+    // Empty space: this right-click means "nothing selected" — clear any
+    // leftover selection (same as Escape) and repeat the last command.
+    if (activeSelectionIds().length){
+      selectedIds = new Set(); selectedId = null;
+      render(); renderList(); buildPropsForm(); buildModifyForm();
+    }
+    repeatLastCommand();
   });
 
   canvas.addEventListener('wheel', (e) => {
@@ -3144,6 +3411,14 @@
     INSERT:'insert', I:'insert'
   };
   let lastCommand = '';
+  // lastCommand may be either a plain resolved tool id (set by setTool(), e.g.
+  // from a toolbar click or a typed command that resolved via cmdMap) or raw
+  // typed text for a non-tool action (UNDO, ZOOM, BEDIT ...). Handle both.
+  function repeatLastCommand(){
+    if (!lastCommand) return;
+    if (Object.values(cmdMap).includes(lastCommand)) setTool(lastCommand);
+    else processCommand(lastCommand);
+  }
 
   function log(text, cls){
     const div = document.createElement('div');
@@ -3235,7 +3510,7 @@
       return;
     }
     if (!trimmed){
-      if (lastCommand) processCommand(lastCommand);
+      repeatLastCommand();
       return;
     }
 
@@ -3349,6 +3624,7 @@
       case 'POLAR': modePolar = !modePolar; syncToggles(); log('POLAR ' + (modePolar?'on':'off') + '.', 'prompt'); break;
       case 'OSNAP': modeOsnap = !modeOsnap; syncToggles(); log('OSNAP ' + (modeOsnap?'on':'off') + '.', 'prompt'); break;
       case 'CLEAR': document.getElementById('clearBtn').click(); break;
+      case 'NEW': document.getElementById('newDrawingBtn').click(); break;
       case 'LAYER': case 'LA': {
         const name = trimmed.split(/\s+/).slice(1).join(' ').trim();
         if (!name){ log('Layers: ' + layers.map(l=>l.name+(l.name===currentLayer?' (current)':'')).join(', '), 'prompt'); break; }
@@ -3361,7 +3637,7 @@
         log('Draw: LINE(L) RECTANG(REC) CIRCLE(C) ARC(A) PLINE(PL) TEXT(T) SELECT(V)', 'prompt');
         log('Dimension: DIMALIGNED(DIM) DIMLINEAR(DLI) DIMDIAMETER(DDI) DIMRADIUS(DRA) DIMBASELINE(DBA) DIMCONTINUE(DCO)', 'prompt');
         log('Modify: MOVE(M) COPY(CO) ROTATE(RO) SCALE(SC) MIRROR(MI) OFFSET(O) ARRAY(AR) TRIM(TR) EXTEND(EX) FILLET(F) CHAMFER(CHA) MATCHPROP(MA) EXPLODE(X) HATCH(H) BLOCK(B) INSERT(I) BEDIT(EB)', 'prompt');
-        log('Other: ERASE(E) UNDO(U) REDO ZOOM(Z) LAYER(LA) SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR', 'prompt');
+        log('Other: ERASE(E) UNDO(U) REDO ZOOM(Z) LAYER(LA) SAVE OPEN ORTHO SNAP GRID POLAR OSNAP CLEAR NEW', 'prompt');
         log('While drawing, type coordinates as "10,5" (absolute), "@2,0" (relative), or a plain number for distance.', 'prompt');
         break;
       default:
@@ -3824,21 +4100,41 @@
     }
 
     if (tool === 'hatch'){
-      const target = ids.length===1 ? entities.find(x=>x.id===ids[0]) : null;
-      const boundary = target ? buildHatchBoundary(target) : null;
-      html += boundary ? `<div class="empty-note">Boundary: ${target.type} #${target.id}.</div>` : `<div class="empty-note">Select ONE closed shape (circle, rect, or closed polyline).</div>`;
+      const pickedBoundary = hatchPickedBoundary;
+      const selBoundary = !pickedBoundary && ids.length ? buildHatchBoundaryFromIds(ids) : null;
+      const boundary = pickedBoundary || selBoundary;
+      if (pickedBoundary){
+        html += `<div class="empty-note">Boundary found via Pick Point (${pickedBoundary.points.length} vertices).</div>`;
+      } else if (selBoundary){
+        html += `<div class="empty-note">Boundary: ${ids.length===1 ? `${entities.find(x=>x.id===ids[0]).type} #${ids[0]}` : `${ids.length} connected entities (closed loop)`}.</div>`;
+      } else if (ids.length >= 2){
+        html += `<div class="empty-note">${ids.length} entities selected, but their endpoints don't form one single closed loop together. Try Pick Point instead — it works even with a closed polyline plus separate trimmed lines nearby.</div>`;
+      } else {
+        html += `<div class="empty-note">Select a closed shape, OR several connected lines/arcs that outline a closed area (e.g. after Trim) — OR use Pick Point and click inside any enclosed region.</div>`;
+      }
+      html += `<button class="formBtn secondary" id="mo_pickpt">📍 ${hatchPickMode ? 'Click inside the area…' : 'Pick Point'}</button>`;
+      if (pickedBoundary) html += `<button class="formBtn secondary" id="mo_clearpick">✕ Clear Pick</button>`;
       html += row('Spacing', numInput('mo_sp', 2, 0.1));
       html += row('Angle (°)', numInput('mo_hang', 45, 1));
       html += `<button class="formBtn" id="mo_apply" ${boundary?'':'disabled'}>▤ Apply Hatch</button>`;
       modifyBody.innerHTML = html;
+      document.getElementById('mo_pickpt').onclick = () => {
+        hatchPickMode = true;
+        flashHint('Click inside a closed area to find its boundary.');
+        buildModifyForm();
+      };
+      const clearBtn = document.getElementById('mo_clearpick');
+      if (clearBtn) clearBtn.onclick = () => { hatchPickedBoundary = null; hatchPickMode = false; buildModifyForm(); };
       const btn = document.getElementById('mo_apply');
       if (boundary) btn.onclick = () => {
         const spacing = Math.max(0.05, gv('mo_sp')), angle = gv('mo_hang');
         const lines = generateHatchLines(boundary, spacing, angle);
         snapshot();
-        const h = { id: uid(), type:'hatch', boundary, lines, color: target.color, width: 1, layer: currentLayer };
+        const style = currentStyle(); // new objects follow the current layer's color/layer
+        const h = { id: uid(), type:'hatch', boundary, lines, color: style.color, width: 1, layer: style.layer };
         entities.push(h);
         selectEntity(h.id);
+        hatchPickedBoundary = null; hatchPickMode = false;
         log(`Hatch created (spacing ${spacing}, angle ${angle}°).`, 'prompt');
       };
       return;
@@ -4230,6 +4526,29 @@
       snapshot(); entities = []; selectedId = null; selectedIds = new Set(); render(); renderList(); buildPropsForm(); buildModifyForm();
     }
   };
+  // "New Drawing" is a full reset (entities, layers, blocks, current layer,
+  // undo history, view) — unlike Clear, which only empties the entities and
+  // leaves layers/blocks/history intact.
+  function newDrawing(){
+    if (blockEditSession) closeBlockEditor();
+    entities = []; nextId = 1;
+    layers = [{ name:'0', color:'#4fd1c5', visible:true, locked:false }];
+    currentLayer = '0';
+    blocks = {}; groupCounter = 1;
+    history = []; future = [];
+    selectedId = null; selectedIds = new Set();
+    cancelDrawing();
+    setTool('select');
+    view = { offsetX: wrap.clientWidth/2, offsetY: wrap.clientHeight/2, scale: 20 };
+    renderLayers(); syncLayerSelect();
+    render(); renderList(); buildPropsForm(); buildModifyForm();
+    try { localStorage.removeItem('cad-autosave'); } catch(err){ /* storage unavailable — nothing to clean up */ }
+    log('*New drawing* — entities, layers, and blocks reset.', 'prompt');
+  }
+  document.getElementById('newDrawingBtn').onclick = () => {
+    if (!entities.length && layers.length===1 && !Object.keys(blocks).length) return; // already blank
+    if (confirm('Start a new drawing? This clears everything — entities, layers, and blocks — and cannot be undone.')) newDrawing();
+  };
   document.getElementById('zoomFit').onclick = zoomToFit;
 
   function zoomToFit(){
@@ -4287,53 +4606,173 @@
   }
 
   // ---------- DXF export ----------
+  // A small, well-known subset of the AutoCAD Color Index (ACI) palette, used
+  // only as a legacy fallback (group 62) for DXF readers that predate true
+  // color. We always ALSO write group 420 (24-bit true color, exact), which
+  // every AutoCAD since 2004 and most modern viewers prefer — so the ACI
+  // fallback only needs to be "in the right ballpark", not pixel-exact.
+  const ACI_KNOWN = [
+    [1,255,0,0],[2,255,255,0],[3,0,255,0],[4,0,255,255],[5,0,0,255],
+    [6,255,0,255],[7,255,255,255],[8,65,65,65],[9,128,128,128]
+  ];
+  function hexToRgb(hex){
+    const h = (hex||'#ffffff').replace('#','');
+    return { r: parseInt(h.slice(0,2),16)||0, g: parseInt(h.slice(2,4),16)||0, b: parseInt(h.slice(4,6),16)||0 };
+  }
+  function hexToTrueColorInt(hex){
+    const { r, g, b } = hexToRgb(hex);
+    return (r<<16) | (g<<8) | b;
+  }
+  function nearestAci(hex){
+    const { r, g, b } = hexToRgb(hex);
+    let best = 7, bestD = Infinity;
+    for (const [aci,rr,gg,bb] of ACI_KNOWN){
+      const d = (r-rr)**2 + (g-gg)**2 + (b-bb)**2;
+      if (d < bestD){ bestD = d; best = aci; }
+    }
+    return best;
+  }
+  // DXF lineweights only come from a fixed enumerated set (hundredths of mm).
+  const DXF_LINEWEIGHTS = [0,5,9,13,15,18,20,25,30,35,40,50,53,60,70,80,90,100,106,120,140,158,200,211];
+  function widthToLineweight(w){
+    const target = Math.round((w||1.5) * 25); // heuristic: app's stroke-width units -> hundredths-mm
+    return DXF_LINEWEIGHTS.reduce((a,b) => Math.abs(b-target) < Math.abs(a-target) ? b : a, DXF_LINEWEIGHTS[0]);
+  }
+  function rgbToHex(r,g,b){
+    const h = (n) => Math.max(0,Math.min(255,Math.round(n))).toString(16).padStart(2,'0');
+    return '#'+h(r)+h(g)+h(b);
+  }
+  function hslToHex(h,s,l){
+    s/=100; l/=100;
+    const k = (n) => (n + h/30) % 12;
+    const a = s * Math.min(l, 1-l);
+    const f = (n) => l - a*Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n), 1)));
+    return rgbToHex(f(0)*255, f(8)*255, f(4)*255);
+  }
+  function intToHex(n){
+    return rgbToHex((n>>16)&255, (n>>8)&255, n&255);
+  }
+  function aciToHex(aci){
+    aci = Math.abs(aci);
+    if (!aci || aci === 256) return null; // ByBlock / ByLayer — caller falls back to the layer's own color
+    const known = ACI_KNOWN.find(a => a[0] === aci);
+    if (known) return rgbToHex(known[1], known[2], known[3]);
+    // The rest of the 255-entry ACI palette isn't reproduced exactly here —
+    // approximate it as a distinct hue per index so imported colors at least
+    // differ from each other, rather than collapsing to one flat gray.
+    return hslToHex((aci * 37) % 360, 70, 50);
+  }
   function toDxf(){
     const lines = [];
     const add = (code, val) => { lines.push(String(code), String(val)); };
     add(0,'SECTION'); add(2,'HEADER');
+    // AC1009 (R12) on purpose: it's the plainest, most universally-accepted
+    // DXF dialect. Newer-version headers (AC1015+) tell AutoCAD's reader to
+    // expect a full R13+ table structure (VPORT/LTYPE/STYLE/VIEW/UCS/APPID/
+    // DIMSTYLE/BLOCK_RECORD, handles, CLASSES section, etc.) — our minimal
+    // TABLES section doesn't provide that, which is exactly what produced
+    // "Error in APPID Table ... drawing discarded". R12 has no such
+    // expectation, so a minimal file like ours is valid.
     add(9,'$ACADVER'); add(1,'AC1009');
     add(0,'ENDSEC');
 
     add(0,'SECTION'); add(2,'TABLES');
     add(0,'TABLE'); add(2,'LAYER'); add(70,layers.length);
     for (const l of layers){
-      add(0,'LAYER'); add(2,l.name); add(70, l.locked?4:0); add(62, l.visible?7:-7); add(6,'CONTINUOUS');
+      // R12 only understands ACI color (group 62) — no true-color (420),
+      // which doesn't exist as a concept until AC1018 and is exactly the
+      // kind of "unexpected in this table" data that triggered the crash.
+      add(0,'LAYER'); add(2,l.name); add(70, l.locked?4:0);
+      add(62, (l.visible?1:-1) * nearestAci(l.color));
+      add(6,'CONTINUOUS');
     }
     add(0,'ENDTAB');
     add(0,'ENDSEC');
 
     add(0,'SECTION'); add(2,'ENTITIES');
+    // Emits an entity's color (ACI fallback only — see the R12 note above)
+    // right after its `add(0,TYPE); add(8,layer);` header line.
+    const addStyle = (e) => { add(62, nearestAci(e.color)); };
     for (const e of entities){
       const lyr = e.layer || '0';
       if (e.type === 'line'){
-        add(0,'LINE'); add(8,lyr);
+        add(0,'LINE'); add(8,lyr); addStyle(e);
         add(10,e.x1); add(20,e.y1); add(30,0);
         add(11,e.x2); add(21,e.y2); add(31,0);
       } else if (e.type === 'rect'){
         const x1=Math.min(e.x1,e.x2), x2=Math.max(e.x1,e.x2);
         const y1=Math.min(e.y1,e.y2), y2=Math.max(e.y1,e.y2);
-        add(0,'LWPOLYLINE'); add(8,lyr); add(90,4); add(70,1);
-        add(10,x1); add(20,y1);
-        add(10,x2); add(20,y1);
-        add(10,x2); add(20,y2);
-        add(10,x1); add(20,y2);
+        // Old-style POLYLINE/VERTEX/SEQEND — the actual R12 entity.
+        // LWPOLYLINE wasn't introduced until R13/R14 and, combined with the
+        // R12 header, is another mismatch worth avoiding entirely.
+        add(0,'POLYLINE'); add(8,lyr); addStyle(e); add(66,1); add(70,1);
+        for (const p of [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}]){
+          add(0,'VERTEX'); add(8,lyr); add(10,p.x); add(20,p.y); add(30,0);
+        }
+        add(0,'SEQEND'); add(8,lyr);
       } else if (e.type === 'circle'){
-        add(0,'CIRCLE'); add(8,lyr);
+        add(0,'CIRCLE'); add(8,lyr); addStyle(e);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
       } else if (e.type === 'arc'){
-        add(0,'ARC'); add(8,lyr);
+        add(0,'ARC'); add(8,lyr); addStyle(e);
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
         add(50,e.startAngle); add(51,e.endAngle);
       } else if (e.type === 'polyline'){
-        add(0,'LWPOLYLINE'); add(8,lyr); add(90,e.points.length); add(70, e.closed?1:0);
-        for (const p of e.points){ add(10,p.x); add(20,p.y); }
+        add(0,'POLYLINE'); add(8,lyr); addStyle(e); add(66,1); add(70, e.closed?1:0);
+        for (const p of e.points){
+          add(0,'VERTEX'); add(8,lyr); add(10,p.x); add(20,p.y); add(30,0);
+        }
+        add(0,'SEQEND'); add(8,lyr);
       } else if (e.type === 'text'){
-        add(0,'TEXT'); add(8,lyr);
+        add(0,'TEXT'); add(8,lyr); addStyle(e);
         add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
         add(1, e.content);
+      } else if (e.type === 'dimension'){
+        // DXF's real DIMENSION entity needs an associated anonymous BLOCK of
+        // pre-computed graphics to display correctly in most viewers — instead,
+        // export the dimension's visible geometry directly as LINE/TEXT
+        // primitives (extension lines, dimension line, arrowheads, label), so
+        // it shows up correctly everywhere without that extra machinery.
+        const dimType = e.dimType || 'aligned';
+        const addLine = (a,b) => { add(0,'LINE'); add(8,lyr); addStyle(e); add(10,a.x); add(20,a.y); add(30,0); add(11,b.x); add(21,b.y); add(31,0); };
+        const addText = (pos, angDeg, text) => { add(0,'TEXT'); add(8,lyr); addStyle(e); add(10,pos.x); add(20,pos.y); add(30,0); add(40,3); add(1,text); add(50, angDeg); };
+        const addArrow = (tip, from, size) => {
+          const adx=tip.x-from.x, ady=tip.y-from.y, alen=Math.hypot(adx,ady)||1;
+          const aux=adx/alen, auy=ady/alen, anx=-auy, any=aux;
+          addLine(tip, {x:tip.x-aux*size+anx*size*0.35, y:tip.y-auy*size+any*size*0.35});
+          addLine(tip, {x:tip.x-aux*size-anx*size*0.35, y:tip.y-auy*size-any*size*0.35});
+        };
+        if (dimType === 'diameter' || dimType === 'radius'){
+          const angRad = (e.ang||0) * Math.PI/180;
+          const labelDist = e.labelDist || e.r*1.3;
+          const edgeNear = { x: e.cx + e.r*Math.cos(angRad), y: e.cy + e.r*Math.sin(angRad) };
+          const labelPt = { x: e.cx + labelDist*Math.cos(angRad), y: e.cy + labelDist*Math.sin(angRad) };
+          const arrowSize = Math.max(0.3, e.r*0.08);
+          if (dimType === 'radius'){
+            addLine({x:e.cx,y:e.cy}, labelPt);
+            addArrow(edgeNear, {x:e.cx,y:e.cy}, arrowSize);
+            addText(labelPt, angRad*180/Math.PI, 'R'+e.r.toFixed(2));
+          } else {
+            const edgeFar = { x: e.cx - e.r*Math.cos(angRad), y: e.cy - e.r*Math.sin(angRad) };
+            addLine(labelPt, edgeFar);
+            addArrow(edgeNear, {x:e.cx,y:e.cy}, arrowSize);
+            addArrow(edgeFar, {x:e.cx,y:e.cy}, arrowSize);
+            addText(labelPt, angRad*180/Math.PI, '\u2300'+(e.r*2).toFixed(2));
+          }
+        } else {
+          const dg = dimLineGeom(e);
+          const arrowSize = Math.max(0.3, dg.measured*0.03);
+          addLine(dg.extStart1, dg.d1);
+          addLine(dg.extStart2, dg.d2);
+          addLine(dg.d1, dg.d2);
+          addArrow(dg.d1, dg.d2, arrowSize);
+          addArrow(dg.d2, dg.d1, arrowSize);
+          const ang = Math.atan2(dg.d2.y-dg.d1.y, dg.d2.x-dg.d1.x);
+          addText(dg.labelPos, ang*180/Math.PI, dg.measured.toFixed(2));
+        }
       } else if (e.type === 'hatch'){
         const b = e.boundary;
-        add(0,'HATCH'); add(8,lyr);
+        add(0,'HATCH'); add(8,lyr); addStyle(e);
         add(2,'ANSI31'); // pattern name (informational)
         add(70,0);       // 0 = pattern fill (not solid)
         add(71,0);       // not associative
@@ -4382,10 +4821,23 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const { entities: parsed, skipped, warnings, blocks: fileBlocks } = parseDxf(reader.result);
+        const { entities: parsed, skipped, warnings, blocks: fileBlocks, layers: fileLayers } = parseDxf(reader.result);
         snapshot();
         entities = entities.concat(parsed);
         renumber();
+        // Merge in every layer the file defined (name/color/visible/locked) —
+        // update layer "0"'s color to match rather than duplicating it, and
+        // also make sure any layer name only ever seen on an entity (no
+        // explicit TABLES/LAYER entry) still gets created.
+        let importedLayerCount = 0;
+        const ensureLayer = (name, info) => {
+          const existing = layers.find(l => l.name === name);
+          if (existing){ if (info) Object.assign(existing, info); }
+          else { layers.push({ name, color:(info&&info.color)||'#cccccc', visible:(info?info.visible:true), locked:(info?info.locked:false) }); importedLayerCount++; }
+        };
+        if (fileLayers) Object.keys(fileLayers).forEach(name => ensureLayer(name, fileLayers[name]));
+        parsed.forEach(e => { if (e.layer && !layers.some(l => l.name === e.layer)) ensureLayer(e.layer, fileLayers && fileLayers[e.layer]); });
+        renderLayers(); syncLayerSelect();
         let importedBlockCount = 0;
         if (fileBlocks) Object.keys(fileBlocks).forEach(name => {
           if (fileBlocks[name].entities.length){ blocks[name] = fileBlocks[name].entities; importedBlockCount++; }
@@ -4394,7 +4846,9 @@
         zoomToFit(); renderList();
 
         const skippedTypes = Object.keys(skipped);
-        let msg = `Imported ${parsed.length} entities.` + (importedBlockCount ? ` (${importedBlockCount} block definition${importedBlockCount===1?'':'s'} also loaded — usable via Insert.)` : '');
+        let msg = `Imported ${parsed.length} entities.`
+          + (importedLayerCount ? ` (${importedLayerCount} layer${importedLayerCount===1?'':'s'} added.)` : '')
+          + (importedBlockCount ? ` (${importedBlockCount} block definition${importedBlockCount===1?'':'s'} also loaded — usable via Insert.)` : '');
         flashHint(msg);
         log('Command: (DXF import) ' + file.name, 'echo');
         log(msg, 'prompt');
@@ -4611,6 +5065,50 @@
     const markSkipped = (type) => { skipped[type] = (skipped[type]||0) + 1; };
     const defaultStyle = { color:'#e0a458', width:1.5, layer:'0' };
 
+    // ---- TABLES/LAYER: read every layer's name/color/visibility/lock state
+    // BEFORE entities are processed, so each entity can resolve "ByLayer" (no
+    // explicit color override) down to that layer's actual color. ----
+    const layersFromFile = {}; // name -> { color, visible, locked }
+    (function scanLayerTable(){
+      let i = 0;
+      while (i < pairs.length && !(pairs[i][0]===0 && pairs[i][1]==='TABLE' && pairs[i+1] && pairs[i+1][0]===2 && pairs[i+1][1]==='LAYER')) i++;
+      if (i >= pairs.length) return; // no LAYER table — fine, entities fall back to defaults
+      i += 2;
+      while (i < pairs.length){
+        const [code, val] = pairs[i];
+        if (code===0 && val==='ENDTAB') break;
+        if (code===0 && val==='LAYER'){
+          const r = readUntilNextEntity(i+1);
+          const name = r.props.name || '0';
+          const aci = r.props.aci;
+          let color = r.props.trueColor != null ? intToHex(r.props.trueColor) : (aci != null ? aciToHex(aci) : null);
+          layersFromFile[name] = {
+            color: color || '#cccccc',
+            visible: aci == null || aci >= 0,
+            locked: !!((r.props.flag||0) & 4)
+          };
+          i = r.nextIdx;
+          continue;
+        }
+        i++;
+      }
+    })();
+    // Resolves an entity's actual color/lineweight/layer: an explicit
+    // per-entity override (group 420/62) wins; otherwise it inherits its
+    // layer's color ("ByLayer", the DXF default when no override is given).
+    function resolveStyle(props){
+      const layerName = props.layer || '0';
+      const layerInfo = layersFromFile[layerName];
+      let color = null;
+      if (props.trueColor != null) color = intToHex(props.trueColor);
+      else if (props.aci != null && props.aci !== 256) color = aciToHex(props.aci);
+      if (!color) color = (layerInfo && layerInfo.color) || defaultStyle.color;
+      const width = props.lineweight != null && props.lineweight >= 0
+        ? Math.max(0.25, props.lineweight/25)
+        : defaultStyle.width;
+      return { color, width, layer: layerName };
+    }
+
     function readUntilNextEntity(startIdx){
       const props = {};
       let j = startIdx;
@@ -4630,6 +5128,10 @@
         else if (code === 2) props.name = val;
         else if (code === 1) props.text = (props.text||'') + val;
         else if (code === 3) props.text = (props.text||'') + val; // MTEXT continuation chunks
+        else if (code === 8) props.layer = val;
+        else if (code === 62) props.aci = parseInt(val,10);
+        else if (code === 420) props.trueColor = parseInt(val,10);
+        else if (code === 370) props.lineweight = parseInt(val,10);
         j++;
       }
       return { props, nextIdx: j };
@@ -4638,19 +5140,20 @@
     // Simple, self-contained entity types shared between the top-level ENTITIES
     // section and BLOCK definitions (used to resolve INSERT geometry).
     function simpleEntityFromProps(type, props){
-      if (type === 'LINE' && props.xs) return { type:'line', x1:props.xs[0], y1:props.ys[0], x2:props.x2, y2:props.y2, ...defaultStyle };
-      if (type === 'CIRCLE' && props.xs) return { type:'circle', cx:props.xs[0], cy:props.ys[0], r:props.r||1, ...defaultStyle };
-      if (type === 'ARC' && props.xs) return { type:'arc', cx:props.xs[0], cy:props.ys[0], r:props.r||1, startAngle:props.startAngle||0, endAngle:props.endAngle||90, ...defaultStyle };
+      const style = resolveStyle(props);
+      if (type === 'LINE' && props.xs) return { type:'line', x1:props.xs[0], y1:props.ys[0], x2:props.x2, y2:props.y2, ...style };
+      if (type === 'CIRCLE' && props.xs) return { type:'circle', cx:props.xs[0], cy:props.ys[0], r:props.r||1, ...style };
+      if (type === 'ARC' && props.xs) return { type:'arc', cx:props.xs[0], cy:props.ys[0], r:props.r||1, startAngle:props.startAngle||0, endAngle:props.endAngle||90, ...style };
       if (type === 'LWPOLYLINE' && props.xs){
         const pts = props.xs.map((x,idx)=>({x, y:props.ys[idx]}));
-        return { type:'polyline', points:pts, closed: !!((props.flag||0) & 1), ...defaultStyle };
+        return { type:'polyline', points:pts, closed: !!((props.flag||0) & 1), ...style };
       }
-      if (type === 'TEXT' && props.xs) return { type:'text', x:props.xs[0], y:props.ys[0], content:props.text||'', height:props.r||3, ...defaultStyle };
+      if (type === 'TEXT' && props.xs) return { type:'text', x:props.xs[0], y:props.ys[0], content:props.text||'', height:props.r||3, ...style };
       if (type === 'MTEXT' && props.xs){
         const content = (props.text||'').replace(/\\P/g,' ').replace(/\{|\}/g,'').replace(/\\[A-Za-z][^;]*;/g,'');
-        return { type:'text', x:props.xs[0], y:props.ys[0], content:content||'(mtext)', height:props.r||3, ...defaultStyle };
+        return { type:'text', x:props.xs[0], y:props.ys[0], content:content||'(mtext)', height:props.r||3, ...style };
       }
-      if (type === 'POINT' && props.xs) return { type:'circle', cx:props.xs[0], cy:props.ys[0], r:0.08, ...defaultStyle };
+      if (type === 'POINT' && props.xs) return { type:'circle', cx:props.xs[0], cy:props.ys[0], r:0.08, ...style };
       return null;
     }
 
@@ -4696,10 +5199,15 @@
     function parseHatch(startIdx){
       let j = startIdx;
       let boundaryPolygon = null, boundaryCircle = null, angle = 45, sawUnsupported = false;
+      const styleProps = {};
       let guard = 0;
       while (j < pairs.length && guard++ < 200000){
         const [code, val] = pairs[j];
         if (code === 0) break;
+        if (code === 8){ styleProps.layer = val; j++; continue; }
+        if (code === 62){ styleProps.aci = parseInt(val,10); j++; continue; }
+        if (code === 420){ styleProps.trueColor = parseInt(val,10); j++; continue; }
+        if (code === 370){ styleProps.lineweight = parseInt(val,10); j++; continue; }
         if (code === 53){ angle = parseFloat(val) || 45; j++; continue; }
         if (code === 92){
           const flag = parseInt(val,10) || 0;
@@ -4753,7 +5261,7 @@
       }
       const boundary = boundaryCircle ? { kind:'circle', ...boundaryCircle } : { kind:'polygon', points:boundaryPolygon };
       const lines = generateHatchLines(boundary, Math.max(0.3, (boundaryCircle?boundaryCircle.r:10)/12), angle);
-      return { entity: { type:'hatch', boundary, lines, ...defaultStyle }, nextIdx:j };
+      return { entity: { type:'hatch', boundary, lines, ...resolveStyle(styleProps) }, nextIdx:j };
     }
 
     // ---- ENTITIES section ----
@@ -4806,7 +5314,7 @@
               break;
             } else { k++; }
           }
-          if (pts.length >= 2) out.push({ id:0, type:'polyline', points:pts, closed, ...defaultStyle });
+          if (pts.length >= 2) out.push({ id:0, type:'polyline', points:pts, closed, ...resolveStyle(props) });
           else markSkipped('POLYLINE (empty)');
           nextIdx = k;
         } else if (type === 'INSERT' && props.xs){
@@ -4830,7 +5338,7 @@
             });
             if (Math.abs(sx-sy) > 1e-6) warnings.push(`INSERT "${name}" used non-uniform X/Y scale — approximated with a single uniform factor.`);
           } else {
-            out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content:`[${name||'BLOCK'}]`, height: 2.5, color:'#6f9bd1', width:1.5 });
+            out.push({ id:0, type:'text', x:props.xs[0], y:props.ys[0], content:`[${name||'BLOCK'}]`, height: 2.5, color:'#6f9bd1', width:1.5, layer: props.layer||'0' });
             warnings.push(`INSERT "${name||'?'}" — block definition not found in file, showing as a text marker.`);
           }
         } else {
@@ -4846,7 +5354,7 @@
 
       i = nextIdx;
     }
-    return { entities: out, skipped, warnings, blocks: blocksFromFile };
+    return { entities: out, skipped, warnings, blocks: blocksFromFile, layers: layersFromFile };
   }
 
   // ---------- Init ----------
