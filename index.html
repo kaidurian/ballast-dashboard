@@ -186,16 +186,28 @@
             flex-wrap: wrap;
         }
 
+        /* 2D plan panel: grows to fill whatever space is left and
+           relies on its own internal overflow-x:auto scroll, so it
+           can shrink comfortably. The 3D canvas panel (below) is the
+           one kept small/fixed so the pair fits even in narrow
+           windows — see apply3DPanelSize() in JS, which sets the
+           precise inline sizes; these are just sane fallbacks. */
         .view-2d-3d-row.side-by-side > .tank-grid-container {
-            flex: 1 1 480px;
-            min-width: 420px;
+            flex: 1 1 auto;
+            min-width: 240px;
+        }
+
+        .view-2d-3d-row.side-by-side #view3dCanvasPanel {
+            flex: 0 0 300px;
+            min-width: 200px;
         }
 
         /* Draggable splitter between the 2D and 3D panels — only shown
            (and only functional) while side-by-side is active. Dragging
-           sets an explicit pixel flex-basis on the 2D panel via JS; the
-           3D panel fills whatever space remains. Double-click resets
-           to the default 50/50-ish split. */
+           sets an explicit pixel flex-basis on the compact 3D panel
+           via JS; the 2D panel fills whatever space remains.
+           Double-click resets the 3D panel to its compact default
+           width. */
         .view-2d-3d-resizer {
             display: none;
             flex: 0 0 10px;
@@ -230,10 +242,11 @@
             cursor: col-resize;
         }
 
-        /* On narrow viewports the row wraps back to stacked (see
-           flex-wrap above); hide the horizontal-drag handle then since
-           there's nothing meaningful to drag. */
-        @media (max-width: 900px) {
+        /* Below this width even the compact 3D panel + resizer can't
+           coexist with a usable 2D panel; the row wraps back to
+           stacked on its own (flex-wrap above) and the handle is
+           hidden since there's nothing meaningful to drag. */
+        @media (max-width: 520px) {
             .view-2d-3d-row.side-by-side .view-2d-3d-resizer {
                 display: none;
             }
@@ -1567,7 +1580,7 @@
         </div>
         <div class="view-2d-3d-resizer" id="view2d3dResizer" title="Drag to resize · double-click to reset"></div>
         <div class="tank-grid-container" id="view3dCanvasPanel">
-            <div style="position:relative; width:100%; height:420px;">
+            <div id="viewer3dWrap" style="position:relative; width:100%; height:420px;">
                 <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
                 <div id="labels3d" style="position:absolute; inset:0; pointer-events:none;"></div>
             </div>
@@ -3166,39 +3179,69 @@
         // ============================================================
         // 3d. 2D/3D LAYOUT TOGGLE + DRAGGABLE SPLITTER
         //     Default: 3D viewer panel stacked below the 2D plan view
-        //     (unchanged from before). When ON, the 3D panel moves
-        //     beside the 2D panel instead, so both are visible
-        //     side-by-side, and a drag handle between them lets the
-        //     user resize the split (i.e. shrink the 3D panel to make
-        //     more room for the 2D plan, or vice versa). Both the
-        //     on/off preference and the chosen split width persist
-        //     across sessions via localStorage. Since the 3D viewer's
-        //     canvas size depends on its container's pixel size,
-        //     resize3DViewer() must run after any layout/width change
+        //     (unchanged from before, full 420px height). When ON, the
+        //     3D panel moves beside the 2D panel instead — but it is
+        //     rendered at a smaller, fixed scale (reduced width AND
+        //     height, not just cropped) rather than splitting the row
+        //     ~50/50. The 2D plan panel takes whatever space is left
+        //     and relies on its own internal horizontal scroll (it
+        //     already has overflow-x:auto), so this fits even in the
+        //     narrowest windows (e.g. the Excel task pane) — there's
+        //     no combined minimum width the row needs to reach before
+        //     it can show both panels side-by-side.
+        //     A drag handle lets the user resize the compact 3D panel
+        //     (make it a bit bigger or smaller); both the on/off
+        //     preference and the chosen 3D width persist across
+        //     sessions via localStorage. Since the 3D viewer's canvas
+        //     size depends on its container's pixel size,
+        //     resize3DViewer() must run after any layout/size change
         //     (the browser doesn't fire a 'resize' event just because
         //     a flex container reflowed).
         // ============================================================
         const SIDE_BY_SIDE_STORAGE_KEY = 'bargeballast_side_by_side_3d';
         const VIEW_SPLIT_STORAGE_KEY = 'bargeballast_view_split_px';
+        const SIDE_BY_SIDE_3D_DEFAULT_WIDTH_PX = 300; // compact default — well under the 480px used before
+        const SIDE_BY_SIDE_3D_MIN_WIDTH_PX = 200;
+        const SIDE_BY_SIDE_3D_MAX_WIDTH_PX = 520;
+        const SIDE_BY_SIDE_3D_HEIGHT_PX = 230;         // reduced scale vs the normal 420px viewer height
+        const STACKED_3D_HEIGHT_PX = 420;              // original height, restored when side-by-side is off
+        const MIN_2D_PANEL_PX = 240;                   // 2D panel can go this narrow before it just scrolls internally
+
+        function apply3DPanelSize(sideBySide, widthPx) {
+            const panel3d = document.getElementById('view3dCanvasPanel');
+            const wrap3d = document.getElementById('viewer3dWrap');
+            const viewerEl = document.getElementById('viewer3d');
+            if (sideBySide) {
+                if (panel3d) {
+                    panel3d.style.flex = `0 0 ${widthPx}px`;
+                    panel3d.style.minWidth = SIDE_BY_SIDE_3D_MIN_WIDTH_PX + 'px';
+                }
+                if (wrap3d) wrap3d.style.height = SIDE_BY_SIDE_3D_HEIGHT_PX + 'px';
+                if (viewerEl) viewerEl.style.height = SIDE_BY_SIDE_3D_HEIGHT_PX + 'px';
+            } else {
+                if (panel3d) { panel3d.style.flex = ''; panel3d.style.minWidth = ''; }
+                if (wrap3d) wrap3d.style.height = STACKED_3D_HEIGHT_PX + 'px';
+                if (viewerEl) viewerEl.style.height = STACKED_3D_HEIGHT_PX + 'px';
+            }
+        }
 
         function toggleSideBySideLayout(checked) {
             const row = document.getElementById('view2d3dRow');
             const panel2d = document.getElementById('view2dPanel');
-            const panel3d = document.getElementById('view3dCanvasPanel');
             if (!row) return;
             row.classList.toggle('side-by-side', !!checked);
 
             if (checked) {
-                // Re-apply any previously dragged split width.
+                if (panel2d) panel2d.style.flex = '1 1 auto'; // 2D takes the remaining space
                 let savedWidth = null;
                 try { savedWidth = localStorage.getItem(VIEW_SPLIT_STORAGE_KEY); } catch (e) {}
-                if (panel2d) panel2d.style.flex = savedWidth ? `0 0 ${savedWidth}px` : '';
-                if (panel3d) panel3d.style.flex = '';
+                const widthPx = savedWidth ? parseFloat(savedWidth) : SIDE_BY_SIDE_3D_DEFAULT_WIDTH_PX;
+                apply3DPanelSize(true, widthPx);
             } else {
-                // Back to stacked — clear any inline split widths so
-                // each panel reverts to its natural full-width layout.
+                // Back to stacked — clear any inline sizing so each
+                // panel reverts to its natural full-width layout.
                 if (panel2d) panel2d.style.flex = '';
-                if (panel3d) panel3d.style.flex = '';
+                apply3DPanelSize(false);
             }
 
             try { localStorage.setItem(SIDE_BY_SIDE_STORAGE_KEY, checked ? '1' : '0'); } catch (e) {}
@@ -3219,15 +3262,13 @@
             toggleSideBySideLayout(saved === '1');
         }
 
-        // ---- Drag-to-resize splitter between the 2D and 3D panels ----
+        // ---- Drag-to-resize splitter — resizes the compact 3D panel ----
         (function setupView2d3dResizer() {
             const resizer = document.getElementById('view2d3dResizer');
             const row = document.getElementById('view2d3dRow');
-            const panel2d = document.getElementById('view2dPanel');
             const panel3d = document.getElementById('view3dCanvasPanel');
-            if (!resizer || !row || !panel2d || !panel3d) return;
+            if (!resizer || !row || !panel3d) return;
 
-            const MIN_PANEL_PX = 320; // keep both panels usable
             let dragging = false;
 
             function pointerX(e) {
@@ -3246,11 +3287,12 @@
                 if (!dragging) return;
                 const rowRect = row.getBoundingClientRect();
                 const resizerWidth = resizer.getBoundingClientRect().width || 10;
-                let newWidth = pointerX(e) - rowRect.left;
-                const maxWidth = rowRect.width - resizerWidth - MIN_PANEL_PX;
-                newWidth = Math.max(MIN_PANEL_PX, Math.min(newWidth, maxWidth));
-                panel2d.style.flex = `0 0 ${newWidth}px`;
-                panel3d.style.flex = '1 1 auto';
+                // 3D panel sits on the right of the handle, so its width
+                // is measured from the pointer to the row's right edge.
+                let newWidth = rowRect.right - pointerX(e) - (resizerWidth / 2);
+                const maxWidth = Math.min(SIDE_BY_SIDE_3D_MAX_WIDTH_PX, rowRect.width - resizerWidth - MIN_2D_PANEL_PX);
+                newWidth = Math.max(SIDE_BY_SIDE_3D_MIN_WIDTH_PX, Math.min(newWidth, maxWidth));
+                apply3DPanelSize(true, newWidth);
                 resize3DViewer();
                 e.preventDefault();
             }
@@ -3260,7 +3302,7 @@
                 dragging = false;
                 resizer.classList.remove('dragging');
                 document.body.style.userSelect = '';
-                const m = /^0 0 ([\d.]+)px$/.exec(panel2d.style.flex || '');
+                const m = /^0 0 ([\d.]+)px$/.exec(panel3d.style.flex || '');
                 try {
                     if (m) localStorage.setItem(VIEW_SPLIT_STORAGE_KEY, m[1]);
                 } catch (e) {}
@@ -3278,10 +3320,9 @@
             window.addEventListener('touchmove', onDragMove, { passive: false });
             window.addEventListener('touchend', onDragEnd);
 
-            // Double-click resets to the default (roughly even) split.
+            // Double-click resets the 3D panel back to its compact default width.
             resizer.addEventListener('dblclick', () => {
-                panel2d.style.flex = '';
-                panel3d.style.flex = '';
+                apply3DPanelSize(true, SIDE_BY_SIDE_3D_DEFAULT_WIDTH_PX);
                 try { localStorage.removeItem(VIEW_SPLIT_STORAGE_KEY); } catch (e) {}
                 requestAnimationFrame(() => {
                     resize3DViewer();
