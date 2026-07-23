@@ -4771,28 +4771,36 @@
           addText(dg.labelPos, ang*180/Math.PI, dg.measured.toFixed(2));
         }
       } else if (e.type === 'hatch'){
+        // NOTE: the real DXF HATCH entity was introduced in AC1014 (R14) and
+        // — unlike LINE/CIRCLE/POLYLINE/TEXT/ARC — it requires DXF "subclass
+        // marker" tags (group code 100, e.g. AcDbEntity/AcDbHatch) to be a
+        // structurally valid entity. Our exporter deliberately writes the
+        // plain, marker-free R12 (AC1009) entity style everywhere else, so a
+        // HATCH written that way is an invalid entity: real AutoCAD (and any
+        // strict DXF reader) can reject or discard the *entire* drawing
+        // because of this one entity, even though every other entity in the
+        // file is fine on its own.
+        //
+        // Fix: emit the hatch's already-computed fill lines (e.lines) as
+        // plain LINE entities, plus the boundary as a POLYLINE outline.
+        // Both are valid in every DXF version, so the fill still shows up
+        // and nothing else in the file can be invalidated by it.
         const b = e.boundary;
-        add(0,'HATCH'); add(8,lyr); addStyle(e);
-        add(2,'ANSI31'); // pattern name (informational)
-        add(70,0);       // 0 = pattern fill (not solid)
-        add(71,0);       // not associative
-        add(91,1);       // 1 boundary path
-        if (b.kind === 'circle'){
-          add(92,0); add(93,1);          // edge-type boundary, 1 edge
-          add(72,2);                     // edge type 2 = circular arc
-          add(10,b.cx); add(20,b.cy); add(40,b.r); add(50,0); add(51,360); add(73,1);
-        } else {
-          add(92,2);                     // polyline boundary
-          add(93,b.points.length);
-          for (const p of b.points){ add(10,p.x); add(20,p.y); add(42,0); }
+        for (const seg of (e.lines||[])){
+          add(0,'LINE'); add(8,lyr); addStyle(e);
+          add(10,seg.x1); add(20,seg.y1); add(30,0);
+          add(11,seg.x2); add(21,seg.y2); add(31,0);
         }
-        add(97,0);                       // 0 source boundary objects
-        add(75,0); add(76,1);
-        add(52,0); add(41,1);
-        add(78,1);                       // 1 pattern definition line
-        add(53,45); add(43,0); add(44,0); add(45,0); add(46, Math.max(0.3, e.width||2)); add(79,0);
-        add(47, Math.max(0.05, (b.kind==='circle'?b.r:10)/40)); // pixel size hint
-        add(98,0);                       // 0 seed points
+        if (b.kind === 'circle'){
+          add(0,'CIRCLE'); add(8,lyr); addStyle(e);
+          add(10,b.cx); add(20,b.cy); add(30,0); add(40,b.r);
+        } else {
+          add(0,'POLYLINE'); add(8,lyr); addStyle(e); add(66,1); add(70,1);
+          for (const p of b.points){
+            add(0,'VERTEX'); add(8,lyr); add(10,p.x); add(20,p.y); add(30,0);
+          }
+          add(0,'SEQEND'); add(8,lyr);
+        }
       }
     }
     add(0,'ENDSEC');
