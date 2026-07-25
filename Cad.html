@@ -355,7 +355,7 @@
 <body>
 <div id="app">
   <div id="topbar">
-    <div class="brand">Drafting Table — AutoCAD-Style (Rev.57)</div>
+    <div class="brand">Drafting Table — AutoCAD-Style (Rev.58)</div>
 
     <button class="tool active" data-tool="select" title="Select / Move — or type V, Enter">▣ Select</button>
     <button class="tool" data-tool="line" title="Line — or type L, Enter">╱ Line</button>
@@ -422,8 +422,8 @@
     <div class="divider"></div>
     <button class="tool mtool" data-tool="trim" title="Trim — or type TR/TRIM, Enter — pick one cutting edge (any shape), then click the piece of a line/polyline/circle/arc/rectangle to remove">✂ Trim</button>
     <button class="tool mtool" data-tool="extend" title="Extend — or type EX/EXTEND, Enter — pick one boundary, then click an open end of a line/polyline/arc to stretch it">⇥ Extend</button>
-    <button class="tool mtool" data-tool="fillet" title="Fillet — or type F/FILLET, Enter — pick exactly 2 lines, set radius, Apply">◜ Fillet</button>
-    <button class="tool mtool" data-tool="chamfer" title="Chamfer — or type CHA/CHAMFER, Enter — pick exactly 2 lines, set distance, Apply">◲ Chamfer</button>
+    <button class="tool mtool" data-tool="fillet" title="Fillet — or type F/FILLET, Enter — pick exactly 2 lines/polyline/box edges (or 1 polyline/box alone for all corners), set radius, Apply">◜ Fillet</button>
+    <button class="tool mtool" data-tool="chamfer" title="Chamfer — or type CHA/CHAMFER, Enter — pick exactly 2 lines/polyline/box edges (or 1 polyline/box alone for all corners), set distance, Apply">◲ Chamfer</button>
     <div class="divider"></div>
     <button class="tool mtool" data-tool="matchprop" title="Match Properties — or type MA/MATCHPROP, Enter — pick source entity, then click targets">✒ Match Prop</button>
     <button class="tool mtool" data-tool="explode" title="Explode — or type X/EXPLODE, Enter — pick rectangles/polylines to break into lines">💥 Explode</button>
@@ -555,6 +555,7 @@
   let mouseWorld = { x: 0, y: 0 };
   let selBoxStart = null; // {sx,sy,wx,wy} — rubber-band window/crossing select
   let modifyGhosts = [];  // live-preview entities while a Move/Copy/Rotate/Scale/Mirror is in progress
+  let modifyVertexPick = null; // corner index picked by clicking a vertex on canvas, for single-polyline Fillet/Chamfer
 
   // Coarse-pointer (touch) devices keep the original "tap empty space to deselect"
   // behavior. Fine-pointer (mouse) devices only deselect via Escape, and clicking
@@ -594,7 +595,8 @@
   // ---------- Modify-tool state machine ----------
   let modifyStage = 0;
   let modifyTemp = {};      // base points, snapshots, etc, per active modify tool
-  let modifyBoundaryId = null; // trim/extend cutting edge, matchprop source id
+  let modifyBoundaryId = null; // matchprop source id
+  let modifyBoundaryIds = [];  // trim/extend cutting/boundary edges — one or more
 
   function applyOrtho(from, world){
     if (!modeOrtho || !from) return world;
@@ -794,10 +796,30 @@
       pts.push({x:e.cx+e.r*Math.cos(mr), y:e.cy+e.r*Math.sin(mr), kind:'midpoint', grip:'stretch-radius'});
     } else if (e.type === 'polyline'){
       e.points.forEach((p,i) => pts.push({x:p.x,y:p.y,kind:'endpoint', grip:'stretch-vertex', part:i}));
-      for (let i=0;i<e.points.length-1;i++){ const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint', grip:'move-segment', part:[i,i+1]}); }
-      if (e.closed && e.points.length>1){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint', grip:'move-segment', part:[e.points.length-1,0]}); }
+      for (let i=0;i<e.points.length-1;i++){ if (e.points[i].noLineAfter) continue; const a=e.points[i], b=e.points[i+1]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint', grip:'move-segment', part:[i,i+1]}); }
+      if (e.closed && e.points.length>1 && !(e.points[e.points.length-1] && e.points[e.points.length-1].noLineAfter)){ const a=e.points[e.points.length-1], b=e.points[0]; pts.push({x:(a.x+b.x)/2, y:(a.y+b.y)/2, kind:'midpoint', grip:'move-segment', part:[e.points.length-1,0]}); }
     } else if (e.type === 'text'){
       pts.push({x:e.x,y:e.y,kind:'endpoint', grip:'move'});
+    } else if (e.type === 'hatch'){
+      // A hatch shows exactly ONE grip — a single handle sitting at the
+      // middle of its fill (the boundary's center/centroid) — so it reads as
+      // "one draggable object", not a shape with editable vertices. Dragging
+      // that grip (or running Move/Copy/Rotate/Scale/Mirror/Array on the
+      // hatch on its own) detaches it from any linked source object — see
+      // detachHatchFromSource — so it becomes a fully independent entity
+      // that no longer follows the object it was originally hatched onto.
+      // The boundary outline points are still reported here (without a
+      // `grip`) purely so they remain valid osnap targets.
+      const b = e.boundary;
+      if (b.kind === 'circle'){
+        pts.push({x:b.cx,y:b.cy,kind:'center', grip:'hatch-move'});
+        [0,90,180,270].forEach(a => { const r=a*Math.PI/180; pts.push({x:b.cx+b.r*Math.cos(r), y:b.cy+b.r*Math.sin(r), kind:'quadrant'}); });
+      } else {
+        b.points.forEach((p,i) => pts.push({x:p.x,y:p.y,kind:'endpoint', part:i}));
+        const cx = b.points.reduce((s,p)=>s+p.x,0)/b.points.length;
+        const cy = b.points.reduce((s,p)=>s+p.y,0)/b.points.length;
+        pts.push({x:cx, y:cy, kind:'midpoint', grip:'hatch-move'});
+      }
     } else if (e.type === 'dimension'){
       if (e.dimType === 'diameter' || e.dimType === 'radius'){
         // Center is an osnap reference point only — not draggable, so the
@@ -852,7 +874,7 @@
   // (mutated in place), `o` is the deep-cloned snapshot from drag start, `g` is
   // the gripDrag state, and `world` is the resolved (snapped/osnapped) cursor point.
   function applyGripDrag(e, o, g, world){
-    if (g.grip === 'move'){
+    if (g.grip === 'move' || g.grip === 'hatch-move'){
       const dx = world.x - g.anchor.x, dy = world.y - g.anchor.y;
       translateEntity(e, o, dx, dy);
     } else if (g.grip === 'move-segment'){
@@ -941,6 +963,7 @@
       const dx = world.x-e.cx, dy = world.y-e.cy, d = Math.hypot(dx,dy);
       if (d > 1e-6){ e.ang = Math.atan2(dy,dx)*180/Math.PI; e.labelDist = d; }
     }
+    if (e.id) syncLinkedHatches(e.id); // reshape (stretch-vertex etc.) needs its hatch rebuilt, not just translated
   }
   function snapshot_after_grip_drag(){
     if (gripDrag.groupMove){
@@ -956,6 +979,16 @@
     for (const e of entities){
       if (!layerVisible(e.layer)) continue;
       pts.push(...entitySnapPoints(e));
+    }
+    // A polyline being drawn right now can snap to its own already-placed
+    // vertices too — this is what makes it possible to close the loop
+    // precisely by clicking back on the start point instead of eyeballing it.
+    if (tool === 'polyline' && polyPoints.length){
+      polyPoints.forEach((p,i) => {
+        pts.push(i===0 && polyPoints.length>=2
+          ? { x:p.x, y:p.y, kind:'close' }             // the start point — click here to close the loop
+          : { x:p.x, y:p.y, kind:'endpoint' });
+      });
     }
     return pts;
   }
@@ -1008,6 +1041,9 @@
     const k = p.kind;
     if (k === 'endpoint'){
       ctx.strokeRect(x-5, y-5, 10, 10);
+    } else if (k === 'close'){
+      ctx.strokeRect(x-5, y-5, 10, 10);
+      ctx.strokeRect(x-8, y-8, 16, 16);
     } else if (k === 'midpoint'){
       ctx.beginPath(); ctx.moveTo(x, y-6); ctx.lineTo(x-6, y+5); ctx.lineTo(x+6, y+5); ctx.closePath(); ctx.stroke();
     } else if (k === 'center'){
@@ -1059,10 +1095,24 @@
     ctx.restore();
   }
 
+  // An entity's color is either an explicit hex override, or the sentinel
+  // 'bylayer' (also treated as the default when color is missing) meaning
+  // "use whatever color this entity's layer currently has." Resolving this
+  // fresh on every render (rather than baking a hex in at creation/import
+  // time) is what makes changing a LAYER's color update every ByLayer
+  // object on that layer immediately — matching real CAD behavior.
+  function effectiveColor(e){
+    if (!e.color || e.color === 'bylayer'){
+      const lyr = layers.find(l => l.name === (e.layer||'0'));
+      return (lyr && lyr.color) || '#4fd1c5';
+    }
+    return e.color;
+  }
   function setStroke(e){
-    ctx.strokeStyle = e.color || '#4fd1c5';
+    const c = effectiveColor(e);
+    ctx.strokeStyle = c;
     ctx.lineWidth = (e.width || 1.5);
-    ctx.fillStyle = e.color || '#4fd1c5';
+    ctx.fillStyle = c;
   }
 
   function drawEntity(e, selected, ghost){
@@ -1106,9 +1156,15 @@
         ctx.moveTo(p0.x, p0.y);
         for (let i=1;i<e.points.length;i++){
           const p = toS(e.points[i].x, e.points[i].y);
-          ctx.lineTo(p.x,p.y);
+          // A fillet at this corner already drew its arc as a separate ARC
+          // entity — the vertex pair it produced (see applyFilletAtVertex /
+          // applyFilletAllCorners) is flagged noLineAfter on the first of the
+          // pair so we lift the pen instead of stroking a redundant straight
+          // chord underneath that arc.
+          if (e.points[i-1] && e.points[i-1].noLineAfter) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
         }
-        if (e.closed) ctx.closePath();
+        if (e.closed && !(e.points[e.points.length-1] && e.points[e.points.length-1].noLineAfter)) ctx.closePath();
         ctx.stroke();
         break;
       }
@@ -1246,9 +1302,10 @@
   }
   function hitTest(world, excludeId){
     const tol = (modeOsnap ? 9 : 6) / view.scale;
+    const excluded = Array.isArray(excludeId) ? new Set(excludeId) : null;
     for (let i = entities.length-1; i>=0; i--){
       const e = entities[i];
-      if (excludeId != null && e.id === excludeId) continue;
+      if (excluded ? excluded.has(e.id) : (excludeId != null && e.id === excludeId)) continue;
       if (!layerVisible(e.layer) || layerLocked(e.layer)) continue;
       if (e.type === 'line'){
         if (distToSeg(world, {x:e.x1,y:e.y1}, {x:e.x2,y:e.y2}) < tol) return e;
@@ -1270,9 +1327,10 @@
         }
       } else if (e.type === 'polyline'){
         for (let j=0;j<e.points.length-1;j++){
+          if (e.points[j].noLineAfter) continue; // fillet gap — no chord drawn here, so nothing to pick
           if (distToSeg(world, e.points[j], e.points[j+1]) < tol) return e;
         }
-        if (e.closed && e.points.length>1){
+        if (e.closed && e.points.length>1 && !(e.points[e.points.length-1] && e.points[e.points.length-1].noLineAfter)){
           if (distToSeg(world, e.points[e.points.length-1], e.points[0]) < tol) return e;
         }
       } else if (e.type === 'text'){
@@ -1323,7 +1381,7 @@
     for (const e of entities){
       const row = document.createElement('div');
       row.className = 'entity-row' + (e.id===selectedId || selectedIds.has(e.id) ? ' selected':'');
-      row.innerHTML = `<span class="swatch" style="background:${e.color}"></span>
+      row.innerHTML = `<span class="swatch" style="background:${effectiveColor(e)}"></span>
         <span class="lbl">${e.type} #${e.id}</span>
         <span class="del" title="Delete">✕</span>`;
       row.querySelector('.lbl').onclick = () => selectEntity(e.id);
@@ -1354,7 +1412,7 @@
         const ids = activeSelectionIds();
         if (ids.length){
           snapshot();
-          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en) { en.layer = l.name; en.color = l.color; } });
+          ids.forEach(id => { const en = entities.find(x=>x.id===id); if (en) en.layer = l.name; });
           render(); renderList(); buildPropsForm();
           log(`${ids.length} entit${ids.length===1?'y':'ies'} moved to layer "${l.name}".`, 'prompt');
         } else {
@@ -1451,8 +1509,8 @@
     array: 'Array: select entities first, set rows/cols or polar count in Modify Options, then Apply.',
     trim: 'Trim: select ONE cutting edge first (line/rect/circle/arc/polyline), then click the piece of a line, polyline edge, circle, arc, or rectangle you want removed.',
     extend: 'Extend: select ONE boundary first, then click near an open end of a line, polyline, or arc to stretch it to the boundary (full circles have no open end).',
-    fillet: 'Fillet: select exactly 2 lines, set a radius in Modify Options, then Apply.',
-    chamfer: 'Chamfer: select exactly 2 lines, set a distance in Modify Options, then Apply.',
+    fillet: 'Fillet: select exactly 2 lines/polyline/box edges (or 1 polyline/box alone to round every corner), set a radius in Modify Options, then Apply.',
+    chamfer: 'Chamfer: select exactly 2 lines/polyline/box edges (or 1 polyline/box alone to chamfer every corner), set a distance in Modify Options, then Apply.',
     matchprop: 'Match Properties: select the SOURCE entity first, then click target entities to copy its color/width/layer.',
     explode: 'Explode: select rectangles/polylines, then Apply in Modify Options to break them into lines.',
     hatch: 'Hatch: select ONE closed shape (circle, rect, or closed polyline), set spacing/angle, then Apply.',
@@ -1464,7 +1522,7 @@
     drawing = null; polyPoints = [];
     lineStart = null; rectStart = null; rectSubMode = null; rectPending = { area:null, length:null, width:null, rot:0 }; circleCenter = null; arcStage = 0; arcTemp = {};
     dimStage = 0; dimTemp = {}; dimTarget = null;
-    modifyStage = 0; modifyTemp = {}; currentOsnap = null;
+    modifyStage = 0; modifyTemp = {}; currentOsnap = null; modifyVertexPick = null;
     if (t !== 'hatch'){ hatchPickMode = false; hatchPickedBoundary = null; }
     if (t === 'dimbaseline' || t === 'dimcontinue'){
       const src = lastDimEntity;
@@ -1484,11 +1542,17 @@
     } else {
       dimChain = null;
     }
-    if (['trim','extend','matchprop'].includes(t)){
+    if (t === 'matchprop'){
       modifyBoundaryId = activeSelectionIds().length === 1 ? activeSelectionIds()[0] : null;
-      if (modifyBoundaryId == null) flashHint('Select exactly one ' + (t==='matchprop'?'source':'cutting/boundary') + ' entity first.');
+      if (modifyBoundaryId == null) flashHint('Select exactly one source entity first.');
+      modifyBoundaryIds = [];
+    } else if (t === 'trim' || t === 'extend'){
+      modifyBoundaryIds = activeSelectionIds().slice();
+      if (!modifyBoundaryIds.length) flashHint('Select one or more cutting/boundary entities first, then ' + (t==='trim'?'Trim.':'Extend.'));
+      modifyBoundaryId = null;
     } else {
       modifyBoundaryId = null;
+      modifyBoundaryIds = [];
     }
     toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === t));
     hint.textContent = hints[t] || '';
@@ -1592,7 +1656,12 @@
   let dimChain = null;    // { p1, axis, dimType, off } — active Baseline/Continue chain state
 
   function currentStyle(){
-    return { color: colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5, layer: currentLayer };
+    const cl = layers.find(l => l.name === currentLayer);
+    // If the toolbar swatch still matches the current layer's color, treat
+    // this as "no explicit override" and use real ByLayer — otherwise the
+    // user deliberately picked a different color, so honor that override.
+    const isByLayer = !cl || colorPicker.value.toLowerCase() === cl.color.toLowerCase();
+    return { color: isByLayer ? 'bylayer' : colorPicker.value, width: parseFloat(lineWidthInput.value) || 1.5, layer: currentLayer };
   }
 
   // Given a fixed length/width/rotation (rectPending) anchored at rectStart, picks which
@@ -1620,6 +1689,16 @@
     }
     polyPoints = []; drawing = null;
     render(); renderList();
+  }
+  function closePolyline(){
+    if (polyPoints.length >= 2){
+      snapshot();
+      entities.push({ id: uid(), type:'polyline', points: polyPoints.slice(), closed:true, ...currentStyle() });
+      log('Polyline closed.', 'prompt');
+    }
+    polyPoints = []; drawing = null; currentOsnap = null;
+    render(); renderList();
+    cmdDone();
   }
 
   // Core point-input logic, shared by canvas clicks and command-line coordinate entry.
@@ -1692,8 +1771,12 @@
       return;
     }
     if (tool === 'polyline'){
+      if (currentOsnap && currentOsnap.kind === 'close' && polyPoints.length >= 2){
+        closePolyline();
+        return;
+      }
       polyPoints.push(world);
-      cmdPrompt('Specify next point or [Undo/Enter to finish]:');
+      cmdPrompt('Specify next point or [Undo/Enter to finish, click start point to close]:');
       return;
     }
     if (tool === 'dimension' || tool === 'dimlinear'){
@@ -1863,18 +1946,51 @@
       return;
     }
 
+    if (tool === 'fillet' || tool === 'chamfer'){
+      // Alternative to the Corner dropdown in the Modify Options panel: click
+      // directly on a vertex of the single selected POLYLINE/BOX to pick that
+      // corner. Only applies in the "1 polyline/box selected" mode (the
+      // 2-edge mode still needs 2 whole entities picked via the select tool
+      // before switching to Fillet/Chamfer).
+      const ids = activeSelectionIds();
+      const edgeEnts = ids.map(id=>entities.find(x=>x.id===id)).filter(e=>e && (e.type==='line' || e.type==='polyline' || e.type==='rect'));
+      if (edgeEnts.length === 1 && (edgeEnts[0].type === 'polyline' || edgeEnts[0].type === 'rect')){
+        const e0 = edgeEnts[0];
+        const isBox = e0.type === 'rect';
+        const previewPts = isBox ? [ {x:e0.x1,y:e0.y1}, {x:e0.x2,y:e0.y1}, {x:e0.x2,y:e0.y2}, {x:e0.x1,y:e0.y2} ] : e0.points;
+        const previewClosed = isBox ? true : !!e0.closed;
+        const tol = 12; // px, same idea as hitTestGrip's vertex-click tolerance
+        let bestK = null, bestD = tol;
+        for (let k=0;k<previewPts.length;k++){
+          if (!(previewClosed || (k>=1 && k<=previewPts.length-2))) continue; // only real corners are pickable
+          const s = worldToScreen(previewPts[k].x, previewPts[k].y);
+          const d = Math.hypot(s.x/devicePixelRatio - screenPt.x, s.y/devicePixelRatio - screenPt.y);
+          if (d < bestD){ bestD = d; bestK = k; }
+        }
+        if (bestK != null){
+          modifyVertexPick = bestK;
+          buildModifyForm();
+          flashHint(`Corner ${bestK} picked — set ${tool==='fillet'?'radius':'distance'} and Apply.`);
+          return;
+        }
+      }
+      if (edgeEnts.length === 1) flashHint('Click closer to one of that corner\'s vertices, or use the Corner dropdown in Modify Options.');
+      else flashHint(`Select exactly 2 LINE/POLYLINE/BOX entities (or 1 alone to pick a corner), then use the Modify Options panel to ${tool}.`);
+      return;
+    }
+
     if (tool === 'trim' || tool === 'extend'){
-      if (modifyBoundaryId == null){ flashHint('Select one cutting/boundary entity first, then ' + (tool==='trim'?'Trim.':'Extend.')); setTool('select'); return; }
-      const boundary = entities.find(x => x.id === modifyBoundaryId);
-      const target = hitTest(world, modifyBoundaryId);
+      if (!modifyBoundaryIds.length){ flashHint('Select one or more cutting/boundary entities first, then ' + (tool==='trim'?'Trim.':'Extend.')); setTool('select'); return; }
+      const boundaries = modifyBoundaryIds.map(id => entities.find(x => x.id === id)).filter(Boolean);
+      const target = hitTest(world, modifyBoundaryIds);
       const validTypes = tool === 'trim' ? ['line','polyline','circle','arc','rect'] : ['line','polyline','arc'];
-      if (!target || target.id === modifyBoundaryId || !validTypes.includes(target.type)){
+      if (!target || modifyBoundaryIds.includes(target.id) || !validTypes.includes(target.type)){
         const hint2 = tool==='trim' ? 'a LINE, POLYLINE edge, CIRCLE, ARC, or RECTANGLE' : 'a LINE, POLYLINE edge, or ARC (circles/rectangles have no open end)';
         flashHint('Click on ' + hint2 + ' to ' + tool + '.'); return;
       }
-      // A rectangle target trims edge-by-edge exactly like a closed polyline, so convert
-      // it in place first — this lets Trim work on a rect the same effortless way it
-      // already works on a circle, without a separate Explode step.
+      // A rectangle target trims all-at-once exactly like a circle, so convert it to a
+      // closed polyline in place first — this lets trimClosedLoopAt() handle it the
+      // same effortless way it already works on a circle, without a separate Explode step.
       if (tool === 'trim' && target.type === 'rect'){
         const rx1=target.x1, ry1=target.y1, rx2=target.x2, ry2=target.y2;
         Object.assign(target, { type:'polyline', closed:true, points:[
@@ -1886,9 +2002,10 @@
         delete target.x1; delete target.y1; delete target.x2; delete target.y2;
       }
       const isCircular = target.type === 'circle' || target.type === 'arc';
+      const isClosedLoop = target.type === 'polyline' && target.closed;
       const ok = tool === 'trim'
-        ? (isCircular ? trimCircularAt(target, boundary, world) : trimEntityAt(target, boundary, world))
-        : (isCircular ? extendArcAt(target, boundary, world) : extendEntityAt(target, boundary, world));
+        ? (isCircular ? trimCircularAt(target, boundaries, world) : isClosedLoop ? trimClosedLoopAt(target, boundaries, world) : trimEntityAt(target, boundaries, world))
+        : (isCircular ? extendArcAt(target, boundaries, world) : extendEntityAt(target, boundaries, world));
       if (ok){ render(); renderList(); log((tool==='trim'?'Trimmed.':'Extended.'), 'prompt'); }
       else flashHint('No intersection found with the boundary in that direction.');
       return;
@@ -2131,6 +2248,18 @@
   // trim/extend call snapshot() internally before mutating, right before the edit is applied.
 
   // ---- Geometry helpers shared by Modify tools ----
+  // A hatch that's still linked to a source object (e.sourceId) normally has
+  // its boundary/fill *derived* from that object (see rebuildHatchFromSource)
+  // rather than transformed directly. But if the hatch itself is the thing
+  // being moved/copied/rotated/scaled/mirrored/arrayed — i.e. it was picked
+  // and edited on its own, separately from its source — that's an explicit
+  // request to break the link and treat the hatch as an independent object
+  // from now on. Dropping sourceId here does exactly that: the hatch keeps
+  // whatever boundary/fill it has at this moment and stops following the
+  // source object on future edits.
+  function detachHatchFromSource(e){
+    if (e.type === 'hatch' && e.sourceId) delete e.sourceId;
+  }
   function translateEntity(e, o, dx, dy){
     if (e.type === 'line' || e.type === 'rect'){ e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; }
     else if (e.type === 'circle' || e.type === 'arc'){ e.cx=o.cx+dx; e.cy=o.cy+dy; }
@@ -2140,8 +2269,9 @@
       if (o.dimType === 'diameter' || o.dimType === 'radius'){ e.cx=o.cx+dx; e.cy=o.cy+dy; }
       else { e.x1=o.x1+dx; e.y1=o.y1+dy; e.x2=o.x2+dx; e.y2=o.y2+dy; e.ox=o.ox+dx; e.oy=o.oy+dy; }
     }
-    else if (e.type === 'hatch'){ e.boundary = translateBoundary(o.boundary, dx, dy); e.lines = (o.lines||[]).map(s=>({x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy})); }
+    else if (e.type === 'hatch'){ detachHatchFromSource(e); e.boundary = translateBoundary(o.boundary, dx, dy); e.lines = (o.lines||[]).map(s=>({x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy})); }
     if (o.basePoint) e.basePoint = { x: o.basePoint.x + dx, y: o.basePoint.y + dy };
+    if (e.id) syncLinkedHatches(e.id); // carry along any hatch applied to this object
   }
   function translateBoundary(b, dx, dy){
     if (b.kind === 'circle') return { kind:'circle', cx:b.cx+dx, cy:b.cy+dy, r:b.r };
@@ -2178,12 +2308,14 @@
         e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
       }
     } else if (e.type === 'hatch'){
+      detachHatchFromSource(e);
       const b = o.boundary;
       e.boundary = b.kind==='circle' ? { kind:'circle', cx: rotatePt({x:b.cx,y:b.cy},base,rad).x, cy: rotatePt({x:b.cx,y:b.cy},base,rad).y, r:b.r }
                                       : { kind:'polygon', points: b.points.map(p=>rotatePt(p,base,rad)) };
       e.lines = (o.lines||[]).map(s => { const a=rotatePt({x:s.x1,y:s.y1},base,rad), c=rotatePt({x:s.x2,y:s.y2},base,rad); return {x1:a.x,y1:a.y,x2:c.x,y2:c.y}; });
     }
     if (o.basePoint) e.basePoint = rotatePt(o.basePoint, base, rad);
+    if (e.id) syncLinkedHatches(e.id);
   }
   function scalePt(p, base, f){ return { x: base.x + (p.x-base.x)*f, y: base.y + (p.y-base.y)*f }; }
   function scaleEntity(e, o, base, f){
@@ -2204,12 +2336,14 @@
         e.x1=p1.x; e.y1=p1.y; e.x2=p2.x; e.y2=p2.y; e.ox=po.x; e.oy=po.y;
       }
     } else if (e.type === 'hatch'){
+      detachHatchFromSource(e);
       const b = o.boundary;
       e.boundary = b.kind==='circle' ? { kind:'circle', cx: scalePt({x:b.cx,y:b.cy},base,f).x, cy: scalePt({x:b.cx,y:b.cy},base,f).y, r: Math.max(0.001,b.r*f) }
                                       : { kind:'polygon', points: b.points.map(p=>scalePt(p,base,f)) };
       e.lines = (o.lines||[]).map(s => { const a=scalePt({x:s.x1,y:s.y1},base,f), c=scalePt({x:s.x2,y:s.y2},base,f); return {x1:a.x,y1:a.y,x2:c.x,y2:c.y}; });
     }
     if (o.basePoint) e.basePoint = scalePt(o.basePoint, base, f);
+    if (e.id) syncLinkedHatches(e.id);
   }
   function mirrorPt(p, a, b){
     const dx=b.x-a.x, dy=b.y-a.y; const len2=dx*dx+dy*dy || 1;
@@ -2246,6 +2380,14 @@
         const p1=mirrorPt({x:c.x1,y:c.y1},a,b), p2=mirrorPt({x:c.x2,y:c.y2},a,b), po=mirrorPt({x:c.ox,y:c.oy},a,b);
         c.x1=p1.x; c.y1=p1.y; c.x2=p2.x; c.y2=p2.y; c.ox=po.x; c.oy=po.y;
       }
+    } else if (c.type === 'hatch'){
+      // A mirrored copy is always a brand-new, independent hatch — it never
+      // stays linked to whatever source object the original hatch followed.
+      delete c.sourceId;
+      const bnd = c.boundary;
+      c.boundary = bnd.kind==='circle' ? { kind:'circle', cx: mirrorPt({x:bnd.cx,y:bnd.cy},a,b).x, cy: mirrorPt({x:bnd.cx,y:bnd.cy},a,b).y, r:bnd.r }
+                                        : { kind:'polygon', points: bnd.points.map(p=>mirrorPt(p,a,b)) };
+      c.lines = (c.lines||[]).map(s => { const p1=mirrorPt({x:s.x1,y:s.y1},a,b), p2=mirrorPt({x:s.x2,y:s.y2},a,b); return {x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y}; });
     }
     if (c.basePoint) c.basePoint = mirrorPt(c.basePoint, a, b);
     return c;
@@ -2385,6 +2527,20 @@
     return [];
   }
 
+  // Multi-boundary versions — Trim/Extend can now be given a whole SET of
+  // cutting-edge entities (real AutoCAD lets you pick several), so every
+  // intersection call collects hits from all of them together.
+  function multiBoundaryIntersections(seg, boundaries){
+    const out = [];
+    for (const b of boundaries) out.push(...boundaryIntersections(seg, b));
+    return out;
+  }
+  function multiCircleBoundaryIntersections(cx,cy,r, boundaries){
+    const out = [];
+    for (const b of boundaries) out.push(...circleBoundaryIntersections(cx,cy,r, b));
+    return out;
+  }
+
   // Where a circle (cx,cy,r) crosses a boundary's finite edges — the mirror image
   // of boundaryIntersections() above, used so circles/arcs can be Trim/Extend targets too.
   function circleBoundaryIntersections(cx,cy,r, boundary){
@@ -2418,15 +2574,15 @@
   // target) or — if the boundary crossed twice inside the remaining span — two
   // separate arcs (the target plus one new entity). This never re-derives the whole
   // shape from scratch, so earlier trims on the same arc are always preserved.
-  function trimCircularAt(target, boundary, clickWorld){
+  function trimCircularAt(target, boundaries, clickWorld){
     const clickAngle = angleAt(target.cx, target.cy, clickWorld.x, clickWorld.y);
-    let rawHits = circleBoundaryIntersections(target.cx, target.cy, target.r, boundary)
+    let rawHits = multiCircleBoundaryIntersections(target.cx, target.cy, target.r, boundaries)
       .map(h => angleAt(target.cx, target.cy, h.x, h.y));
     rawHits = [...new Set(rawHits.map(a => Math.round(a*1e6)/1e6))];
     const makePiece = (startAngle, endAngle) => ({ id: uid(), type:'arc', cx:target.cx, cy:target.cy, r:target.r, startAngle, endAngle, color:target.color, width:target.width, layer:target.layer });
 
     if (target.type === 'circle'){
-      if (rawHits.length < 2){ flashHint('Need at least 2 crossing points with the boundary to trim a full circle.'); return false; }
+      if (rawHits.length < 2){ flashHint('Need at least 2 crossing points with the boundary/boundaries to trim a full circle.'); return false; }
       rawHits.sort((a,b)=>a-b);
       const n = rawHits.length;
       let cutIndex = 0;
@@ -2448,7 +2604,7 @@
     if (sweep < 1e-6) return false;
     const toT = a => angleNorm(a - target.startAngle) / sweep;
     const interior = rawHits.filter(a => { const t = toT(a); return t > 1e-6 && t < 1-1e-6; });
-    if (!interior.length){ flashHint('That boundary doesn\'t cross this arc.'); return false; }
+    if (!interior.length){ flashHint('None of the selected boundaries cross this arc.'); return false; }
     const cuts = [0, ...interior.map(toT).sort((a,b)=>a-b), 1];
     const angleOfT = t => angleNorm(target.startAngle + t*sweep);
     const tc = toT(clickAngle);
@@ -2471,14 +2627,14 @@
   }
   // Extend an arc's nearer end outward until it meets the boundary. (Full circles
   // have no open end, so — like real AutoCAD — only arcs can be extended.)
-  function extendArcAt(target, boundary, clickWorld){
+  function extendArcAt(target, boundaries, clickWorld){
     if (target.type !== 'arc'){ flashHint('A full circle has no open end to extend — trim it to an arc first.'); return false; }
     const clickAngle = angleAt(target.cx, target.cy, clickWorld.x, clickWorld.y);
     // whichever endpoint's angle is numerically closer to the click's angle is the one being extended
     const distToStart = Math.min(angleNorm(clickAngle-target.startAngle), angleNorm(target.startAngle-clickAngle));
     const distToEnd = Math.min(angleNorm(clickAngle-target.endAngle), angleNorm(target.endAngle-clickAngle));
     const wantStart = distToStart < distToEnd;
-    const hits = circleBoundaryIntersections(target.cx, target.cy, target.r, boundary).map(h => angleAt(target.cx, target.cy, h.x, h.y));
+    const hits = multiCircleBoundaryIntersections(target.cx, target.cy, target.r, boundaries).map(h => angleAt(target.cx, target.cy, h.x, h.y));
     if (!hits.length) return false;
     let best = null, bestGap = Infinity;
     for (const h of hits){
@@ -2522,11 +2678,11 @@
     for (const s of segs){ const d = distToSeg(clickWorld, {x:s.x1,y:s.y1}, {x:s.x2,y:s.y2}); if (d<bestD){ bestD=d; best=s; } }
     return best;
   }
-  function trimEntityAt(target, boundary, clickWorld){
+  function trimEntityAt(target, boundaries, clickWorld){
     const segs = getEntitySegments(target);
     if (!segs.length) return false;
     const seg = nearestSegment(segs, clickWorld);
-    const hits = boundaryIntersections(seg, boundary).filter(p => p.t > 1e-6 && p.t < 1-1e-6);
+    const hits = multiBoundaryIntersections(seg, boundaries).filter(p => p.t > 1e-6 && p.t < 1-1e-6);
     if (!hits.length) return false;
     const clickT = ((clickWorld.x-seg.x1)*(seg.x2-seg.x1)+(clickWorld.y-seg.y1)*(seg.y2-seg.y1)) / (Math.pow(seg.x2-seg.x1,2)+Math.pow(seg.y2-seg.y1,2) || 1);
     let best = hits[0], bestD = Math.abs(hits[0].t - clickT);
@@ -2536,7 +2692,86 @@
     else seg.apply({x:best.x,y:best.y}, 'end');
     return true;
   }
-  function extendEntityAt(target, boundary, clickWorld){
+  // Trim a CLOSED polyline (a rectangle target has already been converted to one,
+  // just above where Trim is dispatched) against a boundary in a single operation —
+  // this mirrors trimCircularAt exactly: every crossing with the boundary is found
+  // up front, the piece the click landed in is discarded, and every OTHER piece
+  // becomes its own entity immediately, rather than needing one Trim click per edge.
+  function trimClosedLoopAt(target, boundaries, clickWorld){
+    const pts = target.points, n = pts.length;
+    if (n < 3) return false;
+    const edgeOf = (i) => ({ x1: pts[i].x, y1: pts[i].y, x2: pts[(i+1)%n].x, y2: pts[(i+1)%n].y });
+
+    // Every crossing, expressed as one continuous "loop parameter": edgeIndex + t (t in (0,1)).
+    let rawHits = [];
+    for (let i=0;i<n;i++){
+      const seg = edgeOf(i);
+      const hits = multiBoundaryIntersections(seg, boundaries).filter(h => h.t > 1e-6 && h.t < 1-1e-6);
+      for (const h of hits) rawHits.push({ param: i + h.t, x: h.x, y: h.y });
+    }
+    rawHits.sort((a,b) => a.param - b.param);
+    rawHits = rawHits.filter((h,i) => i===0 || Math.abs(h.param - rawHits[i-1].param) > 1e-6);
+    if (rawHits.length < 2){ flashHint('Need at least 2 crossing points with the boundary/boundaries to trim this loop.'); return false; }
+
+    // The click's own loop parameter, via whichever edge it's nearest to.
+    let bestEdge = 0, bestD = Infinity, bestT = 0;
+    for (let i=0;i<n;i++){
+      const seg = edgeOf(i);
+      const d = distToSeg(clickWorld, {x:seg.x1,y:seg.y1}, {x:seg.x2,y:seg.y2});
+      if (d < bestD){
+        bestD = d; bestEdge = i;
+        const dx=seg.x2-seg.x1, dy=seg.y2-seg.y1, len2 = dx*dx+dy*dy || 1;
+        bestT = Math.max(0, Math.min(1, ((clickWorld.x-seg.x1)*dx + (clickWorld.y-seg.y1)*dy)/len2));
+      }
+    }
+    const clickParam = bestEdge + bestT;
+
+    const m = rawHits.length;
+    let cutIndex = 0;
+    for (let i=0;i<m;i++){
+      const a0 = rawHits[i].param, a1 = rawHits[(i+1)%m].param;
+      const span = ((a1 - a0) % n + n) % n;
+      const rel = ((clickParam - a0) % n + n) % n;
+      if (rel <= span + 1e-6){ cutIndex = i; break; }
+    }
+
+    // Walk the original vertices lying between two consecutive hit points, in loop order.
+    const buildPiecePoints = (fromHit, toHit) => {
+      const span = ((toHit.param - fromHit.param) % n + n) % n;
+      const result = [{x:fromHit.x, y:fromHit.y}];
+      let v = (Math.floor(fromHit.param) + 1) % n, steps = 0;
+      while (steps < n){
+        const rel = ((v - fromHit.param) % n + n) % n;
+        if (rel >= span - 1e-9) break;
+        result.push({x:pts[v].x, y:pts[v].y});
+        v = (v+1) % n; steps++;
+      }
+      result.push({x:toHit.x, y:toHit.y});
+      return result;
+    };
+    const makePieceEntity = (points) => points.length === 2
+      ? { id: uid(), type:'line', x1:points[0].x, y1:points[0].y, x2:points[1].x, y2:points[1].y, color:target.color, width:target.width, layer:target.layer }
+      : { id: uid(), type:'polyline', points, closed:false, color:target.color, width:target.width, layer:target.layer };
+    const applyPieceToTarget = (points) => {
+      if (points.length === 2){
+        target.type = 'line'; target.x1=points[0].x; target.y1=points[0].y; target.x2=points[1].x; target.y2=points[1].y;
+        delete target.points; delete target.closed;
+      } else {
+        target.points = points; target.closed = false;
+      }
+    };
+
+    snapshot();
+    const pieces = [];
+    for (let k=1;k<m;k++){
+      const idx = (cutIndex+k) % m;
+      pieces.push(buildPiecePoints(rawHits[idx], rawHits[(idx+1)%m]));
+    }
+    applyPieceToTarget(pieces[0]);
+    for (let k=1;k<pieces.length;k++) entities.push(makePieceEntity(pieces[k]));
+    return true;
+  }
+  function extendEntityAt(target, boundaries, clickWorld){
     const segs = getEntitySegments(target);
     if (!segs.length) return false;
     const seg = nearestSegment(segs, clickWorld);
@@ -2552,7 +2787,7 @@
     const virtual = wantStart
       ? { x1: seg.x1-ux*big, y1: seg.y1-uy*big, x2: seg.x2, y2: seg.y2 }
       : { x1: seg.x1, y1: seg.y1, x2: seg.x2+ux*big, y2: seg.y2+uy*big };
-    const hits = boundaryIntersections(virtual, boundary);
+    const hits = multiBoundaryIntersections(virtual, boundaries);
     if (!hits.length) return false;
     const from = wantStart ? {x:seg.x1,y:seg.y1} : {x:seg.x2,y:seg.y2};
     let best = null, bestD = Infinity;
@@ -2631,6 +2866,28 @@
     }
     if (ids.length >= 2) return chainEntitiesToBoundary(ids);
     return null;
+  }
+
+  // ---- Keep a hatch's boundary/fill following its source object ----
+  // A hatch created from a single closed shape (rect/circle/closed polyline)
+  // stores that shape's id as h.sourceId. Whenever the source's geometry
+  // changes — a grip-edited vertex, a Properties-panel edit, or a Move/
+  // Rotate/Scale transform — call syncLinkedHatches(sourceId) to rebuild the
+  // hatch's boundary and fill lines from the object's current shape, so the
+  // hatch always matches what it was applied to. Hatches with no sourceId
+  // (Pick Point or multi-entity chained boundaries) are left untouched here;
+  // they keep their own independent boundary snapshot as before.
+  function rebuildHatchFromSource(h){
+    const src = entities.find(x => x.id === h.sourceId);
+    if (!src) return;
+    const b = buildHatchBoundary(src);
+    if (!b) return; // source no longer a valid closed shape (e.g. polyline opened) — leave last-good hatch in place
+    h.boundary = b;
+    h.lines = generateHatchLines(b, h.spacing || 2, h.angleDeg || 0);
+  }
+  function syncLinkedHatches(sourceId){
+    if (!sourceId) return;
+    entities.forEach(x => { if (x.type === 'hatch' && x.sourceId === sourceId) rebuildHatchFromSource(x); });
   }
 
   // ---------- Hatch "Pick Point" boundary detection ----------
@@ -2916,7 +3173,11 @@
           // Dimensions are deliberately excluded too — every point on a
           // dimension is now a purpose-built grip (extension/arrow/label), so
           // the only way to relocate the whole dimension is the Move command.
-          const bodyMoveTypes = ['text','hatch'];
+          // Hatch is excluded for the same reason: it has no grips of its own
+          // (see entitySnapPoints) and can only be relocated with Move — which
+          // also keeps a hatch linked to a source object correctly synced to
+          // that object's new position (see rebuildHatchFromSource).
+          const bodyMoveTypes = ['text'];
           if (bodyMoveTypes.includes(hitE.type)){
             const ids = [...selectedIds];
             dragging = { ids, startWorld: world, origMap: Object.fromEntries(ids.map(id => [id, JSON.parse(JSON.stringify(entities.find(x=>x.id===id)))])) };
@@ -4042,17 +4303,74 @@
     }
 
     if (tool === 'trim' || tool === 'extend'){
-      const b = modifyBoundaryId!=null ? entities.find(x=>x.id===modifyBoundaryId) : null;
-      html += b ? `<div class="empty-note">Boundary: ${b.type} #${b.id}. Click a target LINE, POLYLINE edge, CIRCLE, ARC${tool==='trim' ? ', or RECTANGLE' : ''} on canvas.</div>`
-                : `<div class="empty-note">Select exactly one entity to use as the ${tool==='trim'?'cutting edge':'boundary'}, then re-pick this tool.</div>`;
+      const bs = modifyBoundaryIds.map(id => entities.find(x=>x.id===id)).filter(Boolean);
+      html += bs.length
+        ? `<div class="empty-note">Boundary: ${bs.length===1 ? `${bs[0].type} #${bs[0].id}` : `${bs.length} entities selected`}. Click a target LINE, POLYLINE edge, CIRCLE, ARC${tool==='trim' ? ', or RECTANGLE' : ''} on canvas.</div>`
+        : `<div class="empty-note">Select one or more entities to use as the ${tool==='trim'?'cutting edge(s)':'boundary(ies)'}, then re-pick this tool.</div>`;
       modifyBody.innerHTML = html;
       return;
     }
 
     if (tool === 'fillet' || tool === 'chamfer'){
-      const lines = ids.map(id=>entities.find(x=>x.id===id)).filter(e=>e && e.type==='line');
-      if (lines.length !== 2){
-        html += `<div class="empty-note">Select exactly 2 LINE entities to ${tool}.</div>`;
+      const edgeEnts = ids.map(id=>entities.find(x=>x.id===id)).filter(e=>e && (e.type==='line' || e.type==='polyline' || e.type==='rect'));
+      // A single POLYLINE or RECT (Box) selected on its own: either round/
+      // chamfer ONE chosen corner (pick it from the dropdown — this is the
+      // "apply on each vertex" mode, since every corner can be picked and
+      // filleted/chamfered independently, one at a time), or every corner
+      // in one pass (closed loop = all vertices, rect = all 4 corners, open
+      // polyline = interior vertices only), same as AutoCAD's Polyline mode.
+      // A rect is converted to an equivalent closed polyline the moment
+      // Apply is actually clicked, since a fillet/chamfer corner can't stay
+      // axis-aligned — the vertex list below is only a preview until then.
+      if (edgeEnts.length === 1 && (edgeEnts[0].type === 'polyline' || edgeEnts[0].type === 'rect')){
+        const e0 = edgeEnts[0];
+        const isBox = e0.type === 'rect';
+        const previewPts = isBox ? [ {x:e0.x1,y:e0.y1}, {x:e0.x2,y:e0.y1}, {x:e0.x2,y:e0.y2}, {x:e0.x1,y:e0.y2} ] : e0.points;
+        const previewClosed = isBox ? true : !!e0.closed;
+        const corners = [];
+        for (let k=0;k<previewPts.length;k++){ if (previewClosed || (k>=1 && k<=previewPts.length-2)) corners.push(k); }
+        html += `<div class="empty-note">1 ${isBox ? 'BOX' : 'POLYLINE'} selected — ${tool} one chosen corner, or every corner at once. Tip: click a corner's vertex on the canvas to pick it directly instead of using the dropdown.</div>`;
+        html += tool==='fillet' ? row('Radius', numInput('mo_r', 2, 0.1)) : row('Distance', numInput('mo_r', 1, 0.1));
+        if (corners.length){
+          // If a corner was picked by clicking its vertex on canvas (see
+          // placePoint's fillet/chamfer branch), pre-select it here instead
+          // of always defaulting to the first corner in the list.
+          if (modifyVertexPick != null && !corners.includes(modifyVertexPick)) modifyVertexPick = null;
+          const defaultK = modifyVertexPick != null ? modifyVertexPick : corners[0];
+          const opts = corners.map(k => `<option value="${k}" ${k===defaultK?'selected':''}>Corner ${k} — (${previewPts[k].x.toFixed(2)}, ${previewPts[k].y.toFixed(2)})${k===modifyVertexPick?' ✓ picked':''}</option>`).join('');
+          html += row('Corner', `<select id="mo_vertex">${opts}</select>`);
+          html += `<button class="formBtn" id="mo_apply_vertex">${tool==='fillet'?'◜ Apply Fillet (this corner)':'◲ Apply Chamfer (this corner)'}</button>`;
+        }
+        html += `<button class="formBtn secondary" id="mo_apply">${tool==='fillet'?'◜ Apply Fillet (all corners)':'◲ Apply Chamfer (all corners)'}</button>`;
+        modifyBody.innerHTML = html;
+        if (corners.length){
+          document.getElementById('mo_vertex').onchange = (ev) => { modifyVertexPick = parseInt(ev.target.value, 10); };
+          document.getElementById('mo_apply_vertex').onclick = () => {
+            const val = Math.max(0.0001, gv('mo_r'));
+            const k = parseInt(document.getElementById('mo_vertex').value, 10);
+            snapshot();
+            const target = convertRectToPolyline(e0); // no-op if already a polyline
+            if (tool==='fillet') applyFilletAtVertex(target, k, val);
+            else applyChamferAtVertex(target, k, val);
+            modifyVertexPick = null;
+            render(); renderList(); buildPropsForm(); buildModifyForm();
+            log(`${tool==='fillet'?'Fillet':'Chamfer'} applied to corner ${k}.`, 'prompt');
+          };
+        }
+        document.getElementById('mo_apply').onclick = () => {
+          const val = Math.max(0.0001, gv('mo_r'));
+          snapshot();
+          const target = convertRectToPolyline(e0); // no-op if already a polyline
+          if (tool==='fillet') applyFilletAllCorners(target, val);
+          else applyChamferAllCorners(target, val);
+          modifyVertexPick = null;
+          render(); renderList(); buildPropsForm(); buildModifyForm();
+          log(`${tool==='fillet'?'Fillet':'Chamfer'} applied to every corner.`, 'prompt');
+        };
+        return;
+      }
+      if (edgeEnts.length !== 2){
+        html += `<div class="empty-note">Select exactly 2 LINE/POLYLINE/BOX entities (or 1 POLYLINE/BOX alone to ${tool} one corner or every corner) to ${tool}.</div>`;
         modifyBody.innerHTML = html;
         return;
       }
@@ -4062,8 +4380,12 @@
       document.getElementById('mo_apply').onclick = () => {
         const val = Math.max(0.0001, gv('mo_r'));
         snapshot();
-        if (tool==='fillet') applyFillet(lines[0], lines[1], val);
-        else applyChamfer(lines[0], lines[1], val);
+        const hint0 = entityHintPoint(edgeEnts[1]), hint1 = entityHintPoint(edgeEnts[0]);
+        const ref1 = edgeRefFromEntity(edgeEnts[0], hint0);
+        const ref2 = edgeRefFromEntity(edgeEnts[1], hint1);
+        const styleSrc = edgeEnts[0];
+        if (tool==='fillet') applyFillet(ref1, ref2, val, styleSrc);
+        else applyChamfer(ref1, ref2, val, styleSrc);
         render(); renderList(); buildPropsForm();
         log(`${tool==='fillet'?'Fillet':'Chamfer'} applied.`, 'prompt');
       };
@@ -4131,7 +4453,12 @@
         const lines = generateHatchLines(boundary, spacing, angle);
         snapshot();
         const style = currentStyle(); // new objects follow the current layer's color/layer
-        const h = { id: uid(), type:'hatch', boundary, lines, color: style.color, width: 1, layer: style.layer };
+        // Link the hatch to its source object (single-entity boundary only —
+        // a Pick Point or multi-entity chained boundary has no one object to
+        // track) so the hatch can be rebuilt from that object's live geometry
+        // whenever it's reshaped or transformed. See rebuildHatchFromSource.
+        const sourceId = (!pickedBoundary && ids.length === 1) ? ids[0] : null;
+        const h = { id: uid(), type:'hatch', boundary, lines, color: style.color, width: 1, layer: style.layer, sourceId, spacing, angleDeg: angle };
         entities.push(h);
         selectEntity(h.id);
         hatchPickedBoundary = null; hatchPickMode = false;
@@ -4238,15 +4565,96 @@
     return [];
   }
 
-  function applyFillet(l1, l2, radius){
-    const p = lineLineIntersectInfinite({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
-    if (!p){ flashHint('Selected lines don\'t intersect (when extended).'); return; }
-    // Angle between the two lines (as directed from the intersection point toward
-    // whichever endpoint is nearer), used to convert a fillet radius into the
-    // tangent-point distance back from the intersection along each line.
+  // ---- Fillet/Chamfer: works on LINE entities, individual POLYLINE edges
+  // (segments), and RECT ("Box") edges — not just standalone lines. A
+  // polyline/rect passed in isn't fillet/chamfered as a whole here;
+  // edgeRefFromEntity below picks out the ONE segment closest to the other
+  // picked entity (via `hintPt`) and returns a small line-shaped "ref" for
+  // it, with a commit() that writes the trimmed point back to the right
+  // vertex instead of x1/x2 fields. That lets the exact same corner math
+  // that always worked on two lines now also work on any combination of
+  // line/polyline/rect, picking whichever edge sits nearest the other
+  // selected entity. A rect can't represent a rounded/cut corner while
+  // staying an axis-aligned rect, so convertRectToPolyline first turns it
+  // into an equivalent 4-vertex closed polyline (same shape, same corners)
+  // before any edge is picked — exactly like the corner-stretch grip does.
+  function convertRectToPolyline(e){
+    if (e.type !== 'rect') return e;
+    const corners = [ {x:e.x1,y:e.y1}, {x:e.x2,y:e.y1}, {x:e.x2,y:e.y2}, {x:e.x1,y:e.y2} ];
+    Object.assign(e, { type:'polyline', points:corners, closed:true });
+    delete e.x1; delete e.y1; delete e.x2; delete e.y2;
+    return e;
+  }
+  function entityHintPoint(e){
+    if (e.type === 'line') return { x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2 };
+    if (e.type === 'rect') return { x:(e.x1+e.x2)/2, y:(e.y1+e.y2)/2 };
+    if (e.type === 'polyline'){
+      const n = e.points.length || 1;
+      return { x: e.points.reduce((s,p)=>s+p.x,0)/n, y: e.points.reduce((s,p)=>s+p.y,0)/n };
+    }
+    return { x:0, y:0 };
+  }
+  function edgeRefFromEntity(e, hintPt){
+    if (e.type === 'line'){
+      return {
+        x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2,
+        color:e.color, width:e.width, layer:e.layer,
+        commit(nearIsStart, pt){ if (nearIsStart){ e.x1=pt.x; e.y1=pt.y; } else { e.x2=pt.x; e.y2=pt.y; } }
+      };
+    }
+    if (e.type === 'rect') e = convertRectToPolyline(e);
+    if (e.type === 'polyline'){
+      const n = e.points.length;
+      const segCount = e.closed ? n : n-1;
+      let bestI = 0, bestD = Infinity;
+      for (let i=0;i<segCount;i++){
+        const a=e.points[i], b=e.points[(i+1)%n];
+        const d = distToSeg(hintPt, a, b);
+        if (d < bestD){ bestD = d; bestI = i; }
+      }
+      const a = e.points[bestI], b = e.points[(bestI+1)%n];
+      const bIdx = (bestI+1)%n;
+      return {
+        x1:a.x, y1:a.y, x2:b.x, y2:b.y,
+        color:e.color, width:e.width, layer:e.layer,
+        commit(nearIsStart, pt){ e.points[nearIsStart ? bestI : bIdx] = { x:pt.x, y:pt.y }; }
+      };
+    }
+    return null;
+  }
+  // The arc renderer always sweeps from startAngle to endAngle going CCW
+  // (increasing angle, wrapping past 360° if endAngle < startAngle) — see
+  // the 'arc' case in the canvas render loop and the arc hit-test, both of
+  // which assume that same fixed direction. A fillet's correct arc is
+  // always the SHORT way around between the two tangent points (it should
+  // hug the corner, never bulge out the long way past the far side of the
+  // circle) — so whichever raw angle pair comes out of the tangent-point
+  // math, this picks whichever start/end ordering keeps the CCW sweep at
+  // or under 180°, swapping them if needed.
+  function shortArcSweep(a1, a2){
+    const d = (a2 - a1 + 360) % 360;
+    return d <= 180 ? { startAngle:a1, endAngle:a2 } : { startAngle:a2, endAngle:a1 };
+  }
+  function applyFillet(ref1, ref2, radius, styleSrc){
+    const p = lineLineIntersectInfinite({x:ref1.x1,y:ref1.y1},{x:ref1.x2,y:ref1.y2},{x:ref2.x1,y:ref2.y1},{x:ref2.x2,y:ref2.y2});
+    if (!p){ flashHint('Selected edges don\'t intersect (when extended).'); return; }
+    // Direction of each edge pointing AWAY from the corner (p), regardless of
+    // which endpoint happens to be stored as "start" vs "end". Using the raw
+    // (x2-x1) vector directly is orientation-dependent: whichever edge has its
+    // far endpoint stored as the start ends up with a vector pointing INTO the
+    // corner, which flips the angle-between calculation to the supplementary
+    // (bigger) angle instead of the true, physical corner angle. Fillet must
+    // always work on that true corner angle — e.g. two edges meeting at 30°
+    // should fillet across the 30° angle, never the 150° one.
+    const awayDir = (l) => {
+      const dx=l.x2-l.x1, dy=l.y2-l.y1;
+      const d1 = Math.hypot(l.x1-p.x, l.y1-p.y), d2 = Math.hypot(l.x2-p.x, l.y2-p.y);
+      return (d1 < d2) ? {x:dx,y:dy} : {x:-dx,y:-dy};
+    };
+    const dir1 = awayDir(ref1), dir2 = awayDir(ref2);
     const angBetween = Math.acos(Math.min(1, Math.max(-1,
-      ((l1.x2-l1.x1)*(l2.x2-l2.x1) + (l1.y2-l1.y1)*(l2.y2-l2.y1)) /
-      ((Math.hypot(l1.x2-l1.x1,l1.y2-l1.y1)||1) * (Math.hypot(l2.x2-l2.x1,l2.y2-l2.y1)||1))
+      (dir1.x*dir2.x + dir1.y*dir2.y) /
+      ((Math.hypot(dir1.x,dir1.y)||1) * (Math.hypot(dir2.x,dir2.y)||1))
     )));
     const halfAng = Math.max(0.001, Math.min(Math.PI/2-0.001, angBetween/2));
     const tangentDist = radius / Math.tan(halfAng);
@@ -4257,11 +4665,16 @@
       const dist = Math.min(tangentDist, len-0.001);
       return { nearIsStart, ux, uy, dist };
     };
-    const t1 = trimTo(l1), t2 = trimTo(l2);
-    const pt1 = t1.nearIsStart ? { x: p.x - t1.ux*t1.dist, y: p.y - t1.uy*t1.dist } : { x: p.x + t1.ux*t1.dist, y: p.y + t1.uy*t1.dist };
-    const pt2 = t2.nearIsStart ? { x: p.x - t2.ux*t2.dist, y: p.y - t2.uy*t2.dist } : { x: p.x + t2.ux*t2.dist, y: p.y + t2.uy*t2.dist };
-    if (t1.nearIsStart) { l1.x1=pt1.x; l1.y1=pt1.y; } else { l1.x2=pt1.x; l1.y2=pt1.y; }
-    if (t2.nearIsStart) { l2.x1=pt2.x; l2.y1=pt2.y; } else { l2.x2=pt2.x; l2.y2=pt2.y; }
+    const t1 = trimTo(ref1), t2 = trimTo(ref2);
+    // The tangent point sits at `dist` from p, moving AWAY from p along the
+    // edge (i.e. toward the far endpoint) — that's +ux/+uy when the near
+    // endpoint is the start (ux already points start→end, away from p), and
+    // -ux/-uy when the near endpoint is the end (ux then points end→start,
+    // i.e. INTO p, so the away-from-p direction is the negation).
+    const pt1 = t1.nearIsStart ? { x: p.x + t1.ux*t1.dist, y: p.y + t1.uy*t1.dist } : { x: p.x - t1.ux*t1.dist, y: p.y - t1.uy*t1.dist };
+    const pt2 = t2.nearIsStart ? { x: p.x + t2.ux*t2.dist, y: p.y + t2.uy*t2.dist } : { x: p.x - t2.ux*t2.dist, y: p.y - t2.uy*t2.dist };
+    ref1.commit(t1.nearIsStart, pt1);
+    ref2.commit(t2.nearIsStart, pt2);
     // fillet arc center: offset from p along the bisector of the two tangent points, at distance radius/sin(halfAngle)
     const v1 = { x: pt1.x-p.x, y: pt1.y-p.y }, v2 = { x: pt2.x-p.x, y: pt2.y-p.y };
     const len1 = Math.hypot(v1.x,v1.y)||1, len2 = Math.hypot(v2.x,v2.y)||1;
@@ -4272,23 +4685,134 @@
     const center = { x: p.x + (bis.x/bisLen)*centerDist, y: p.y + (bis.y/bisLen)*centerDist };
     let a1 = Math.atan2(pt1.y-center.y, pt1.x-center.x)*180/Math.PI; if (a1<0) a1+=360;
     let a2 = Math.atan2(pt2.y-center.y, pt2.x-center.x)*180/Math.PI; if (a2<0) a2+=360;
-    entities.push({ id: uid(), type:'arc', cx:center.x, cy:center.y, r:radius, startAngle:a1, endAngle:a2, color:l1.color, width:l1.width, layer:l1.layer });
+    const sweep = shortArcSweep(a1, a2);
+    entities.push({ id: uid(), type:'arc', cx:center.x, cy:center.y, r:radius, startAngle:sweep.startAngle, endAngle:sweep.endAngle, color:styleSrc.color, width:styleSrc.width, layer:styleSrc.layer });
   }
 
-  function applyChamfer(l1, l2, dist){
-    const p = lineLineIntersectInfinite({x:l1.x1,y:l1.y1},{x:l1.x2,y:l1.y2},{x:l2.x1,y:l2.y1},{x:l2.x2,y:l2.y2});
-    if (!p){ flashHint('Selected lines don\'t intersect (when extended).'); return; }
+  function applyChamfer(ref1, ref2, dist, styleSrc){
+    const p = lineLineIntersectInfinite({x:ref1.x1,y:ref1.y1},{x:ref1.x2,y:ref1.y2},{x:ref2.x1,y:ref2.y1},{x:ref2.x2,y:ref2.y2});
+    if (!p){ flashHint('Selected edges don\'t intersect (when extended).'); return; }
     const clip = (l) => {
       const dx=l.x2-l.x1, dy=l.y2-l.y1, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len;
       const d1 = Math.hypot(l.x1-p.x, l.y1-p.y), d2 = Math.hypot(l.x2-p.x, l.y2-p.y);
       const nearIsStart = d1 < d2;
       const cd = Math.min(dist, len-0.001);
-      const pt = nearIsStart ? { x:p.x-ux*cd, y:p.y-uy*cd } : { x:p.x+ux*cd, y:p.y+uy*cd };
-      if (nearIsStart) { l.x1=pt.x; l.y1=pt.y; } else { l.x2=pt.x; l.y2=pt.y; }
+      // Same near/far direction as fillet's trimTo: move `cd` away from p,
+      // toward the far endpoint (+ux when start is near, -ux when end is near).
+      const pt = nearIsStart ? { x:p.x+ux*cd, y:p.y+uy*cd } : { x:p.x-ux*cd, y:p.y-uy*cd };
+      l.commit(nearIsStart, pt);
       return pt;
     };
-    const pt1 = clip(l1), pt2 = clip(l2);
-    entities.push({ id: uid(), type:'line', x1:pt1.x, y1:pt1.y, x2:pt2.x, y2:pt2.y, color:l1.color, width:l1.width, layer:l1.layer });
+    const pt1 = clip(ref1), pt2 = clip(ref2);
+    entities.push({ id: uid(), type:'line', x1:pt1.x, y1:pt1.y, x2:pt2.x, y2:pt2.y, color:styleSrc.color, width:styleSrc.width, layer:styleSrc.layer });
+  }
+
+  // ---- Fillet/Chamfer on EVERY corner of a single polyline in one go —
+  // AutoCAD's "Polyline" mode for these commands. Operates on the corner
+  // (prev vertex → this vertex → next vertex) directly, since the vertex
+  // itself IS the intersection point — no infinite-line extension needed.
+  function clamp1(v){ return Math.min(1, Math.max(-1, v)); }
+  function computeFilletAtCorner(prev, corner, next, radius){
+    const dir1 = { x:prev.x-corner.x, y:prev.y-corner.y };
+    const dir2 = { x:next.x-corner.x, y:next.y-corner.y };
+    const len1 = Math.hypot(dir1.x,dir1.y)||1, len2 = Math.hypot(dir2.x,dir2.y)||1;
+    const angBetween = Math.acos(clamp1((dir1.x*dir2.x+dir1.y*dir2.y)/(len1*len2)));
+    const halfAng = Math.max(0.001, Math.min(Math.PI/2-0.001, angBetween/2));
+    const tangentDist = radius / Math.tan(halfAng);
+    const d1 = Math.min(tangentDist, len1-0.001), d2 = Math.min(tangentDist, len2-0.001);
+    const pt1 = { x: corner.x + dir1.x/len1*d1, y: corner.y + dir1.y/len1*d1 };
+    const pt2 = { x: corner.x + dir2.x/len2*d2, y: corner.y + dir2.y/len2*d2 };
+    const v1 = { x:pt1.x-corner.x, y:pt1.y-corner.y }, v2 = { x:pt2.x-corner.x, y:pt2.y-corner.y };
+    const l1 = Math.hypot(v1.x,v1.y)||1, l2 = Math.hypot(v2.x,v2.y)||1;
+    const bis = { x: v1.x/l1+v2.x/l2, y: v1.y/l1+v2.y/l2 };
+    const bisLen = Math.hypot(bis.x,bis.y)||1;
+    const half = Math.acos(clamp1((v1.x*v2.x+v1.y*v2.y)/(l1*l2)))/2;
+    const centerDist = radius / Math.max(0.05, Math.sin(half));
+    const center = { x: corner.x+(bis.x/bisLen)*centerDist, y: corner.y+(bis.y/bisLen)*centerDist };
+    let a1 = Math.atan2(pt1.y-center.y, pt1.x-center.x)*180/Math.PI; if (a1<0) a1+=360;
+    let a2 = Math.atan2(pt2.y-center.y, pt2.x-center.x)*180/Math.PI; if (a2<0) a2+=360;
+    return { pt1, pt2, center, a1, a2 };
+  }
+  function computeChamferAtCorner(prev, corner, next, dist){
+    const dir1 = { x:prev.x-corner.x, y:prev.y-corner.y };
+    const dir2 = { x:next.x-corner.x, y:next.y-corner.y };
+    const len1 = Math.hypot(dir1.x,dir1.y)||1, len2 = Math.hypot(dir2.x,dir2.y)||1;
+    const d1 = Math.min(dist, len1-0.001), d2 = Math.min(dist, len2-0.001);
+    return {
+      pt1: { x: corner.x+dir1.x/len1*d1, y: corner.y+dir1.y/len1*d1 },
+      pt2: { x: corner.x+dir2.x/len2*d2, y: corner.y+dir2.y/len2*d2 }
+    };
+  }
+  function applyFilletAllCorners(poly, radius){
+    const n = poly.points.length;
+    if (n < 3){ flashHint('Polyline needs at least 3 vertices to fillet its corners.'); return; }
+    const orig = poly.points;
+    const newPoints = [];
+    const arcsToAdd = [];
+    for (let k=0;k<n;k++){
+      const isCorner = poly.closed || (k>=1 && k<=n-2);
+      if (!isCorner){ newPoints.push(orig[k]); continue; }
+      const prev = orig[(k-1+n)%n], corner = orig[k], next = orig[(k+1)%n];
+      const res = computeFilletAtCorner(prev, corner, next, radius);
+      // The arc entity pushed below already draws this corner — flag pt1 so
+      // the polyline renderer/hit-test/grips skip drawing a straight chord
+      // between pt1 and pt2 underneath it (the "extra line like chamfer" bug).
+      res.pt1.noLineAfter = true;
+      newPoints.push(res.pt1, res.pt2);
+      arcsToAdd.push(res);
+    }
+    poly.points = newPoints;
+    arcsToAdd.forEach(res => { const sweep = shortArcSweep(res.a1, res.a2); entities.push({ id: uid(), type:'arc', cx:res.center.x, cy:res.center.y, r:radius, startAngle:sweep.startAngle, endAngle:sweep.endAngle, color:poly.color, width:poly.width, layer:poly.layer }); });
+  }
+  function applyChamferAllCorners(poly, dist){
+    const n = poly.points.length;
+    if (n < 3){ flashHint('Polyline needs at least 3 vertices to chamfer its corners.'); return; }
+    const orig = poly.points;
+    const newPoints = [];
+    for (let k=0;k<n;k++){
+      const isCorner = poly.closed || (k>=1 && k<=n-2);
+      if (!isCorner){ newPoints.push(orig[k]); continue; }
+      const prev = orig[(k-1+n)%n], corner = orig[k], next = orig[(k+1)%n];
+      const { pt1, pt2 } = computeChamferAtCorner(prev, corner, next, dist);
+      newPoints.push(pt1, pt2);
+    }
+    poly.points = newPoints;
+  }
+  // ---- Fillet/Chamfer at just ONE chosen vertex, instead of every corner
+  // at once. `k` is the vertex's index in poly.points *before* the edit —
+  // every other vertex is left completely untouched; only that one corner
+  // is replaced with its two tangent/cut points (and, for fillet, the
+  // connecting arc entity).
+  function polyCornerIndices(poly){
+    const n = poly.points.length;
+    const idx = [];
+    for (let k=0;k<n;k++){ if (poly.closed || (k>=1 && k<=n-2)) idx.push(k); }
+    return idx;
+  }
+  function applyFilletAtVertex(poly, k, radius){
+    const n = poly.points.length;
+    if (n < 3){ flashHint('Polyline needs at least 3 vertices to fillet a corner.'); return; }
+    const isCorner = poly.closed || (k>=1 && k<=n-2);
+    if (!isCorner){ flashHint('That vertex is an open endpoint and can\'t be filleted.'); return; }
+    const orig = poly.points;
+    const prev = orig[(k-1+n)%n], corner = orig[k], next = orig[(k+1)%n];
+    const res = computeFilletAtCorner(prev, corner, next, radius);
+    // See applyFilletAllCorners: the arc entity below already draws this
+    // corner, so flag pt1 to suppress the redundant straight chord segment.
+    res.pt1.noLineAfter = true;
+    poly.points = orig.slice(0,k).concat([res.pt1, res.pt2], orig.slice(k+1));
+    const sweep = shortArcSweep(res.a1, res.a2);
+    entities.push({ id: uid(), type:'arc', cx:res.center.x, cy:res.center.y, r:radius, startAngle:sweep.startAngle, endAngle:sweep.endAngle, color:poly.color, width:poly.width, layer:poly.layer });
+  }
+  function applyChamferAtVertex(poly, k, dist){
+    const n = poly.points.length;
+    if (n < 3){ flashHint('Polyline needs at least 3 vertices to chamfer a corner.'); return; }
+    const isCorner = poly.closed || (k>=1 && k<=n-2);
+    if (!isCorner){ flashHint('That vertex is an open endpoint and can\'t be chamfered.'); return; }
+    const orig = poly.points;
+    const prev = orig[(k-1+n)%n], corner = orig[k], next = orig[(k+1)%n];
+    const { pt1, pt2 } = computeChamferAtCorner(prev, corner, next, dist);
+    poly.points = orig.slice(0,k).concat([pt1, pt2], orig.slice(k+1));
   }
 
   // ---------- Properties panel (edit selected entity) ----------
@@ -4369,7 +4893,7 @@
       html += row('Y', numInput('p_y', e.y));
       html += row('Height', numInput('p_h', e.height));
     } else if (e.type === 'hatch'){
-      html += `<div class="empty-note">Hatch boundary: ${e.boundary.kind}. Use Explode-style tools aren't available for hatch — delete and re-hatch to change spacing/angle.</div>`;
+      html += `<div class="empty-note">Hatch boundary: ${e.boundary.kind}.${e.sourceId ? ' Linked to its source object — drag the single grip at the middle of the hatch (or use Move/Copy/Rotate/Scale/Mirror/Array on the hatch alone) to detach it and edit it independently.' : ' Independent — no longer linked to a source object.'} Use Explode-style tools aren't available for hatch — delete and re-hatch to change spacing/angle.</div>`;
     } else if (e.type === 'dimension'){
       if (e.dimType === 'diameter' || e.dimType === 'radius'){
         html += row('Center X', numInput('p_cx', e.cx));
@@ -4382,7 +4906,9 @@
 
     html += `<div class="divider-thin"></div>`;
     html += `<div class="form-row"><label>Layer</label><select id="p_layer">${layers.map(l=>`<option value="${l.name}" ${l.name===(e.layer||'0')?'selected':''}>${l.name}</option>`).join('')}</select></div>`;
-    html += `<div class="form-row"><label>Color</label><input type="color" id="p_color" value="${e.color}"></div>`;
+    { const isByLayer = !e.color || e.color === 'bylayer';
+    html += `<div class="form-row"><label>Color</label><input type="color" id="p_color" value="${effectiveColor(e)}" ${isByLayer?'disabled':''}>
+      <label style="font-size:10px;color:var(--text-dim);margin-left:6px;display:flex;align-items:center;gap:3px;"><input type="checkbox" id="p_bylayer" ${isByLayer?'checked':''}> ByLayer</label></div>`; }
     html += row('Line width', numInput('p_width', e.width, 0.5));
     html += `<button class="formBtn secondary" id="p_dup">⧉ Duplicate</button>`;
     html += `<button class="formBtn dangerBtn" id="p_del">✕ Delete Entity</button>`;
@@ -4395,7 +4921,7 @@
     const bind = (id, apply) => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.addEventListener('input', () => { ensurePropsSnapshot(); apply(el); render(); renderList(); scheduleAutosave(); });
+      el.addEventListener('input', () => { ensurePropsSnapshot(); apply(el); syncLinkedHatches(e.id); render(); renderList(); scheduleAutosave(); });
     };
 
     if (e.type === 'line'){
@@ -4436,10 +4962,11 @@
         ensurePropsSnapshot();
         const last = e.points[e.points.length-1] || {x:0,y:0};
         e.points.push({ x: last.x+1, y: last.y });
+        syncLinkedHatches(e.id);
         renderPropsPtList(e); render();
       };
       const closedEl = document.getElementById('p_closed');
-      closedEl.addEventListener('change', () => { ensurePropsSnapshot(); e.closed = closedEl.checked; render(); });
+      closedEl.addEventListener('change', () => { ensurePropsSnapshot(); e.closed = closedEl.checked; syncLinkedHatches(e.id); render(); });
     } else if (e.type === 'text'){
       bind('p_content', el => e.content = el.value);
       bind('p_x', el => e.x = parseFloat(el.value)||0);
@@ -4459,12 +4986,17 @@
       }
     }
 
-    bind('p_color', el => e.color = el.value);
+    bind('p_color', el => { e.color = el.value; const cb = document.getElementById('p_bylayer'); if (cb) cb.checked = false; });
+    { const cb = document.getElementById('p_bylayer');
+      if (cb) cb.addEventListener('change', () => {
+        ensurePropsSnapshot();
+        e.color = cb.checked ? 'bylayer' : effectiveColor(e);
+        render(); renderList(); scheduleAutosave();
+        buildPropsForm();
+      }); }
     bind('p_width', el => e.width = Math.max(0.1, parseFloat(el.value)||0.1));
     bind('p_layer', el => {
-      e.layer = el.value;
-      const lyr = layers.find(l => l.name === el.value);
-      if (lyr) e.color = lyr.color; // ByLayer: object adopts its new layer's color
+      e.layer = el.value; // color is untouched: ByLayer objects auto-follow the new layer, explicit overrides stay put
       buildPropsForm();
     });
 
@@ -4503,6 +5035,7 @@
         ensurePropsSnapshot();
         const i = parseInt(inp.dataset.i,10), axis = inp.dataset.axis;
         e.points[i][axis] = parseFloat(inp.value) || 0;
+        syncLinkedHatches(e.id);
         render();
       });
     });
@@ -4512,6 +5045,7 @@
         const i = parseInt(elm.dataset.rm,10);
         if (e.points.length <= 2){ flashHint('A polyline needs at least 2 points.'); return; }
         e.points.splice(i,1);
+        syncLinkedHatches(e.id);
         renderPropsPtList(e); render();
       };
     });
@@ -4606,11 +5140,13 @@
   }
 
   // ---------- DXF export ----------
-  // A small, well-known subset of the AutoCAD Color Index (ACI) palette, used
-  // only as a legacy fallback (group 62) for DXF readers that predate true
-  // color. We always ALSO write group 420 (24-bit true color, exact), which
-  // every AutoCAD since 2004 and most modern viewers prefer — so the ACI
-  // fallback only needs to be "in the right ballpark", not pixel-exact.
+  // A small, well-known subset of the AutoCAD Color Index (ACI) palette. This
+  // app's DXF export is R12 (AC1009) and ACI-color-only (group 62) — real
+  // AutoCAD rejects an unexpected true-color (420) group in an R12-headered
+  // file, so colors here are approximated to the nearest of these 9 ACI
+  // swatches rather than written exactly. (Import still reads a 420 group
+  // if a file happens to have one — see resolveStyle/layersFromFile below —
+  // it's only ever written on export.)
   const ACI_KNOWN = [
     [1,255,0,0],[2,255,255,0],[3,0,255,0],[4,0,255,255],[5,0,0,255],
     [6,255,0,255],[7,255,255,255],[8,65,65,65],[9,128,128,128]
@@ -4679,9 +5215,18 @@
     add(0,'SECTION'); add(2,'TABLES');
     add(0,'TABLE'); add(2,'LAYER'); add(70,layers.length);
     for (const l of layers){
-      // R12 only understands ACI color (group 62) — no true-color (420),
-      // which doesn't exist as a concept until AC1018 and is exactly the
-      // kind of "unexpected in this table" data that triggered the crash.
+      // R12 only understands ACI color (group 62) in the TABLES section —
+      // true-color (420) doesn't formally exist until AC1018 (2004). Real
+      // AutoCAD (unlike more lenient third-party DXF readers) strictly
+      // validates the TABLES section against the declared $ACADVER and
+      // rejects the whole drawing on an unexpected group here — the same
+      // failure mode as the "Error in APPID Table ... drawing discarded"
+      // case above, just triggered by an extra group instead of a missing
+      // table. So layer color is ACI-approximated on export (9-swatch
+      // palette) for real AutoCAD compatibility; exact hex color still
+      // round-trips fine through this app's own DXF export/import, and
+      // through any reader that does support 420 on import (see aciToHex /
+      // layersFromFile below, which both still read a 420 if present).
       add(0,'LAYER'); add(2,l.name); add(70, l.locked?4:0);
       add(62, (l.visible?1:-1) * nearestAci(l.color));
       add(6,'CONTINUOUS');
@@ -4691,8 +5236,11 @@
 
     add(0,'SECTION'); add(2,'ENTITIES');
     // Emits an entity's color (ACI fallback only — see the R12 note above)
-    // right after its `add(0,TYPE); add(8,layer);` header line.
-    const addStyle = (e) => { add(62, nearestAci(e.color)); };
+    // right after its `add(0,TYPE); add(8,layer);` header line. Skipping the
+    // true-color group (420) here too, for the same reason: real AutoCAD
+    // reading an AC1009-headered file rejects unexpected groups it doesn't
+    // expect for that version — this is the strict-parity fix.
+    const addStyle = (e) => { add(62, (!e.color || e.color==='bylayer') ? 256 : nearestAci(e.color)); };
     for (const e of entities){
       const lyr = e.layer || '0';
       if (e.type === 'line'){
@@ -4718,11 +5266,53 @@
         add(10,e.cx); add(20,e.cy); add(30,0); add(40,e.r);
         add(50,e.startAngle); add(51,e.endAngle);
       } else if (e.type === 'polyline'){
-        add(0,'POLYLINE'); add(8,lyr); addStyle(e); add(66,1); add(70, e.closed?1:0);
-        for (const p of e.points){
-          add(0,'VERTEX'); add(8,lyr); add(10,p.x); add(20,p.y); add(30,0);
+        // Fillet corners (see applyFilletAtVertex/applyFilletAllCorners) flag
+        // the vertex pair that an ARC entity (exported separately, elsewhere
+        // in this loop) already draws — noLineAfter. Split the DXF chain at
+        // each such gap instead of writing that pair as a normal VERTEX-to-
+        // VERTEX edge too, or AutoCAD would show a straight line coincident
+        // with the arc (the same "extra line" bug this fixes in-app).
+        const hasGap = e.points.some(p => p && p.noLineAfter);
+        if (!hasGap){
+          add(0,'POLYLINE'); add(8,lyr); addStyle(e); add(66,1); add(70, e.closed?1:0);
+          for (const p of e.points){
+            add(0,'VERTEX'); add(8,lyr); add(10,p.x); add(20,p.y); add(30,0);
+          }
+          add(0,'SEQEND'); add(8,lyr);
+        } else {
+          // Walk the polyline's edges (circularly, if closed) and split into
+          // maximal chains of consecutive DRAWN edges, skipping any edge
+          // flagged noLineAfter. For a closed loop we first rotate the start
+          // to just after a gap, so the walk ends exactly at that gap's other
+          // side instead of losing the closing edge or the gap's own vertex.
+          const n = e.points.length;
+          const edgeCount = e.closed ? n : n-1;
+          const drawn = [];
+          for (let i=0;i<edgeCount;i++) drawn.push(!(e.points[i] && e.points[i].noLineAfter));
+          let start = 0;
+          if (e.closed){
+            const gapIdx = drawn.indexOf(false);
+            start = gapIdx === -1 ? 0 : (gapIdx+1) % edgeCount;
+          }
+          const chains = [];
+          let cur = [e.points[start % n]];
+          for (let step=0; step<edgeCount; step++){
+            const edgeI = (start+step) % edgeCount;
+            const to = (edgeI+1) % n;
+            if (drawn[edgeI]){
+              cur.push(e.points[to]);
+            } else {
+              if (cur.length >= 2) chains.push(cur);
+              cur = [e.points[to]];
+            }
+          }
+          if (cur.length >= 2) chains.push(cur);
+          chains.forEach(chain => {
+            add(0,'POLYLINE'); add(8,lyr); addStyle(e); add(66,1); add(70, 0); // a chain with a gap can never be the one full closed loop
+            for (const p of chain){ add(0,'VERTEX'); add(8,lyr); add(10,p.x); add(20,p.y); add(30,0); }
+            add(0,'SEQEND'); add(8,lyr);
+          });
         }
-        add(0,'SEQEND'); add(8,lyr);
       } else if (e.type === 'text'){
         add(0,'TEXT'); add(8,lyr); addStyle(e);
         add(10,e.x); add(20,e.y); add(30,0); add(40, e.height||3);
@@ -4782,9 +5372,12 @@
         // file is fine on its own.
         //
         // Fix: emit the hatch's already-computed fill lines (e.lines) as
-        // plain LINE entities, plus the boundary as a POLYLINE outline.
-        // Both are valid in every DXF version, so the fill still shows up
-        // and nothing else in the file can be invalidated by it.
+        // plain LINE entities, plus the boundary as its own outline. Both are
+        // valid in every DXF version. This does mean the boundary can appear
+        // twice (once here, once as its own original entity) if that source
+        // entity is still in the drawing — the hatch and the object are kept
+        // independently selectable in-app instead (each shows its own grips),
+        // rather than removing this boundary export.
         const b = e.boundary;
         for (const seg of (e.lines||[])){
           add(0,'LINE'); add(8,lyr); addStyle(e);
@@ -5106,11 +5699,13 @@
     // layer's color ("ByLayer", the DXF default when no override is given).
     function resolveStyle(props){
       const layerName = props.layer || '0';
-      const layerInfo = layersFromFile[layerName];
       let color = null;
       if (props.trueColor != null) color = intToHex(props.trueColor);
       else if (props.aci != null && props.aci !== 256) color = aciToHex(props.aci);
-      if (!color) color = (layerInfo && layerInfo.color) || defaultStyle.color;
+      // No explicit override (no color code at all, or an explicit 256/ByLayer) —
+      // keep 'bylayer' as a live sentinel instead of baking in today's layer color,
+      // so this entity keeps tracking its layer if the layer's color changes later.
+      if (!color) color = 'bylayer';
       const width = props.lineweight != null && props.lineweight >= 0
         ? Math.max(0.25, props.lineweight/25)
         : defaultStyle.width;
