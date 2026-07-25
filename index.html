@@ -1577,7 +1577,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-58(Rev.3)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-58(Rev.4)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8774,6 +8774,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <div class="lc-table-scroll" id="lcMergedWeights"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
                         <div class="lc-preview-section-title">Load_Editor!E124:F.. — Axle Xpos[m]/Ypos[m] by step (1st column = Load_Editor!B, name per row)</div>
                         <div class="lc-table-scroll" id="lcMergedAxles"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
+                        <div class="lc-preview-section-title">BALLASTPLAN(mT)!F177:.. — time values by step (1st column = sheet column letter, F onward until blank)</div>
+                        <div class="lc-table-scroll" id="lcMergedTime"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
                     </div>
                 </div>
             </div>
@@ -8811,6 +8813,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         let loadConditionBusy = false;
         let lcWeightLabels = [];   // Load_Editor!B14:B.. — one label per tank row, refreshed on modal open
         let lcAxleLabels = [];     // Load_Editor!B124:B.. — one label per axle row, refreshed on modal open
+        let lcTimeColLabels = [];  // BALLASTPLAN(mT)!F177:.. — one column-letter label per time value, refreshed on modal open
 
         function lcColLetterToIndex(letter) {
             let n = 0;
@@ -8879,6 +8882,38 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 });
             } catch (e) {
                 console.warn(`Load Conditions: could not read label column ${LC_WEIGHT_LABEL_COL} from Load_Editor`, e);
+            }
+        }
+
+        // ---- Read the live column extent of BALLASTPLAN(mT)!F177:..
+        // for the merged time-values table's row labels (F, G, H, ...).
+        // Trimmed to the LAST non-blank cell (not the first blank one) —
+        // a mid-range gap is a legitimate unused time slot, not the end
+        // of the data. ----
+        async function pullLcTimeColumns() {
+            if (!isOfficeInitialized) return;
+            try {
+                await Excel.run(async (context) => {
+                    const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
+                    const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + LC_MAX_COLS - 1);
+                    const rangeP = planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`);
+                    rangeP.load("values");
+                    await context.sync();
+
+                    const row = (rangeP.values && rangeP.values[0]) || [];
+                    let lastNonBlank = -1;
+                    for (let c = 0; c < row.length; c++) {
+                        const v = row[c];
+                        if (!(v === '' || v === null || v === undefined)) lastNonBlank = c;
+                    }
+                    const labels = [];
+                    for (let c = 0; c <= lastNonBlank; c++) {
+                        labels.push(lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + c));
+                    }
+                    lcTimeColLabels = labels;
+                });
+            } catch (e) {
+                console.warn(`Load Conditions: could not read live column extent from ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}`, e);
             }
         }
 
@@ -8956,7 +8991,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: 'no-store' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
-                el.textContent = (data && data.savedAt) ? ('saved ' + new Date(data.savedAt).toLocaleString()) : 'not saved yet';
+                if (data && data.savedAt) {
+                    const wCount = (data.weights || []).length;
+                    const aCount = (data.axles || []).length;
+                    const tCount = (data.planRow || []).filter(v => v !== null && v !== undefined && v !== '').length;
+                    el.textContent = `saved ${new Date(data.savedAt).toLocaleString()} — ${wCount} wt · ${aCount} axle · ${tCount} time`;
+                } else {
+                    el.textContent = 'not saved yet';
+                }
             } catch (e) {
                 el.textContent = 'status unknown';
             }
@@ -9055,19 +9097,23 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             const statusEl = document.getElementById('lcCompareStatus');
             const wEl = document.getElementById('lcMergedWeights');
             const aEl = document.getElementById('lcMergedAxles');
+            const tEl = document.getElementById('lcMergedTime');
             if (statusEl) statusEl.textContent = 'loading…';
             if (wEl) wEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
             if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
+            if (tEl) tEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
 
             if (!loadConditionNames || loadConditionNames.length === 0) {
                 if (statusEl) statusEl.textContent = 'no steps yet';
                 if (wEl) wEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
                 if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
+                if (tEl) tEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
                 return;
             }
 
             try {
                 await pullLcLabels();
+                await pullLcTimeColumns();
                 const steps = await Promise.all(loadConditionNames.map(async (name, i) => {
                     try {
                         const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: 'no-store' });
@@ -9083,6 +9129,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
                 lcRenderMergedWeightsTable(steps);
                 lcRenderMergedAxlesTable(steps);
+                lcRenderMergedTimeTable(steps);
                 if (statusEl) statusEl.textContent = 'updated ' + new Date().toLocaleString();
             } catch (e) {
                 console.warn('refreshLoadConditionComparison error', e);
@@ -9142,6 +9189,32 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
         }
 
+        function lcRenderMergedTimeTable(steps) {
+            const el = document.getElementById('lcMergedTime');
+            if (!el) return;
+            // Row extent: prefer the live BALLASTPLAN(mT)!F177:.. column
+            // extent (pullLcTimeColumns()); fall back to the longest
+            // saved step so previously-saved data is never hidden just
+            // because the live sheet currently has fewer filled columns.
+            const maxFromSteps = Math.max(0, ...steps.map(s => (s.data && s.data.planRow ? s.data.planRow.length : 0)));
+            const rowCount = Math.max(lcTimeColLabels.length, maxFromSteps);
+            if (rowCount === 0) {
+                el.innerHTML = `<div class="tg-modal-sub">No time values found in ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW} onward, and none saved yet for any step.</div>`;
+                return;
+            }
+            const header = `<tr><th>Column</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
+            let body = '';
+            for (let r = 0; r < rowCount; r++) {
+                const label = lcTimeColLabels[r] || lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + r);
+                const cells = steps.map(s => {
+                    const t = s.data && s.data.planRow ? s.data.planRow[r] : undefined;
+                    return `<td>${lcFmtTime(t)}</td>`;
+                }).join('');
+                body += `<tr><td>${label}</td>${cells}</tr>`;
+            }
+            el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+        }
+
         // ---- Save: Excel -> Firebase ----
         async function saveLoadCondition(i) {
             if (loadConditionBusy) return;
@@ -9196,10 +9269,21 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     }
                     const planValuesRow = (rangeP.values && rangeP.values[0]) || [];
                     const planFormatsRow = (rangeP.numberFormat && rangeP.numberFormat[0]) || [];
+                    // BALLASTPLAN(mT)!F177:.. can have blank cells IN THE
+                    // MIDDLE (e.g. a time slot that's simply not used for
+                    // this condition) — stopping at the FIRST blank cell
+                    // (like the tank/axle ranges do) would silently drop
+                    // every value after that gap. Instead, find the LAST
+                    // non-blank cell and keep everything up to it,
+                    // preserving internal gaps as blank/null.
+                    let planLastNonBlank = -1;
                     for (let c = 0; c < planValuesRow.length; c++) {
                         const v = planValuesRow[c];
-                        if (v === '' || v === null || v === undefined) break;
-                        planRow.push(v);
+                        if (!(v === '' || v === null || v === undefined)) planLastNonBlank = c;
+                    }
+                    for (let c = 0; c <= planLastNonBlank; c++) {
+                        const v = planValuesRow[c];
+                        planRow.push((v === '' || v === null || v === undefined) ? null : v);
                         planFormats.push(planFormatsRow[c] || "h:mm");
                     }
                 });
