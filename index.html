@@ -1577,7 +1577,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-58(Rev.1)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-58(Rev2)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8735,18 +8735,21 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             </div>
             <p class="tg-modal-sub">
                 Each button below is named from <strong>BALLASTPLAN(mT)!F7</strong>
-                onward (one name per column, until the first blank cell).
+                onward (one name per column, until the first blank cell) — these
+                are the "steps" compared in the tables further down.
                 <strong>Save</strong> captures the current
                 <strong>Load_Editor!D14:D..</strong> (tank Filling[mT]),
                 <strong>Load_Editor!E124:F..</strong> (axle Xpos[m]/Ypos[m])
-                and <strong>BALLASTPLAN(mT)!F177:..</strong> values and keeps
-                them in Firebase under that name.
-                <strong>Restore</strong> pushes a saved condition back into
-                Excel at those same positions &mdash; except the name itself
-                is written to <strong>Load_Editor!R148</strong> instead of
-                back into BALLASTPLAN(mT) row&nbsp;7, which always stays as
-                the label row. Add or rename slots by editing row&nbsp;7 in
-                Excel, then use "↻ Refresh names" below.
+                and <strong>BALLASTPLAN(mT)!F177:..</strong> (time values)
+                and keeps them in Firebase under that name.
+                <strong>Restore</strong> pushes a saved condition's tank
+                weights and axle positions back to those same Load_Editor
+                positions, and pushes the BALLASTPLAN(mT) row&nbsp;177 time
+                values to <strong>Load_Editor!R14:..</strong> instead of back
+                into BALLASTPLAN(mT) &mdash; the restored condition's name
+                itself goes to <strong>Load_Editor!R148</strong>. Add or
+                rename slots by editing row&nbsp;7 in Excel, then use
+                "↻ Refresh names" below.
             </p>
 
             <div class="tg-modal-body">
@@ -8755,6 +8758,23 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <button type="button" class="tg-add-train-btn" onclick="pullLoadConditionNames()">↻ Refresh names from BALLASTPLAN(mT)!F7:..</button>
                     </div>
                     <div id="lcSlotList"><!-- slot cards rendered by JS --></div>
+
+                    <!-- ---- Merged comparison tables: one row per
+                         Load_Editor row (labeled from column B), one
+                         column per saved step/condition. ---- -->
+                    <div class="tg-train-card" style="margin-top: 14px;">
+                        <div class="tg-train-card-header">
+                            <strong>📊 Compare saved steps</strong>
+                            <span class="tg-train-summary" id="lcCompareStatus">not loaded yet</span>
+                        </div>
+                        <div class="tg-train-list-actions">
+                            <button type="button" class="tg-add-train-btn" onclick="refreshLoadConditionComparison()">↻ Refresh comparison</button>
+                        </div>
+                        <div class="lc-preview-section-title">Load_Editor!D14:D.. — Tank Filling[mT] by step (1st column = Load_Editor!B, name per row)</div>
+                        <div class="lc-table-scroll" id="lcMergedWeights"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
+                        <div class="lc-preview-section-title">Load_Editor!E124:F.. — Axle Xpos[m]/Ypos[m] by step (1st column = Load_Editor!B, name per row)</div>
+                        <div class="lc-table-scroll" id="lcMergedAxles"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
+                    </div>
                 </div>
             </div>
 
@@ -8776,15 +8796,21 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // code runs).
         // ============================================================
         const LC_NAME_ROW = 7;                 // BALLASTPLAN(mT) row holding slot names (F onward)
-        const LC_DATA_ROW = 177;               // BALLASTPLAN(mT) row holding the saved data (F onward)
+        const LC_DATA_ROW = 177;               // BALLASTPLAN(mT) row holding the saved data (F onward) — time-formatted values
         const LC_START_COL = "F";
         const LC_MAX_COLS = 60;                // generous over-read, trimmed at first blank cell
         const LC_WEIGHT_MAX_ROWS = 200;        // generous over-read for Load_Editor!D14:D.. (tank weights)
+        const LC_WEIGHT_LABEL_COL = "B";       // Load_Editor column holding each tank's name/label, row 14+
+        const LC_AXLE_LABEL_COL = "B";         // Load_Editor column holding each axle row's name/label, row 124+
+        const LC_TIME_RESTORE_ROW = 14;        // Load_Editor row that receives BALLASTPLAN(mT)!F177:.. on Restore
+        const LC_TIME_RESTORE_START_COL = "R"; // Load_Editor column that receives BALLASTPLAN(mT)!F177:.. on Restore
         const LC_RESTORE_NAME_CELL = "R148";   // Load_Editor cell that receives the restored slot's name
         const LC_FIREBASE_BASE = `${FIREBASE_URL}/loadConditions`;
 
         let loadConditionNames = [];
         let loadConditionBusy = false;
+        let lcWeightLabels = [];   // Load_Editor!B14:B.. — one label per tank row, refreshed on modal open
+        let lcAxleLabels = [];     // Load_Editor!B124:B.. — one label per axle row, refreshed on modal open
 
         function lcColLetterToIndex(letter) {
             let n = 0;
@@ -8811,9 +8837,34 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         async function openLoadConditionsModal() {
             document.getElementById('lcOverlay').classList.add('tg-open');
             await pullLoadConditionNames();
+            await pullLcLabels();
+            refreshLoadConditionComparison();
         }
         function closeLoadConditionsModal() {
             document.getElementById('lcOverlay').classList.remove('tg-open');
+        }
+
+        // ---- Read the Load_Editor!B label columns used as the 1st
+        // column of the merged comparison tables (tank/axle row names). ----
+        async function pullLcLabels() {
+            if (!isOfficeInitialized) return;
+            try {
+                await Excel.run(async (context) => {
+                    const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const wEndRow = EXCEL_START_ROW + LC_WEIGHT_MAX_ROWS - 1;
+                    const rangeWL = editorSheet.getRange(`${LC_WEIGHT_LABEL_COL}${EXCEL_START_ROW}:${LC_WEIGHT_LABEL_COL}${wEndRow}`);
+                    rangeWL.load("values");
+                    const aEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
+                    const rangeAL = editorSheet.getRange(`${LC_AXLE_LABEL_COL}${AXLE_START_ROW}:${LC_AXLE_LABEL_COL}${aEndRow}`);
+                    rangeAL.load("values");
+                    await context.sync();
+
+                    lcWeightLabels = (rangeWL.values || []).map(r => r[0]);
+                    lcAxleLabels = (rangeAL.values || []).map(r => r[0]);
+                });
+            } catch (e) {
+                console.warn(`Load Conditions: could not read label column ${LC_WEIGHT_LABEL_COL} from Load_Editor`, e);
+            }
         }
 
         // ---- Read slot names from BALLASTPLAN(mT)!F7:.. ----
@@ -8868,15 +8919,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     <div class="tg-train-list-actions">
                         <button type="button" class="tg-add-train-btn" onclick="saveLoadCondition(${i})">💾 Save current data as "${safe}"</button>
                         <button type="button" class="tg-add-train-btn" onclick="restoreLoadCondition(${i})">↩ Restore "${safe}" to Excel</button>
-                        <button type="button" class="lc-preview-toggle" onclick="toggleLcPreview(${i})">👁 Preview saved data table</button>
+                        <button type="button" class="lc-preview-toggle" onclick="toggleLcPreview(${i})">👁 Preview time values (row ${LC_DATA_ROW})</button>
                     </div>
                     <div class="lc-confirm-row" id="lcConfirm_${i}">
-                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.., E${AXLE_START_ROW}:F.., and ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:.. with "${safe}"?</span>
+                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.., E${AXLE_START_ROW}:F.., and Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. with "${safe}"?</span>
                         <button type="button" class="tg-add-train-btn" onclick="confirmRestoreLoadCondition(${i})">✓ Yes, restore</button>
                         <button type="button" class="tg-add-train-btn" onclick="cancelRestoreLoadCondition(${i})">✕ Cancel</button>
                     </div>
                     <div class="lc-msg" id="lcMsg_${i}"></div>
-                    <div class="lc-preview-wrap" id="lcPreview_${i}"><!-- tables rendered by JS, see toggleLcPreview() --></div>
+                    <div class="lc-preview-wrap" id="lcPreview_${i}"><!-- time-value table rendered by JS, see toggleLcPreview() --></div>
                 </div>`;
             }).join('');
             names.forEach((name, i) => refreshLoadConditionStatus(i));
@@ -8944,6 +8995,19 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             }
         }
 
+        function lcFmtTime(v) {
+            if (v === null || v === undefined || v === '') return '—';
+            const n = Number(v);
+            if (!Number.isFinite(n)) return lcEscapeHtml(String(v));
+            // BALLASTPLAN(mT) row 177 holds time-formatted values — an
+            // Excel time serial is a fraction of a 24h day (can exceed 1
+            // for elapsed/duration values) — render it as H:MM.
+            const totalMinutes = Math.round(n * 24 * 60);
+            const h = Math.floor(totalMinutes / 60);
+            const m = ((totalMinutes % 60) + 60) % 60;
+            return `${h}:${String(m).padStart(2, '0')}`;
+        }
+
         function lcRenderPreviewTables(i, data) {
             const wrap = document.getElementById('lcPreview_' + i);
             if (!wrap) return;
@@ -8951,35 +9015,108 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 wrap.innerHTML = '<div class="tg-modal-sub">No saved data yet for this name — use Save first.</div>';
                 return;
             }
-            const weights = data.weights || [];
-            const axles = data.axles || [];
             const planRow = data.planRow || [];
 
-            // Table 1: tank Filling[mT] — one row per Load_Editor row, two columns.
-            const weightsTable = weights.length ? `
-                <div class="lc-preview-section-title">Load_Editor!D${EXCEL_START_ROW}:D${EXCEL_START_ROW + weights.length - 1} — Tank Filling[mT] (${weights.length} row${weights.length === 1 ? '' : 's'})</div>
-                <div class="lc-table-scroll"><table class="lc-table"><thead><tr><th>Row</th><th>Filling [mT]</th></tr></thead>
-                <tbody>${weights.map((v, idx) => `<tr><td>${EXCEL_START_ROW + idx}</td><td>${lcFmtNum(v)}</td></tr>`).join('')}</tbody></table></div>` : '';
-
-            // Table 2: axle Xpos[m]/Ypos[m] — one row per Load_Editor row, three columns.
-            const axlesTable = axles.length ? `
-                <div class="lc-preview-section-title">Load_Editor!E${AXLE_START_ROW}:F${AXLE_START_ROW + axles.length - 1} — Axle Xpos[m] / Ypos[m] (${axles.length} row${axles.length === 1 ? '' : 's'})</div>
-                <div class="lc-table-scroll"><table class="lc-table"><thead><tr><th>Row</th><th>Xpos [m]</th><th>Ypos [m]</th></tr></thead>
-                <tbody>${axles.map((a, idx) => `<tr><td>${AXLE_START_ROW + idx}</td><td>${lcFmtNum(a.x)}</td><td>${lcFmtNum(a.y)}</td></tr>`).join('')}</tbody></table></div>` : '';
-
-            // Table 3: BALLASTPLAN(mT) row 177 — one column per sheet
-            // column (header row) with the single data row underneath,
-            // i.e. column headers + one data row in the same table.
+            // BALLASTPLAN(mT) row 177 — one column per sheet column
+            // (header row) with the single data row underneath, i.e.
+            // column headers + one data row in the same table. Tank
+            // weights and axle positions now live in the merged
+            // "Compare saved steps" tables instead (see below).
             const planTable = planRow.length ? `
-                <div class="lc-preview-section-title">${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:${lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + planRow.length - 1)}${LC_DATA_ROW} — ${planRow.length} value${planRow.length === 1 ? '' : 's'}</div>
+                <div class="lc-preview-section-title">${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:${lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + planRow.length - 1)}${LC_DATA_ROW} — ${planRow.length} time value${planRow.length === 1 ? '' : 's'}</div>
                 <div class="lc-table-scroll"><table class="lc-table"><thead><tr>${planRow.map((_, idx) => `<th>${lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + idx)}</th>`).join('')}</tr></thead>
-                <tbody><tr>${planRow.map(v => `<td>${lcFmtNum(v)}</td>`).join('')}</tr></tbody></table></div>` : '';
+                <tbody><tr>${planRow.map(v => `<td>${lcFmtTime(v)}</td>`).join('')}</tr></tbody></table></div>` : '';
 
-            wrap.innerHTML = (weightsTable + axlesTable + planTable)
-                || '<div class="tg-modal-sub">Saved entry has no data in any of the three ranges.</div>';
+            wrap.innerHTML = planTable
+                || '<div class="tg-modal-sub">Saved entry has no BALLASTPLAN(mT) row values.</div>';
             if (data.savedAt) {
                 wrap.innerHTML += `<div class="lc-preview-section-title" style="margin-top:10px;">Saved ${lcEscapeHtml(new Date(data.savedAt).toLocaleString())}</div>`;
             }
+        }
+
+        // ---- Merged comparison tables: rows = Load_Editor rows
+        // (labeled from column B), columns = one per saved step. ----
+        async function refreshLoadConditionComparison() {
+            const statusEl = document.getElementById('lcCompareStatus');
+            const wEl = document.getElementById('lcMergedWeights');
+            const aEl = document.getElementById('lcMergedAxles');
+            if (statusEl) statusEl.textContent = 'loading…';
+            if (wEl) wEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
+            if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
+
+            if (!loadConditionNames || loadConditionNames.length === 0) {
+                if (statusEl) statusEl.textContent = 'no steps yet';
+                if (wEl) wEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
+                if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
+                return;
+            }
+
+            try {
+                await pullLcLabels();
+                const steps = await Promise.all(loadConditionNames.map(async (name, i) => {
+                    try {
+                        const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: 'no-store' });
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        const data = await res.json();
+                        loadConditionDataCache[i] = data;
+                        return { name, data };
+                    } catch (e) {
+                        console.warn(`Comparison: could not load step "${name}"`, e);
+                        return { name, data: null };
+                    }
+                }));
+
+                lcRenderMergedWeightsTable(steps);
+                lcRenderMergedAxlesTable(steps);
+                if (statusEl) statusEl.textContent = 'updated ' + new Date().toLocaleString();
+            } catch (e) {
+                console.warn('refreshLoadConditionComparison error', e);
+                if (statusEl) statusEl.textContent = 'failed to load';
+            }
+        }
+
+        function lcRenderMergedWeightsTable(steps) {
+            const el = document.getElementById('lcMergedWeights');
+            if (!el) return;
+            const maxRows = Math.max(lcWeightLabels.length, ...steps.map(s => (s.data && s.data.weights ? s.data.weights.length : 0)), 0);
+            if (maxRows === 0) {
+                el.innerHTML = '<div class="tg-modal-sub">No tank weight data saved yet for any step.</div>';
+                return;
+            }
+            const header = `<tr><th>${LC_WEIGHT_LABEL_COL} (name)</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
+            let body = '';
+            for (let r = 0; r < maxRows; r++) {
+                const label = lcWeightLabels[r];
+                const labelText = (label === undefined || label === null || label === '') ? `Row ${EXCEL_START_ROW + r}` : lcEscapeHtml(String(label));
+                const cells = steps.map(s => {
+                    const w = s.data && s.data.weights ? s.data.weights[r] : undefined;
+                    return `<td>${lcFmtNum(w)}</td>`;
+                }).join('');
+                body += `<tr><td>${labelText}</td>${cells}</tr>`;
+            }
+            el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+        }
+
+        function lcRenderMergedAxlesTable(steps) {
+            const el = document.getElementById('lcMergedAxles');
+            if (!el) return;
+            const maxRows = Math.max(lcAxleLabels.length, ...steps.map(s => (s.data && s.data.axles ? s.data.axles.length : 0)), 0);
+            if (maxRows === 0) {
+                el.innerHTML = '<div class="tg-modal-sub">No axle position data saved yet for any step.</div>';
+                return;
+            }
+            const header = `<tr><th>${LC_AXLE_LABEL_COL} (name)</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)} X</th><th>${lcEscapeHtml(s.name)} Y</th>`).join('')}</tr>`;
+            let body = '';
+            for (let r = 0; r < maxRows; r++) {
+                const label = lcAxleLabels[r];
+                const labelText = (label === undefined || label === null || label === '') ? `Row ${AXLE_START_ROW + r}` : lcEscapeHtml(String(label));
+                const cells = steps.map(s => {
+                    const a = s.data && s.data.axles ? s.data.axles[r] : undefined;
+                    return `<td>${lcFmtNum(a ? a.x : undefined)}</td><td>${lcFmtNum(a ? a.y : undefined)}</td>`;
+                }).join('');
+                body += `<tr><td>${labelText}</td>${cells}</tr>`;
+            }
+            el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
         }
 
         // ---- Save: Excel -> Firebase ----
@@ -8996,7 +9133,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             const statusEl = document.getElementById('lcStatus_' + i);
             if (statusEl) statusEl.textContent = 'saving…';
             try {
-                let weights = [], axles = [], planRow = [];
+                let weights = [], axles = [], planRow = [], planFormats = [];
                 await Excel.run(async (context) => {
                     const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
                     const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
@@ -9011,10 +9148,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const rangeA = editorSheet.getRange(`E${AXLE_START_ROW}:F${aEndRow}`);
                     rangeA.load("values");
 
-                    // 3) BALLASTPLAN(mT)!F177:.. — one data row, over-read then trim at first blank
+                    // 3) BALLASTPLAN(mT)!F177:.. — one data row (time-formatted),
+                    // over-read then trim at first blank. numberFormat is
+                    // captured too so Restore can re-apply it at its new
+                    // destination (Load_Editor!R14:..), which has no
+                    // pre-existing time formatting of its own.
                     const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + LC_MAX_COLS - 1);
                     const rangeP = planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`);
-                    rangeP.load("values");
+                    rangeP.load("values, numberFormat");
 
                     await context.sync();
 
@@ -9030,9 +9171,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         if (xBlank && yBlank) break;
                         axles.push({ x: xBlank ? null : x, y: yBlank ? null : y });
                     }
-                    for (const v of ((rangeP.values && rangeP.values[0]) || [])) {
+                    const planValuesRow = (rangeP.values && rangeP.values[0]) || [];
+                    const planFormatsRow = (rangeP.numberFormat && rangeP.numberFormat[0]) || [];
+                    for (let c = 0; c < planValuesRow.length; c++) {
+                        const v = planValuesRow[c];
                         if (v === '' || v === null || v === undefined) break;
                         planRow.push(v);
+                        planFormats.push(planFormatsRow[c] || "h:mm");
                     }
                 });
 
@@ -9050,6 +9195,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     weights: weights,
                     axles: axles,
                     planRow: planRow,
+                    planFormats: planFormats,
                     savedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -9071,6 +9217,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 if (previewWrap && previewWrap.classList.contains('lc-preview-show')) {
                     lcRenderPreviewTables(i, payload);
                 }
+                refreshLoadConditionComparison();
             } catch (e) {
                 console.warn("saveLoadCondition error", e);
                 lcShowMsg(i, 'Could not save this load condition: ' + ((e && e.message) || e), true);
@@ -9128,6 +9275,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const weights = data.weights || [];
                 const axles = data.axles || [];
                 const planRow = data.planRow || [];
+                const planFormats = data.planFormats || [];
 
                 if (weights.length === 0 && axles.length === 0 && planRow.length === 0) {
                     lcShowMsg(i, `"${name}" has no saved values in any of the three ranges.`, true);
@@ -9179,16 +9327,21 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 if (planRow.length > 0) {
                     try {
                         await Excel.run(async (context) => {
-                            const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
-                            const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + planRow.length - 1);
-                            planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`).values = [planRow];
+                            const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                            const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_TIME_RESTORE_START_COL) + planRow.length - 1);
+                            const destRange = editorSheet.getRange(`${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:${endCol}${LC_TIME_RESTORE_ROW}`);
+                            destRange.values = [planRow];
+                            // Re-apply the time format captured on Save — this
+                            // is a fresh destination (Load_Editor!R14:..) with
+                            // no pre-existing time formatting of its own.
+                            destRange.numberFormat = [planRow.map((_, idx) => planFormats[idx] || "h:mm")];
                             await context.sync();
                         });
-                        results.push(`✓ BALLASTPLAN(mT) row → ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:.. (${planRow.length} value(s))`);
+                        results.push(`✓ BALLASTPLAN(mT) row 177 time values → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. (${planRow.length} value(s))`);
                         anyWritten = true;
                     } catch (e) {
                         console.warn('restore plan row failed', e);
-                        results.push(`✗ BALLASTPLAN(mT) row failed (${(e && e.message) || e})`);
+                        results.push(`✗ BALLASTPLAN(mT) row 177 → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. failed (${(e && e.message) || e})`);
                     }
                 }
 
