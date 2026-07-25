@@ -1510,7 +1510,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-56-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-58-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1532,6 +1532,7 @@
             </div>
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
+            <button type="button" class="tg-btn" title="Save/restore named load conditions (Load_Editor!D14:D.., E124:F.., and BALLASTPLAN(mT)!F177:..) to/from Firebase" onclick="openLoadConditionsModal()">💾 Load Conditions</button>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
                 <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
@@ -8640,6 +8641,331 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             </div>
         </div>
     </div>
+
+    <!-- ============================================================
+         LOAD CONDITIONS MODAL (markup)
+         Populated/rendered by renderLoadConditionSlots() in the script
+         below. Same page/modal pattern as the Generate Trailer modal
+         above (reuses the tg-* CSS classes).
+
+         Each "slot" button is named from BALLASTPLAN(mT)!F7:.. (until
+         the first blank cell across the row). Save captures the
+         CURRENT Excel values from:
+           - Load_Editor!D14:D..        (tank Filling[mT], one per tank row)
+           - Load_Editor!E124:F..       (axle Xpos[m] / Ypos[m])
+           - BALLASTPLAN(mT)!F177:..    (one data row)
+         and stores them in Firebase under loadConditions/<slot>.
+         Restore writes those three ranges back to the SAME positions,
+         except the slot's own name is written to Load_Editor!R148
+         instead of back into BALLASTPLAN(mT) row 7 (row 7 stays as the
+         label row and is never overwritten by Restore).
+         ============================================================ -->
+    <div class="tg-overlay" id="lcOverlay" onclick="if(event.target===this) closeLoadConditionsModal()">
+        <div class="tg-modal" id="lcModal">
+            <div class="tg-modal-header">
+                <h2>💾 Load Conditions</h2>
+                <button type="button" class="tg-close-x" title="Close" onclick="closeLoadConditionsModal()">✕</button>
+            </div>
+            <p class="tg-modal-sub">
+                Each button below is named from <strong>BALLASTPLAN(mT)!F7</strong>
+                onward (one name per column, until the first blank cell).
+                <strong>Save</strong> captures the current
+                <strong>Load_Editor!D14:D..</strong> (tank Filling[mT]),
+                <strong>Load_Editor!E124:F..</strong> (axle Xpos[m]/Ypos[m])
+                and <strong>BALLASTPLAN(mT)!F177:..</strong> values and keeps
+                them in Firebase under that name.
+                <strong>Restore</strong> pushes a saved condition back into
+                Excel at those same positions &mdash; except the name itself
+                is written to <strong>Load_Editor!R148</strong> instead of
+                back into BALLASTPLAN(mT) row&nbsp;7, which always stays as
+                the label row. Add or rename slots by editing row&nbsp;7 in
+                Excel, then use "↻ Refresh names" below.
+            </p>
+
+            <div class="tg-modal-body">
+                <div class="tg-modal-col-left" style="flex: 1 1 100%; max-width: none;">
+                    <div class="tg-train-list-actions">
+                        <button type="button" class="tg-add-train-btn" onclick="pullLoadConditionNames()">↻ Refresh names from BALLASTPLAN(mT)!F7:..</button>
+                    </div>
+                    <div id="lcSlotList"><!-- slot cards rendered by JS --></div>
+                </div>
+            </div>
+
+            <div class="tg-footer">
+                <button type="button" class="tg-btn" onclick="closeLoadConditionsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // LOAD CONDITIONS — named save/restore snapshots via Firebase
+        // See the modal markup above for the full range/behaviour
+        // description. Reuses EXCEL_START_ROW (14), AXLE_START_ROW
+        // (124), AXLE_MAX_ROWS, PUMP_SHEET_NAME ("BALLASTPLAN(mT)"),
+        // FIREBASE_URL, isOfficeInitialized and logAutoBallast from the
+        // main script above (classic inline script blocks share one
+        // global scope, so these are already in place by the time this
+        // code runs).
+        // ============================================================
+        const LC_NAME_ROW = 7;                 // BALLASTPLAN(mT) row holding slot names (F onward)
+        const LC_DATA_ROW = 177;               // BALLASTPLAN(mT) row holding the saved data (F onward)
+        const LC_START_COL = "F";
+        const LC_MAX_COLS = 60;                // generous over-read, trimmed at first blank cell
+        const LC_WEIGHT_MAX_ROWS = 200;        // generous over-read for Load_Editor!D14:D.. (tank weights)
+        const LC_RESTORE_NAME_CELL = "R148";   // Load_Editor cell that receives the restored slot's name
+        const LC_FIREBASE_BASE = `${FIREBASE_URL}/loadConditions`;
+
+        let loadConditionNames = [];
+        let loadConditionBusy = false;
+
+        function lcColLetterToIndex(letter) {
+            let n = 0;
+            for (let i = 0; i < letter.length; i++) n = n * 26 + (letter.charCodeAt(i) - 64);
+            return n - 1; // 0-based
+        }
+        function lcColIndexToLetter(index) {
+            let n = index + 1, s = '';
+            while (n > 0) {
+                const rem = (n - 1) % 26;
+                s = String.fromCharCode(65 + rem) + s;
+                n = Math.floor((n - 1) / 26);
+            }
+            return s;
+        }
+        function lcEscapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        }
+        function lcSlugify(name) {
+            return String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'slot';
+        }
+
+        // ---- Open/close ----
+        async function openLoadConditionsModal() {
+            document.getElementById('lcOverlay').classList.add('tg-open');
+            await pullLoadConditionNames();
+        }
+        function closeLoadConditionsModal() {
+            document.getElementById('lcOverlay').classList.remove('tg-open');
+        }
+
+        // ---- Read slot names from BALLASTPLAN(mT)!F7:.. ----
+        async function pullLoadConditionNames() {
+            const listEl = document.getElementById('lcSlotList');
+            if (listEl) listEl.innerHTML = '<div class="tg-modal-sub">Loading condition names…</div>';
+
+            if (!isOfficeInitialized) {
+                // Standalone/mock mode — nothing live to read from Excel;
+                // show whatever was found last time (if any).
+                renderLoadConditionSlots();
+                return;
+            }
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME); // "BALLASTPLAN(mT)"
+                    const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + LC_MAX_COLS - 1);
+                    const range = sheet.getRange(`${LC_START_COL}${LC_NAME_ROW}:${endCol}${LC_NAME_ROW}`);
+                    range.load("values");
+                    await context.sync();
+
+                    const row = (range.values && range.values[0]) || [];
+                    const names = [];
+                    for (const v of row) {
+                        if (v === '' || v === null || v === undefined) break;
+                        names.push(String(v));
+                    }
+                    loadConditionNames = names;
+                });
+            } catch (e) {
+                console.warn(`Load Conditions: could not read slot names from ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_NAME_ROW}:..`, e);
+            }
+            renderLoadConditionSlots();
+        }
+
+        function renderLoadConditionSlots() {
+            const listEl = document.getElementById('lcSlotList');
+            if (!listEl) return;
+            const names = loadConditionNames;
+            if (!names || names.length === 0) {
+                listEl.innerHTML = `<div class="tg-modal-sub">No condition names found in ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_NAME_ROW} onward. Type one name per column across that row in Excel (e.g. "Departure", "Arrival"), then click "Refresh names" above.</div>`;
+                return;
+            }
+            listEl.innerHTML = names.map((name, i) => {
+                const safe = lcEscapeHtml(name);
+                return `
+                <div class="tg-train-card">
+                    <div class="tg-train-card-header">
+                        <strong>${safe}</strong>
+                        <span class="tg-train-summary" id="lcStatus_${i}">checking…</span>
+                    </div>
+                    <div class="tg-train-list-actions">
+                        <button type="button" class="tg-add-train-btn" onclick="saveLoadCondition(${i})">💾 Save current data as "${safe}"</button>
+                        <button type="button" class="tg-add-train-btn" onclick="restoreLoadCondition(${i})">↩ Restore "${safe}" to Excel</button>
+                    </div>
+                </div>`;
+            }).join('');
+            names.forEach((name, i) => refreshLoadConditionStatus(i));
+        }
+
+        async function refreshLoadConditionStatus(i) {
+            const el = document.getElementById('lcStatus_' + i);
+            const name = loadConditionNames[i];
+            if (!el || !name) return;
+            try {
+                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                el.textContent = (data && data.savedAt) ? ('saved ' + new Date(data.savedAt).toLocaleString()) : 'not saved yet';
+            } catch (e) {
+                el.textContent = 'status unknown';
+            }
+        }
+
+        // ---- Save: Excel -> Firebase ----
+        async function saveLoadCondition(i) {
+            if (loadConditionBusy) return;
+            const name = loadConditionNames[i];
+            if (!name) return;
+            if (!isOfficeInitialized) {
+                alert('Open this add-in inside Excel to read live data before saving a condition.');
+                return;
+            }
+            loadConditionBusy = true;
+            const statusEl = document.getElementById('lcStatus_' + i);
+            if (statusEl) statusEl.textContent = 'saving…';
+            try {
+                let weights = [], axles = [], planRow = [];
+                await Excel.run(async (context) => {
+                    const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
+
+                    // 1) Load_Editor!D14:D.. — tank Filling[mT], over-read then trim at first blank
+                    const wEndRow = EXCEL_START_ROW + LC_WEIGHT_MAX_ROWS - 1;
+                    const rangeW = editorSheet.getRange(`D${EXCEL_START_ROW}:D${wEndRow}`);
+                    rangeW.load("values");
+
+                    // 2) Load_Editor!E124:F.. — axle Xpos[m]/Ypos[m], over-read then trim at first blank
+                    const aEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
+                    const rangeA = editorSheet.getRange(`E${AXLE_START_ROW}:F${aEndRow}`);
+                    rangeA.load("values");
+
+                    // 3) BALLASTPLAN(mT)!F177:.. — one data row, over-read then trim at first blank
+                    const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + LC_MAX_COLS - 1);
+                    const rangeP = planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`);
+                    rangeP.load("values");
+
+                    await context.sync();
+
+                    for (const r of rangeW.values) {
+                        const v = r[0];
+                        if (v === '' || v === null || v === undefined) break;
+                        weights.push(v);
+                    }
+                    for (const r of rangeA.values) {
+                        const [x, y] = r;
+                        const xBlank = (x === '' || x === null || x === undefined);
+                        const yBlank = (y === '' || y === null || y === undefined);
+                        if (xBlank && yBlank) break;
+                        axles.push({ x: xBlank ? null : x, y: yBlank ? null : y });
+                    }
+                    for (const v of ((rangeP.values && rangeP.values[0]) || [])) {
+                        if (v === '' || v === null || v === undefined) break;
+                        planRow.push(v);
+                    }
+                });
+
+                const payload = {
+                    name: name,
+                    weights: weights,
+                    axles: axles,
+                    planRow: planRow,
+                    savedAt: new Date().toISOString(),
+                    source: "excel-addin"
+                };
+                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error("Firebase PUT failed: " + res.status);
+
+                logAutoBallast(`💾 Saved load condition "${name}" — ${weights.length} tank weight(s), ${axles.length} axle(s), ${planRow.length} BALLASTPLAN(mT) value(s).`);
+                if (statusEl) statusEl.textContent = 'saved ' + new Date().toLocaleString();
+            } catch (e) {
+                console.warn("saveLoadCondition error", e);
+                alert('Could not save this load condition. See console for details.');
+                if (statusEl) statusEl.textContent = 'save failed';
+            } finally {
+                loadConditionBusy = false;
+            }
+        }
+
+        // ---- Restore: Firebase -> Excel ----
+        async function restoreLoadCondition(i) {
+            if (loadConditionBusy) return;
+            const name = loadConditionNames[i];
+            if (!name) return;
+            if (!isOfficeInitialized) {
+                alert('Open this add-in inside Excel to push data back into the workbook.');
+                return;
+            }
+            if (!confirm(`Restore "${name}" into Excel?\n\nThis will overwrite:\n- Load_Editor!D${EXCEL_START_ROW}:D..\n- Load_Editor!E${AXLE_START_ROW}:F..\n- ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:..\n- Load_Editor!${LC_RESTORE_NAME_CELL} (set to "${name}")`)) return;
+
+            loadConditionBusy = true;
+            const statusEl = document.getElementById('lcStatus_' + i);
+            if (statusEl) statusEl.textContent = 'restoring…';
+            try {
+                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: "no-store" });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                if (!data) {
+                    alert(`No saved data found for "${name}" yet — use Save first.`);
+                    if (statusEl) statusEl.textContent = 'not saved yet';
+                    return;
+                }
+
+                const weights = data.weights || [];
+                const axles = data.axles || [];
+                const planRow = data.planRow || [];
+
+                await Excel.run(async (context) => {
+                    const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                    const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
+
+                    if (weights.length > 0) {
+                        const wEndRow = EXCEL_START_ROW + weights.length - 1;
+                        editorSheet.getRange(`D${EXCEL_START_ROW}:D${wEndRow}`).values = weights.map(v => [v]);
+                    }
+                    if (axles.length > 0) {
+                        const aEndRow = AXLE_START_ROW + axles.length - 1;
+                        editorSheet.getRange(`E${AXLE_START_ROW}:F${aEndRow}`).values = axles.map(a => [a.x, a.y]);
+                    }
+                    if (planRow.length > 0) {
+                        const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + planRow.length - 1);
+                        planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`).values = [planRow];
+                    }
+                    // The slot NAME does not go back into BALLASTPLAN(mT) row
+                    // LC_NAME_ROW (that row stays put as the label row) —
+                    // instead it's recorded here as "currently restored
+                    // condition", per the modal description above.
+                    editorSheet.getRange(LC_RESTORE_NAME_CELL).values = [[name]];
+
+                    await context.sync();
+                });
+
+                logAutoBallast(`↩ Restored load condition "${name}" to Excel (Load_Editor!D/E:F, ${PUMP_SHEET_NAME}!F${LC_DATA_ROW}, name → Load_Editor!${LC_RESTORE_NAME_CELL}).`);
+                if (statusEl) statusEl.textContent = 'restored ' + new Date().toLocaleString();
+                // Re-read the freshly-written values back into the dashboard.
+                setTimeout(() => pullExcelTankData(), 300);
+            } catch (e) {
+                console.warn("restoreLoadCondition error", e);
+                alert('Could not restore this load condition. See console for details.');
+                if (statusEl) statusEl.textContent = 'restore failed';
+            } finally {
+                loadConditionBusy = false;
+            }
+        }
+    </script>
 
     <script>
         // ------------------------------------------------------------
