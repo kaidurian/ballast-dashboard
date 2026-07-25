@@ -1577,7 +1577,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-58(Rev.4)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-58(Rev.5)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8774,7 +8774,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <div class="lc-table-scroll" id="lcMergedWeights"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
                         <div class="lc-preview-section-title">Load_Editor!E124:F.. — Axle Xpos[m]/Ypos[m] by step (1st column = Load_Editor!B, name per row)</div>
                         <div class="lc-table-scroll" id="lcMergedAxles"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
-                        <div class="lc-preview-section-title">BALLASTPLAN(mT)!F177:.. — time values by step (1st column = sheet column letter, F onward until blank)</div>
+                        <div class="lc-preview-section-title">BALLASTPLAN(mT)!F177:.. — time values by step (1st column header = BALLASTPLAN(mT)!A177, rows = step00/step01/step02/.. for F/G/H/.. onward until blank)</div>
                         <div class="lc-table-scroll" id="lcMergedTime"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
                     </div>
                 </div>
@@ -8813,7 +8813,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         let loadConditionBusy = false;
         let lcWeightLabels = [];   // Load_Editor!B14:B.. — one label per tank row, refreshed on modal open
         let lcAxleLabels = [];     // Load_Editor!B124:B.. — one label per axle row, refreshed on modal open
-        let lcTimeColLabels = [];  // BALLASTPLAN(mT)!F177:.. — one column-letter label per time value, refreshed on modal open
+        let lcTimeColLabels = [];  // BALLASTPLAN(mT)!F177:.. — one "stepNN" label per time value (zero-indexed, F=step00, G=step01, ...), refreshed on modal open
+        let lcTimeRowLabel = '';   // BALLASTPLAN(mT)!A177 — row label/description cell, shown as the header of the step-label column
 
         function lcColLetterToIndex(letter) {
             let n = 0;
@@ -8886,7 +8887,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         }
 
         // ---- Read the live column extent of BALLASTPLAN(mT)!F177:..
-        // for the merged time-values table's row labels (F, G, H, ...).
+        // for the merged time-values table's row labels (step00, step01,
+        // step02, ... — zero-indexed, F=step00, G=step01, H=step02, ...),
+        // plus BALLASTPLAN(mT)!A177 as the label-column header text.
         // Trimmed to the LAST non-blank cell (not the first blank one) —
         // a mid-range gap is a legitimate unused time slot, not the end
         // of the data. ----
@@ -8898,6 +8901,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + LC_MAX_COLS - 1);
                     const rangeP = planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`);
                     rangeP.load("values");
+                    const rangeLabel = planSheet.getRange(`A${LC_DATA_ROW}`);
+                    rangeLabel.load("values");
                     await context.sync();
 
                     const row = (rangeP.values && rangeP.values[0]) || [];
@@ -8906,11 +8911,18 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         const v = row[c];
                         if (!(v === '' || v === null || v === undefined)) lastNonBlank = c;
                     }
+                    // Zero-indexed "stepNN" labels: F177=step00, G177=step01,
+                    // H177=step02, ... (replaces the old column-letter labels).
                     const labels = [];
                     for (let c = 0; c <= lastNonBlank; c++) {
-                        labels.push(lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + c));
+                        labels.push('step' + String(c).padStart(2, '0'));
                     }
                     lcTimeColLabels = labels;
+
+                    const labelVal = (rangeLabel.values && rangeLabel.values[0] && rangeLabel.values[0][0]);
+                    lcTimeRowLabel = (labelVal === '' || labelVal === null || labelVal === undefined)
+                        ? `${PUMP_SHEET_NAME}!A${LC_DATA_ROW}`
+                        : String(labelVal);
                 });
             } catch (e) {
                 console.warn(`Load Conditions: could not read live column extent from ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}`, e);
@@ -9202,10 +9214,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 el.innerHTML = `<div class="tg-modal-sub">No time values found in ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW} onward, and none saved yet for any step.</div>`;
                 return;
             }
-            const header = `<tr><th>Column</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
+            const header = `<tr><th>${lcEscapeHtml(lcTimeRowLabel || (PUMP_SHEET_NAME + '!A' + LC_DATA_ROW))}</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
             let body = '';
             for (let r = 0; r < rowCount; r++) {
-                const label = lcTimeColLabels[r] || lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + r);
+                const label = lcTimeColLabels[r] || ('step' + String(r).padStart(2, '0'));
                 const cells = steps.map(s => {
                     const t = s.data && s.data.planRow ? s.data.planRow[r] : undefined;
                     return `<td>${lcFmtTime(t)}</td>`;
