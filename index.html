@@ -1577,7 +1577,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-58(Rev2)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-58(Rev.3)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8745,9 +8745,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 <strong>Restore</strong> pushes a saved condition's tank
                 weights and axle positions back to those same Load_Editor
                 positions, and pushes the BALLASTPLAN(mT) row&nbsp;177 time
-                values to <strong>Load_Editor!R14:..</strong> instead of back
+                values to <strong>Load_Editor!R148:..</strong> instead of back
                 into BALLASTPLAN(mT) &mdash; the restored condition's name
-                itself goes to <strong>Load_Editor!R148</strong>. Add or
+                itself goes to <strong>Load_Editor!R14</strong>. Add or
                 rename slots by editing row&nbsp;7 in Excel, then use
                 "↻ Refresh names" below.
             </p>
@@ -8802,9 +8802,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const LC_WEIGHT_MAX_ROWS = 200;        // generous over-read for Load_Editor!D14:D.. (tank weights)
         const LC_WEIGHT_LABEL_COL = "B";       // Load_Editor column holding each tank's name/label, row 14+
         const LC_AXLE_LABEL_COL = "B";         // Load_Editor column holding each axle row's name/label, row 124+
-        const LC_TIME_RESTORE_ROW = 14;        // Load_Editor row that receives BALLASTPLAN(mT)!F177:.. on Restore
+        const LC_TIME_RESTORE_ROW = 148;       // Load_Editor row that receives BALLASTPLAN(mT)!F177:.. on Restore
         const LC_TIME_RESTORE_START_COL = "R"; // Load_Editor column that receives BALLASTPLAN(mT)!F177:.. on Restore
-        const LC_RESTORE_NAME_CELL = "R148";   // Load_Editor cell that receives the restored slot's name
+        const LC_RESTORE_NAME_CELL = "R14";    // Load_Editor cell that receives the restored slot's name (moved off R148 so it doesn't collide with the time-row values above)
         const LC_FIREBASE_BASE = `${FIREBASE_URL}/loadConditions`;
 
         let loadConditionNames = [];
@@ -8845,7 +8845,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         }
 
         // ---- Read the Load_Editor!B label columns used as the 1st
-        // column of the merged comparison tables (tank/axle row names). ----
+        // column of the merged comparison tables (tank/axle row names).
+        // Trimmed at the first blank cell in column B, so the merged
+        // tables stop exactly where the sheet's data does. ----
         async function pullLcLabels() {
             if (!isOfficeInitialized) return;
             try {
@@ -8859,8 +8861,21 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     rangeAL.load("values");
                     await context.sync();
 
-                    lcWeightLabels = (rangeWL.values || []).map(r => r[0]);
-                    lcAxleLabels = (rangeAL.values || []).map(r => r[0]);
+                    const wLabels = [];
+                    for (const r of (rangeWL.values || [])) {
+                        const v = r[0];
+                        if (v === '' || v === null || v === undefined) break;
+                        wLabels.push(v);
+                    }
+                    lcWeightLabels = wLabels;
+
+                    const aLabels = [];
+                    for (const r of (rangeAL.values || [])) {
+                        const v = r[0];
+                        if (v === '' || v === null || v === undefined) break;
+                        aLabels.push(v);
+                    }
+                    lcAxleLabels = aLabels;
                 });
             } catch (e) {
                 console.warn(`Load Conditions: could not read label column ${LC_WEIGHT_LABEL_COL} from Load_Editor`, e);
@@ -9078,9 +9093,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         function lcRenderMergedWeightsTable(steps) {
             const el = document.getElementById('lcMergedWeights');
             if (!el) return;
-            const maxRows = Math.max(lcWeightLabels.length, ...steps.map(s => (s.data && s.data.weights ? s.data.weights.length : 0)), 0);
+            // Row extent is driven by Load_Editor!B14:B.. (trimmed at the
+            // first blank cell in pullLcLabels()) — i.e. the table runs
+            // from row 14 until column B goes blank, not by whichever
+            // saved step happens to have the most values.
+            const maxRows = lcWeightLabels.length;
             if (maxRows === 0) {
-                el.innerHTML = '<div class="tg-modal-sub">No tank weight data saved yet for any step.</div>';
+                el.innerHTML = '<div class="tg-modal-sub">No tank names found in Load_Editor!B' + EXCEL_START_ROW + ' onward.</div>';
                 return;
             }
             const header = `<tr><th>${LC_WEIGHT_LABEL_COL} (name)</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
@@ -9100,9 +9119,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         function lcRenderMergedAxlesTable(steps) {
             const el = document.getElementById('lcMergedAxles');
             if (!el) return;
-            const maxRows = Math.max(lcAxleLabels.length, ...steps.map(s => (s.data && s.data.axles ? s.data.axles.length : 0)), 0);
+            // Row extent is driven by Load_Editor!B124:B.. (trimmed at the
+            // first blank cell in pullLcLabels()) — i.e. the table runs
+            // from row 124 until column B goes blank, not by whichever
+            // saved step happens to have the most values.
+            const maxRows = lcAxleLabels.length;
             if (maxRows === 0) {
-                el.innerHTML = '<div class="tg-modal-sub">No axle position data saved yet for any step.</div>';
+                el.innerHTML = '<div class="tg-modal-sub">No axle names found in Load_Editor!B' + AXLE_START_ROW + ' onward.</div>';
                 return;
             }
             const header = `<tr><th>${LC_AXLE_LABEL_COL} (name)</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)} X</th><th>${lcEscapeHtml(s.name)} Y</th>`).join('')}</tr>`;
