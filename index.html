@@ -1135,6 +1135,9 @@
             cursor: pointer;
         }
         .tg-btn:hover { border-color: var(--accent-blue); color: var(--text-main); }
+        .step-loader-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+        .step-loader-btn-group { display: flex; flex-wrap: wrap; gap: 4px; }
+        .step-loader-btn.busy { opacity: 0.5; pointer-events: none; }
 
         .tg-overlay {
             display: none;
@@ -1522,6 +1525,18 @@
         }
         .lc-confirm-row.lc-confirm-show { display: flex; flex-wrap: wrap; }
         .lc-confirm-row .tg-add-train-btn { padding: 3px 8px; font-size: 10px; }
+        .lc-preview-toggle {
+            background: none;
+            border: 1px dashed var(--panel-border);
+            color: var(--text-muted);
+            font-size: 10px;
+            border-radius: 4px;
+            padding: 3px 8px;
+            cursor: pointer;
+        }
+        .lc-preview-toggle:hover { border-color: var(--accent-blue); color: var(--text-main); }
+        .lc-preview-wrap { display: none; margin-top: 8px; }
+        .lc-preview-wrap.lc-preview-show { display: block; }
         .lc-preview-section-title {
             font-size: 10px;
             font-weight: 700;
@@ -1565,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-59(Rev.04)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-60(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1588,6 +1603,11 @@
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
             <button type="button" class="tg-btn" title="Save/restore named load conditions (Load_Editor!D14:D.., E124:F.., and BALLASTPLAN(mT)!F177:..) to/from Firebase" onclick="openLoadConditionsModal()">💾 Load Conditions</button>
+            <div class="toggle-container step-loader-group" title="One button per name found in BALLASTPLAN(mT)!E7:.. (until the first blank cell). Click a button (e.g. STEP00) to pull that SAME-NAME sheet's data into Load_Editor: col D (row 21 on) → Load_Editor!D14:.., cols P:S (row 21 on) → Load_Editor!D124:G.., and AB29/AB30 → Load_Editor!R147/R148.">
+                <span>📥 Step Data</span>
+                <div class="step-loader-btn-group" id="stepLoaderBtnGroup"><!-- buttons rendered by renderStepLoaderButtons() --></div>
+                <button type="button" class="tg-btn" title="Refresh step names from BALLASTPLAN(mT)!E7:.." onclick="pullStepLoaderNames()">↻</button>
+            </div>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
                 <input type="checkbox" id="dimensionToggleCheckbox" onchange="toggleDimensionLabels()">
@@ -5388,6 +5408,7 @@
                     // that pull loads the right barge on startup.
                     populateBargeSelector().then(() => pullExcelTankData());
                     registerExcelAutoTrack();
+                    pullStepLoaderNames();
                 } else {
                     startFirebaseMode();
                 }
@@ -8707,15 +8728,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
          the first blank cell across the row). Save captures the
          CURRENT Excel values from:
            - Load_Editor!D14:D..        (tank Filling[mT], one per tank row)
-           - Load_Editor!D124:G..       (axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m])
+           - Load_Editor!E124:F..       (axle Xpos[m] / Ypos[m])
+           - BALLASTPLAN(mT)!F177:..    (one data row)
          and stores them in Firebase under loadConditions/<slot>.
-         Restore writes those two ranges back to the SAME positions.
-         Restore does NOT touch anything else: the time-value step
-         (which used to read BALLASTPLAN(mT) row 177 and write
-         Load_Editor!R148) and the name-write step (which used to write
-         to Load_Editor!R14) are both disabled per user request.
-         BALLASTPLAN(mT) row 7 (the label row) is never touched by
-         Restore either way.
+         Restore writes those three ranges back to the SAME positions,
+         except the slot's own name is written to Load_Editor!R148
+         instead of back into BALLASTPLAN(mT) row 7 (row 7 stays as the
+         label row and is never overwritten by Restore).
          ============================================================ -->
     <div class="tg-overlay" id="lcOverlay" onclick="if(event.target===this) closeLoadConditionsModal()">
         <div class="tg-modal" id="lcModal">
@@ -8728,14 +8747,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 onward (one name per column, until the first blank cell) — these
                 are the "steps" compared in the tables further down.
                 <strong>Save</strong> captures the current
-                <strong>Load_Editor!D14:D..</strong> (tank Filling[mT]) and
-                <strong>Load_Editor!D124:G..</strong> (axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m])
+                <strong>Load_Editor!D14:D..</strong> (tank Filling[mT]),
+                <strong>Load_Editor!E124:F..</strong> (axle Xpos[m]/Ypos[m])
+                and <strong>BALLASTPLAN(mT)!F177:..</strong> (time values)
                 and keeps them in Firebase under that name.
                 <strong>Restore</strong> pushes a saved condition's tank
                 weights and axle positions back to those same Load_Editor
-                positions. It does not write anything else — the time
-                value from BALLASTPLAN(mT) row&nbsp;177 and the condition's
-                name are no longer written back to Load_Editor. Add or
+                positions, and pushes the BALLASTPLAN(mT) row&nbsp;177 time
+                values to <strong>Load_Editor!R148:..</strong> instead of back
+                into BALLASTPLAN(mT) &mdash; the restored condition's name
+                itself goes to <strong>Load_Editor!R14</strong>. Add or
                 rename slots by editing row&nbsp;7 in Excel, then use
                 "↻ Refresh names" below.
             </p>
@@ -8758,11 +8779,11 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <div class="tg-train-list-actions">
                             <button type="button" class="tg-add-train-btn" onclick="refreshLoadConditionComparison()">↻ Refresh comparison</button>
                         </div>
-                        <div class="lc-preview-section-title">Tank Filling[mT]</div>
+                        <div class="lc-preview-section-title">Load_Editor!D14:D.. — Tank Filling[mT] by step (1st column = Load_Editor!B, name per row)</div>
                         <div class="lc-table-scroll" id="lcMergedWeights"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
-                        <div class="lc-preview-section-title">Trailer arrangement</div>
+                        <div class="lc-preview-section-title">Load_Editor!E124:F.. — Axle Xpos[m]/Ypos[m] by step (1st column = Load_Editor!B, name per row)</div>
                         <div class="lc-table-scroll" id="lcMergedAxles"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
-                        <div class="lc-preview-section-title">Start time of step</div>
+                        <div class="lc-preview-section-title">BALLASTPLAN(mT)!F177:.. — time values by step (1st column header = BALLASTPLAN(mT)!A177, rows = step00/step01/step02/.. for F/G/H/.. onward until blank)</div>
                         <div class="lc-table-scroll" id="lcMergedTime"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
                     </div>
                 </div>
@@ -8792,15 +8813,17 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const LC_WEIGHT_MAX_ROWS = 200;        // generous over-read for Load_Editor!D14:D.. (tank weights)
         const LC_WEIGHT_LABEL_COL = "B";       // Load_Editor column holding each tank's name/label, row 14+
         const LC_AXLE_LABEL_COL = "B";         // Load_Editor column holding each axle row's name/label, row 124+
+        const LC_TIME_RESTORE_ROW = 148;       // Load_Editor row that receives BALLASTPLAN(mT)!F177:.. on Restore
+        const LC_TIME_RESTORE_START_COL = "R"; // Load_Editor column that receives BALLASTPLAN(mT)!F177:.. on Restore
+        const LC_RESTORE_NAME_CELL = "R14";    // Load_Editor cell that receives the restored slot's name (moved off R148 so it doesn't collide with the time-row values above)
         const LC_FIREBASE_BASE = `${FIREBASE_URL}/loadConditions`;
 
         let loadConditionNames = [];
         let loadConditionBusy = false;
         let lcWeightLabels = [];   // Load_Editor!B14:B.. — one label per tank row, refreshed on modal open
         let lcAxleLabels = [];     // Load_Editor!B124:B.. — one label per axle row, refreshed on modal open
-        let lcStepStartNames = [];   // BALLASTPLAN(mT)!F7:.. — step names (column headers), trimmed at first blank cell in row 7
-        let lcStepStartValues = [];  // BALLASTPLAN(mT)!F177:.. — matching time values, same columns as the names above
-        let lcStepStartFormats = []; // number formats captured alongside the values above, re-applied to Load_Editor on Restore
+        let lcTimeColLabels = [];  // BALLASTPLAN(mT)!F177:.. — one "stepNN" label per time value (zero-indexed, F=step00, G=step01, ...), refreshed on modal open
+        let lcTimeRowLabel = '';   // BALLASTPLAN(mT)!A177 — row label/description cell, shown as the header of the step-label column
 
         function lcColLetterToIndex(letter) {
             let n = 0;
@@ -8872,45 +8895,46 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             }
         }
 
-        // ---- Read the live "Start time of step" data: BALLASTPLAN(mT)
-        // row 7 (step names, the column headers) and row 177 (matching
-        // time values), both starting at LC_START_COL ("F") and trimmed
-        // at the first blank cell IN ROW 7 — i.e. the number of step
-        // columns shown is however many names exist in row 7 before the
-        // first blank one, not the extent of row 177 itself. ----
-        async function pullStepStartTimes() {
+        // ---- Read the live column extent of BALLASTPLAN(mT)!F177:..
+        // for the merged time-values table's row labels (step00, step01,
+        // step02, ... — zero-indexed, F=step00, G=step01, H=step02, ...),
+        // plus BALLASTPLAN(mT)!A177 as the label-column header text.
+        // Trimmed to the LAST non-blank cell (not the first blank one) —
+        // a mid-range gap is a legitimate unused time slot, not the end
+        // of the data. ----
+        async function pullLcTimeColumns() {
             if (!isOfficeInitialized) return;
             try {
                 await Excel.run(async (context) => {
                     const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
                     const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + LC_MAX_COLS - 1);
-                    const rangeNames = planSheet.getRange(`${LC_START_COL}${LC_NAME_ROW}:${endCol}${LC_NAME_ROW}`);
-                    rangeNames.load("values");
-                    const rangeVals = planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`);
-                    rangeVals.load("values, numberFormat");
+                    const rangeP = planSheet.getRange(`${LC_START_COL}${LC_DATA_ROW}:${endCol}${LC_DATA_ROW}`);
+                    rangeP.load("values");
+                    const rangeLabel = planSheet.getRange(`A${LC_DATA_ROW}`);
+                    rangeLabel.load("values");
                     await context.sync();
 
-                    const nameRow = (rangeNames.values && rangeNames.values[0]) || [];
-                    const valRow = (rangeVals.values && rangeVals.values[0]) || [];
-                    const fmtRow = (rangeVals.numberFormat && rangeVals.numberFormat[0]) || [];
-
-                    const names = [];
-                    const values = [];
-                    const formats = [];
-                    for (let c = 0; c < nameRow.length; c++) {
-                        const n = nameRow[c];
-                        if (n === '' || n === null || n === undefined) break;
-                        names.push(String(n));
-                        const v = valRow[c];
-                        values.push((v === '' || v === null || v === undefined) ? null : v);
-                        formats.push(fmtRow[c] || "h:mm");
+                    const row = (rangeP.values && rangeP.values[0]) || [];
+                    let lastNonBlank = -1;
+                    for (let c = 0; c < row.length; c++) {
+                        const v = row[c];
+                        if (!(v === '' || v === null || v === undefined)) lastNonBlank = c;
                     }
-                    lcStepStartNames = names;
-                    lcStepStartValues = values;
-                    lcStepStartFormats = formats;
+                    // Zero-indexed "stepNN" labels: F177=step00, G177=step01,
+                    // H177=step02, ... (replaces the old column-letter labels).
+                    const labels = [];
+                    for (let c = 0; c <= lastNonBlank; c++) {
+                        labels.push('step' + String(c).padStart(2, '0'));
+                    }
+                    lcTimeColLabels = labels;
+
+                    const labelVal = (rangeLabel.values && rangeLabel.values[0] && rangeLabel.values[0][0]);
+                    lcTimeRowLabel = (labelVal === '' || labelVal === null || labelVal === undefined)
+                        ? `${PUMP_SHEET_NAME}!A${LC_DATA_ROW}`
+                        : String(labelVal);
                 });
             } catch (e) {
-                console.warn(`Load Conditions: could not read live ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_NAME_ROW}:.. / ${LC_START_COL}${LC_DATA_ROW}:..`, e);
+                console.warn(`Load Conditions: could not read live column extent from ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}`, e);
             }
         }
 
@@ -8966,13 +8990,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     <div class="tg-train-list-actions">
                         <button type="button" class="tg-add-train-btn" onclick="saveLoadCondition(${i})">💾 Save current data as "${safe}"</button>
                         <button type="button" class="tg-add-train-btn" onclick="restoreLoadCondition(${i})">↩ Restore "${safe}" to Excel</button>
+                        <button type="button" class="lc-preview-toggle" onclick="toggleLcPreview(${i})">👁 Preview time values (row ${LC_DATA_ROW})</button>
                     </div>
                     <div class="lc-confirm-row" id="lcConfirm_${i}">
-                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.. and D${AXLE_START_ROW}:G.. with "${safe}"?</span>
+                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.., E${AXLE_START_ROW}:F.., and Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. with "${safe}"?</span>
                         <button type="button" class="tg-add-train-btn" onclick="confirmRestoreLoadCondition(${i})">✓ Yes, restore</button>
                         <button type="button" class="tg-add-train-btn" onclick="cancelRestoreLoadCondition(${i})">✕ Cancel</button>
                     </div>
                     <div class="lc-msg" id="lcMsg_${i}"></div>
+                    <div class="lc-preview-wrap" id="lcPreview_${i}"><!-- time-value table rendered by JS, see toggleLcPreview() --></div>
                 </div>`;
             }).join('');
             names.forEach((name, i) => refreshLoadConditionStatus(i));
@@ -9025,6 +9051,28 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             return Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : lcEscapeHtml(String(v));
         }
 
+        async function toggleLcPreview(i) {
+            const wrap = document.getElementById('lcPreview_' + i);
+            if (!wrap) return;
+            if (wrap.classList.contains('lc-preview-show')) {
+                wrap.classList.remove('lc-preview-show');
+                return;
+            }
+            wrap.classList.add('lc-preview-show');
+            wrap.innerHTML = '<div class="tg-modal-sub">Loading saved data…</div>';
+            const name = loadConditionNames[i];
+            try {
+                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                loadConditionDataCache[i] = data;
+                lcRenderPreviewTables(i, data);
+            } catch (e) {
+                console.warn('toggleLcPreview error', e);
+                wrap.innerHTML = '<div class="tg-modal-sub">Could not load preview data. See console for details.</div>';
+            }
+        }
+
         function lcFmtTime(v) {
             if (v === null || v === undefined || v === '') return '—';
             const n = Number(v);
@@ -9038,11 +9086,34 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             return `${h}:${String(m).padStart(2, '0')}`;
         }
 
+        function lcRenderPreviewTables(i, data) {
+            const wrap = document.getElementById('lcPreview_' + i);
+            if (!wrap) return;
+            if (!data) {
+                wrap.innerHTML = '<div class="tg-modal-sub">No saved data yet for this name — use Save first.</div>';
+                return;
+            }
+            const planRow = data.planRow || [];
+
+            // BALLASTPLAN(mT) row 177 — one column per sheet column
+            // (header row) with the single data row underneath, i.e.
+            // column headers + one data row in the same table. Tank
+            // weights and axle positions now live in the merged
+            // "Compare saved steps" tables instead (see below).
+            const planTable = planRow.length ? `
+                <div class="lc-preview-section-title">${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:${lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + planRow.length - 1)}${LC_DATA_ROW} — ${planRow.length} time value${planRow.length === 1 ? '' : 's'}</div>
+                <div class="lc-table-scroll"><table class="lc-table"><thead><tr>${planRow.map((_, idx) => `<th>${lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + idx)}</th>`).join('')}</tr></thead>
+                <tbody><tr>${planRow.map(v => `<td>${lcFmtTime(v)}</td>`).join('')}</tr></tbody></table></div>` : '';
+
+            wrap.innerHTML = planTable
+                || '<div class="tg-modal-sub">Saved entry has no BALLASTPLAN(mT) row values.</div>';
+            if (data.savedAt) {
+                wrap.innerHTML += `<div class="lc-preview-section-title" style="margin-top:10px;">Saved ${lcEscapeHtml(new Date(data.savedAt).toLocaleString())}</div>`;
+            }
+        }
+
         // ---- Merged comparison tables: rows = Load_Editor rows
-        // (labeled from column B), columns = one per saved step. The
-        // "Start time of step" table is different — it reads live
-        // BALLASTPLAN(mT) row 7 / row 177 directly, so it refreshes
-        // regardless of whether any named conditions are saved yet. ----
+        // (labeled from column B), columns = one per saved step. ----
         async function refreshLoadConditionComparison() {
             const statusEl = document.getElementById('lcCompareStatus');
             const wEl = document.getElementById('lcMergedWeights');
@@ -9053,18 +9124,17 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
             if (tEl) tEl.innerHTML = '<div class="tg-modal-sub">Loading…</div>';
 
+            if (!loadConditionNames || loadConditionNames.length === 0) {
+                if (statusEl) statusEl.textContent = 'no steps yet';
+                if (wEl) wEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
+                if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
+                if (tEl) tEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
+                return;
+            }
+
             try {
-                await pullStepStartTimes();
-                lcRenderMergedTimeTable();
-
-                if (!loadConditionNames || loadConditionNames.length === 0) {
-                    if (statusEl) statusEl.textContent = 'no steps yet';
-                    if (wEl) wEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
-                    if (aEl) aEl.innerHTML = '<div class="tg-modal-sub">No named steps found — see BALLASTPLAN(mT)!F7:.. above.</div>';
-                    return;
-                }
-
                 await pullLcLabels();
+                await pullLcTimeColumns();
                 const steps = await Promise.all(loadConditionNames.map(async (name, i) => {
                     try {
                         const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: 'no-store' });
@@ -9080,6 +9150,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
                 lcRenderMergedWeightsTable(steps);
                 lcRenderMergedAxlesTable(steps);
+                lcRenderMergedTimeTable(steps);
                 if (statusEl) statusEl.textContent = 'updated ' + new Date().toLocaleString();
             } catch (e) {
                 console.warn('refreshLoadConditionComparison error', e);
@@ -9099,7 +9170,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 el.innerHTML = '<div class="tg-modal-sub">No tank names found in Load_Editor!B' + EXCEL_START_ROW + ' onward.</div>';
                 return;
             }
-            const header = `<tr><th>Tank</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
+            const header = `<tr><th>${LC_WEIGHT_LABEL_COL} (name)</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
             let body = '';
             for (let r = 0; r < maxRows; r++) {
                 const label = lcWeightLabels[r];
@@ -9125,29 +9196,43 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 el.innerHTML = '<div class="tg-modal-sub">No axle names found in Load_Editor!B' + AXLE_START_ROW + ' onward.</div>';
                 return;
             }
-            const header = `<tr><th>RO-RO loads</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)} Load</th><th>${lcEscapeHtml(s.name)} X</th><th>${lcEscapeHtml(s.name)} Y</th><th>${lcEscapeHtml(s.name)} VCG</th>`).join('')}</tr>`;
+            const header = `<tr><th>${LC_AXLE_LABEL_COL} (name)</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)} X</th><th>${lcEscapeHtml(s.name)} Y</th>`).join('')}</tr>`;
             let body = '';
             for (let r = 0; r < maxRows; r++) {
                 const label = lcAxleLabels[r];
                 const labelText = (label === undefined || label === null || label === '') ? `Row ${AXLE_START_ROW + r}` : lcEscapeHtml(String(label));
                 const cells = steps.map(s => {
                     const a = s.data && s.data.axles ? s.data.axles[r] : undefined;
-                    return `<td>${lcFmtNum(a ? a.load : undefined)}</td><td>${lcFmtNum(a ? a.x : undefined)}</td><td>${lcFmtNum(a ? a.y : undefined)}</td><td>${lcFmtNum(a ? a.vcg : undefined)}</td>`;
+                    return `<td>${lcFmtNum(a ? a.x : undefined)}</td><td>${lcFmtNum(a ? a.y : undefined)}</td>`;
                 }).join('');
                 body += `<tr><td>${labelText}</td>${cells}</tr>`;
             }
             el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
         }
 
-        function lcRenderMergedTimeTable() {
+        function lcRenderMergedTimeTable(steps) {
             const el = document.getElementById('lcMergedTime');
             if (!el) return;
-            if (!lcStepStartNames || lcStepStartNames.length === 0) {
-                el.innerHTML = `<div class="tg-modal-sub">No step names found in ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_NAME_ROW} onward.</div>`;
+            // Row extent: prefer the live BALLASTPLAN(mT)!F177:.. column
+            // extent (pullLcTimeColumns()); fall back to the longest
+            // saved step so previously-saved data is never hidden just
+            // because the live sheet currently has fewer filled columns.
+            const maxFromSteps = Math.max(0, ...steps.map(s => (s.data && s.data.planRow ? s.data.planRow.length : 0)));
+            const rowCount = Math.max(lcTimeColLabels.length, maxFromSteps);
+            if (rowCount === 0) {
+                el.innerHTML = `<div class="tg-modal-sub">No time values found in ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW} onward, and none saved yet for any step.</div>`;
                 return;
             }
-            const header = `<tr>${lcStepStartNames.map(n => `<th>${lcEscapeHtml(n)}</th>`).join('')}</tr>`;
-            const body = `<tr>${lcStepStartValues.map(v => `<td>${lcFmtTime(v)}</td>`).join('')}</tr>`;
+            const header = `<tr><th>${lcEscapeHtml(lcTimeRowLabel || (PUMP_SHEET_NAME + '!A' + LC_DATA_ROW))}</th>${steps.map(s => `<th>${lcEscapeHtml(s.name)}</th>`).join('')}</tr>`;
+            let body = '';
+            for (let r = 0; r < rowCount; r++) {
+                const label = lcTimeColLabels[r] || ('step' + String(r).padStart(2, '0'));
+                const cells = steps.map(s => {
+                    const t = s.data && s.data.planRow ? s.data.planRow[r] : undefined;
+                    return `<td>${lcFmtTime(t)}</td>`;
+                }).join('');
+                body += `<tr><td>${label}</td>${cells}</tr>`;
+            }
             el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
         }
 
@@ -9175,9 +9260,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const rangeW = editorSheet.getRange(`D${EXCEL_START_ROW}:D${wEndRow}`);
                     rangeW.load("values");
 
-                    // 2) Load_Editor!D124:G.. — axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m], over-read then trim at first blank
+                    // 2) Load_Editor!E124:F.. — axle Xpos[m]/Ypos[m], over-read then trim at first blank
                     const aEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
-                    const rangeA = editorSheet.getRange(`D${AXLE_START_ROW}:G${aEndRow}`);
+                    const rangeA = editorSheet.getRange(`E${AXLE_START_ROW}:F${aEndRow}`);
                     rangeA.load("values");
 
                     // 3) BALLASTPLAN(mT)!F177:.. — one data row (time-formatted),
@@ -9197,18 +9282,11 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         weights.push(v);
                     }
                     for (const r of rangeA.values) {
-                        const [load, x, y, vcg] = r;
+                        const [x, y] = r;
                         const xBlank = (x === '' || x === null || x === undefined);
                         const yBlank = (y === '' || y === null || y === undefined);
-                        const loadBlank = (load === '' || load === null || load === undefined);
-                        const vcgBlank = (vcg === '' || vcg === null || vcg === undefined);
                         if (xBlank && yBlank) break;
-                        axles.push({
-                            load: loadBlank ? null : load,
-                            x: xBlank ? null : x,
-                            y: yBlank ? null : y,
-                            vcg: vcgBlank ? null : vcg
-                        });
+                        axles.push({ x: xBlank ? null : x, y: yBlank ? null : y });
                     }
                     const planValuesRow = (rangeP.values && rangeP.values[0]) || [];
                     const planFormatsRow = (rangeP.numberFormat && rangeP.numberFormat[0]) || [];
@@ -9235,7 +9313,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     // Nothing to save is almost always a sign the first cell
                     // of one/all ranges (D14, E124/F124, F177) is blank in
                     // Excel, not a code failure — surface that clearly.
-                    lcShowMsg(i, `Nothing to save: D${EXCEL_START_ROW}, D${AXLE_START_ROW}/G${AXLE_START_ROW} and ${LC_START_COL}${LC_DATA_ROW} were all blank in Excel.`, true);
+                    lcShowMsg(i, `Nothing to save: D${EXCEL_START_ROW}, E${AXLE_START_ROW}/F${AXLE_START_ROW} and ${LC_START_COL}${LC_DATA_ROW} were all blank in Excel.`, true);
                     if (statusEl) statusEl.textContent = 'nothing to save';
                     return;
                 }
@@ -9260,7 +9338,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 if (statusEl) statusEl.textContent = 'saved ' + new Date().toLocaleString();
                 lcShowMsg(i, `Saved: ${weights.length} tank weight(s), ${axles.length} axle(s), ${planRow.length} BALLASTPLAN(mT) value(s).`, false);
 
+                // Keep the preview table (if open) in sync with what was
+                // just saved, without needing another Firebase round-trip.
                 loadConditionDataCache[i] = payload;
+                const previewWrap = document.getElementById('lcPreview_' + i);
+                if (previewWrap && previewWrap.classList.contains('lc-preview-show')) {
+                    lcRenderPreviewTables(i, payload);
+                }
                 refreshLoadConditionComparison();
             } catch (e) {
                 console.warn("saveLoadCondition error", e);
@@ -9306,37 +9390,35 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (statusEl) statusEl.textContent = 'restoring…';
             lcClearMsg(i);
             try {
-                // Each range/value is written in its OWN Excel.run/context.sync()
-                // so one bad value (e.g. a stray formula/text) can't abort the
-                // others — Office.js only commits everything queued in a
-                // context together at sync() time, so batching them into one
-                // Excel.run meant a single failure could silently cancel the
-                // whole restore.
-                const results = [];
-                let anyWritten = false;
-
-                // ---- Time value restore DISABLED per user request.
-                // This step used to read the LIVE time value from
-                // BALLASTPLAN(mT) row 177 (slot 0/"STEP00" = F177,
-                // slot 1/"STEP01" = G177, slot 2/"STEP02" = H177, ...)
-                // and write it into Load_Editor!R148. Restore no longer
-                // reads from BALLASTPLAN(mT) row 177 or writes to R148
-                // at all. ----
-
-                // ---- Tank weights / axle positions: still from the saved
-                // Firebase snapshot for this named condition, as before. ----
-                let data = null;
-                try {
-                    const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: "no-store" });
-                    if (!res.ok) throw new Error("HTTP " + res.status);
-                    data = await res.json();
-                    loadConditionDataCache[i] = data;
-                } catch (e) {
-                    console.warn(`could not load saved data for "${name}"`, e);
+                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: "no-store" });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                loadConditionDataCache[i] = data;
+                if (!data) {
+                    lcShowMsg(i, `No saved data found for "${name}" yet — use Save first.`, true);
+                    if (statusEl) statusEl.textContent = 'not saved yet';
+                    return;
                 }
 
-                const weights = (data && data.weights) || [];
-                const axles = (data && data.axles) || [];
+                const weights = data.weights || [];
+                const axles = data.axles || [];
+                const planRow = data.planRow || [];
+                const planFormats = data.planFormats || [];
+
+                if (weights.length === 0 && axles.length === 0 && planRow.length === 0) {
+                    lcShowMsg(i, `"${name}" has no saved values in any of the three ranges.`, true);
+                    if (statusEl) statusEl.textContent = 'nothing to restore';
+                    return;
+                }
+
+                // Each range is written in its OWN Excel.run/context.sync()
+                // so one bad value (e.g. a stray formula/text) can't abort
+                // the other two ranges — Office.js only commits everything
+                // queued in a context together at sync() time, so batching
+                // all three into one Excel.run meant a single failure could
+                // silently cancel the whole restore.
+                const results = [];
+                let anyWritten = false;
 
                 if (weights.length > 0) {
                     try {
@@ -9359,10 +9441,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         await Excel.run(async (context) => {
                             const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
                             const aEndRow = AXLE_START_ROW + axles.length - 1;
-                            editorSheet.getRange(`D${AXLE_START_ROW}:G${aEndRow}`).values = axles.map(a => [a.load, a.x, a.y, a.vcg]);
+                            editorSheet.getRange(`E${AXLE_START_ROW}:F${aEndRow}`).values = axles.map(a => [a.x, a.y]);
                             await context.sync();
                         });
-                        results.push(`✓ axle positions → Load_Editor!D/G${AXLE_START_ROW}:${AXLE_START_ROW + axles.length - 1}`);
+                        results.push(`✓ axle positions → Load_Editor!E/F${AXLE_START_ROW}:${AXLE_START_ROW + axles.length - 1}`);
                         anyWritten = true;
                     } catch (e) {
                         console.warn('restore axles failed', e);
@@ -9370,11 +9452,42 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     }
                 }
 
-                // Slot NAME write to Load_Editor!R14 DISABLED per user request
-                // (previously wrote the restored condition's name there as a
-                // "currently restored condition" marker; no longer sent).
-                // Slot NAME also never goes back into BALLASTPLAN(mT) row
-                // LC_NAME_ROW (that row stays put as the label row).
+                if (planRow.length > 0) {
+                    try {
+                        await Excel.run(async (context) => {
+                            const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                            const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_TIME_RESTORE_START_COL) + planRow.length - 1);
+                            const destRange = editorSheet.getRange(`${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:${endCol}${LC_TIME_RESTORE_ROW}`);
+                            destRange.values = [planRow];
+                            // Re-apply the time format captured on Save — this
+                            // is a fresh destination (Load_Editor!R14:..) with
+                            // no pre-existing time formatting of its own.
+                            destRange.numberFormat = [planRow.map((_, idx) => planFormats[idx] || "h:mm")];
+                            await context.sync();
+                        });
+                        results.push(`✓ BALLASTPLAN(mT) row 177 time values → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. (${planRow.length} value(s))`);
+                        anyWritten = true;
+                    } catch (e) {
+                        console.warn('restore plan row failed', e);
+                        results.push(`✗ BALLASTPLAN(mT) row 177 → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. failed (${(e && e.message) || e})`);
+                    }
+                }
+
+                // Slot NAME never goes back into BALLASTPLAN(mT) row
+                // LC_NAME_ROW (that row stays put as the label row) —
+                // instead it's recorded here as "currently restored
+                // condition", per the modal description above.
+                try {
+                    await Excel.run(async (context) => {
+                        const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                        editorSheet.getRange(LC_RESTORE_NAME_CELL).values = [[name]];
+                        await context.sync();
+                    });
+                    results.push(`✓ name → Load_Editor!${LC_RESTORE_NAME_CELL}`);
+                } catch (e) {
+                    console.warn('restore name-cell failed', e);
+                    results.push(`✗ could not write name to Load_Editor!${LC_RESTORE_NAME_CELL} (${(e && e.message) || e})`);
+                }
 
                 const allOk = results.every(r => r.startsWith('✓'));
                 lcShowMsg(i, results.join(' · '), !allOk);
@@ -9388,6 +9501,196 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 if (statusEl) statusEl.textContent = 'restore failed';
             } finally {
                 loadConditionBusy = false;
+            }
+        }
+    </script>
+
+    <script>
+        // ============================================================
+        // STEP DATA LOADER — one button per name found in
+        // BALLASTPLAN(mT)!E7:.. (until the first blank cell). Clicking
+        // a button (e.g. "STEP00") pulls data from the sheet of that
+        // SAME name into Load_Editor:
+        //   <StepSheet>!D21:D..   (until first blank in D) -> Load_Editor!D14:D..
+        //   <StepSheet>!P21:S..   (until first blank in P) -> Load_Editor!D124:G..
+        //   <StepSheet>!AB29, AB30                          -> Load_Editor!R147, R148
+        // This is distinct from the "Load Conditions" Firebase
+        // save/restore feature above: it reads live directly from
+        // another Excel sheet (no Firebase involved), and the sheet
+        // it reads from is picked purely by matching the button's own
+        // label/name, not a fixed sheet name.
+        // Reuses PUMP_SHEET_NAME ("BALLASTPLAN(mT)"), EXCEL_START_ROW
+        // (14), AXLE_START_ROW (124), isOfficeInitialized,
+        // logAutoBallast, and the lcColLetterToIndex/lcColIndexToLetter
+        // helpers already defined in the Load Conditions script above
+        // (classic inline script blocks share one global scope).
+        // ============================================================
+        const STEP_NAME_SHEET = PUMP_SHEET_NAME;   // "BALLASTPLAN(mT)"
+        const STEP_NAME_ROW = 7;                   // row holding step names
+        const STEP_NAME_START_COL = "E";           // start column for step names (until blank)
+        const STEP_NAME_MAX_COLS = 60;             // generous over-read, trimmed at first blank cell
+
+        const STEP_SRC_D_START_ROW = 21;           // source sheet: col D, start row (until blank)
+        const STEP_SRC_D_MAX_ROWS = 300;
+        const STEP_SRC_PQRS_START_ROW = 21;        // source sheet: cols P:S, start row (until blank in P)
+        const STEP_SRC_PQRS_MAX_ROWS = 300;
+        const STEP_SRC_AB_ROW_1 = 29;               // source sheet: single cell AB29
+        const STEP_SRC_AB_ROW_2 = 30;               // source sheet: single cell AB30
+
+        const STEP_DEST_D_START_ROW = EXCEL_START_ROW;   // Load_Editor!D14:.. (14)
+        const STEP_DEST_D_MAX_ROWS = 300;                 // block cleared before writing
+        const STEP_DEST_DG_START_ROW = AXLE_START_ROW;   // Load_Editor!D124:G.. (124)
+        const STEP_DEST_DG_MAX_ROWS = 300;                // block cleared before writing
+        const STEP_DEST_R_ROW_1 = 147;              // Load_Editor!R147 <- source AB29
+        const STEP_DEST_R_ROW_2 = 148;              // Load_Editor!R148 <- source AB30
+
+        let stepLoaderNames = [];
+        let stepLoaderBusy = false;
+
+        // ---- Read step names from BALLASTPLAN(mT)!E7:.. (until blank) ----
+        async function pullStepLoaderNames() {
+            if (!isOfficeInitialized) {
+                renderStepLoaderButtons();
+                return;
+            }
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getItem(STEP_NAME_SHEET);
+                    const endCol = lcColIndexToLetter(lcColLetterToIndex(STEP_NAME_START_COL) + STEP_NAME_MAX_COLS - 1);
+                    const range = sheet.getRange(`${STEP_NAME_START_COL}${STEP_NAME_ROW}:${endCol}${STEP_NAME_ROW}`);
+                    range.load("values");
+                    await context.sync();
+
+                    const row = (range.values && range.values[0]) || [];
+                    const names = [];
+                    for (const v of row) {
+                        if (v === '' || v === null || v === undefined) break;
+                        names.push(String(v));
+                    }
+                    stepLoaderNames = names;
+                });
+            } catch (e) {
+                console.warn(`Step Data Loader: could not read names from ${STEP_NAME_SHEET}!${STEP_NAME_START_COL}${STEP_NAME_ROW}:..`, e);
+            }
+            renderStepLoaderButtons();
+        }
+
+        function renderStepLoaderButtons() {
+            const el = document.getElementById('stepLoaderBtnGroup');
+            if (!el) return;
+            if (!stepLoaderNames || stepLoaderNames.length === 0) {
+                el.innerHTML = `<span class="tg-modal-sub" style="font-size:10px;">No names found in ${STEP_NAME_SHEET}!${STEP_NAME_START_COL}${STEP_NAME_ROW}:..</span>`;
+                return;
+            }
+            el.innerHTML = stepLoaderNames.map(name =>
+                `<button type="button" class="tg-btn step-loader-btn" title="Pull ${lcEscapeHtml(name)}!D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., AB${STEP_SRC_AB_ROW_1}/${STEP_SRC_AB_ROW_2} into Load_Editor" onclick="loadStepDataToLoadEditor('${lcEscapeHtml(name).replace(/'/g, "\\'")}', this)">${lcEscapeHtml(name)}</button>`
+            ).join('');
+        }
+
+        // ---- Click handler: pull <name> sheet data into Load_Editor ----
+        async function loadStepDataToLoadEditor(stepName, btnEl) {
+            if (!isOfficeInitialized) {
+                alert('Not connected to Excel — Step Data can only be pulled while running as an Excel add-in.');
+                return;
+            }
+            if (stepLoaderBusy) return;
+            stepLoaderBusy = true;
+            if (btnEl) btnEl.classList.add('busy');
+
+            const results = [];
+            try {
+                let dValues = [];       // Load_Editor!D14:.. source column
+                let pqrsValues = [];    // Load_Editor!D124:G.. source 4 columns (from P:S)
+                let ab1 = null, ab2 = null;
+
+                // --- 1) Read everything from the source (stepName) sheet ---
+                await Excel.run(async (context) => {
+                    let srcSheet;
+                    try {
+                        srcSheet = context.workbook.worksheets.getItem(stepName);
+                    } catch (e) {
+                        throw new Error(`sheet "${stepName}" not found`);
+                    }
+
+                    const dEndRow = STEP_SRC_D_START_ROW + STEP_SRC_D_MAX_ROWS - 1;
+                    const rangeD = srcSheet.getRange(`D${STEP_SRC_D_START_ROW}:D${dEndRow}`);
+                    rangeD.load("values");
+
+                    const pqrsEndRow = STEP_SRC_PQRS_START_ROW + STEP_SRC_PQRS_MAX_ROWS - 1;
+                    const rangePQRS = srcSheet.getRange(`P${STEP_SRC_PQRS_START_ROW}:S${pqrsEndRow}`);
+                    rangePQRS.load("values");
+
+                    const rangeAB = srcSheet.getRange(`AB${STEP_SRC_AB_ROW_1}:AB${STEP_SRC_AB_ROW_2}`);
+                    rangeAB.load("values");
+
+                    await context.sync();
+
+                    // Trim D column at first blank cell.
+                    for (const r of (rangeD.values || [])) {
+                        const v = r[0];
+                        if (v === '' || v === null || v === undefined) break;
+                        dValues.push(v);
+                    }
+
+                    // Trim P:S rows at first blank cell in column P (index 0).
+                    for (const r of (rangePQRS.values || [])) {
+                        const v = r[0];
+                        if (v === '' || v === null || v === undefined) break;
+                        pqrsValues.push([r[0], r[1], r[2], r[3]]);
+                    }
+
+                    const abv = rangeAB.values || [];
+                    ab1 = (abv[0] && abv[0][0] !== undefined) ? abv[0][0] : null;
+                    ab2 = (abv[1] && abv[1][0] !== undefined) ? abv[1][0] : null;
+                });
+
+                if (dValues.length === 0 && pqrsValues.length === 0 && ab1 === null && ab2 === null) {
+                    throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or AB${STEP_SRC_AB_ROW_1}/${STEP_SRC_AB_ROW_2}`);
+                }
+
+                // --- 2) Write everything into Load_Editor ---
+                await Excel.run(async (context) => {
+                    const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+
+                    // D14:D.. — clear the generous block first, then write
+                    // only the rows actually read (same convention as the
+                    // Trailer Generator's D:G124 clear-then-write above).
+                    const dBlockEndRow = STEP_DEST_D_START_ROW + STEP_DEST_D_MAX_ROWS - 1;
+                    editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dBlockEndRow}`).clear(Excel.ClearApplyTo.contents);
+                    if (dValues.length > 0) {
+                        const dWriteEndRow = STEP_DEST_D_START_ROW + dValues.length - 1;
+                        editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dWriteEndRow}`).values = dValues.map(v => [v]);
+                    }
+
+                    // D124:G.. — same clear-then-write pattern, 4 columns.
+                    const dgBlockEndRow = STEP_DEST_DG_START_ROW + STEP_DEST_DG_MAX_ROWS - 1;
+                    editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgBlockEndRow}`).clear(Excel.ClearApplyTo.contents);
+                    if (pqrsValues.length > 0) {
+                        const dgWriteEndRow = STEP_DEST_DG_START_ROW + pqrsValues.length - 1;
+                        editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = pqrsValues;
+                    }
+
+                    // R147 / R148 — single cells, always overwritten directly.
+                    editorSheet.getRange(`R${STEP_DEST_R_ROW_1}`).values = [[ab1]];
+                    editorSheet.getRange(`R${STEP_DEST_R_ROW_2}`).values = [[ab2]];
+
+                    await context.sync();
+                });
+
+                results.push(`✓ D${STEP_SRC_D_START_ROW}:.. → Load_Editor!D${STEP_DEST_D_START_ROW}:.. (${dValues.length} value(s))`);
+                results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
+                results.push(`✓ AB${STEP_SRC_AB_ROW_1}/${STEP_SRC_AB_ROW_2} → Load_Editor!R${STEP_DEST_R_ROW_1}/R${STEP_DEST_R_ROW_2}`);
+                logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
+
+                // Refresh the dashboard from the freshly-written Load_Editor data.
+                setTimeout(() => pullExcelTankData(), 300);
+            } catch (e) {
+                console.warn(`Step Data Loader: failed for "${stepName}"`, e);
+                alert(`Could not pull Step Data from "${stepName}": ${(e && e.message) || e}`);
+                logAutoBallast(`✗ Step Data "${stepName}" failed: ${(e && e.message) || e}`);
+            } finally {
+                stepLoaderBusy = false;
+                if (btnEl) btnEl.classList.remove('busy');
             }
         }
     </script>
