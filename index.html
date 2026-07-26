@@ -1565,7 +1565,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-59(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-59(Rev.01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8707,13 +8707,17 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
          the first blank cell across the row). Save captures the
          CURRENT Excel values from:
            - Load_Editor!D14:D..        (tank Filling[mT], one per tank row)
-           - Load_Editor!E124:F..       (axle Xpos[m] / Ypos[m])
-           - BALLASTPLAN(mT)!F177:..    (one data row)
+           - Load_Editor!D124:G..       (axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m])
          and stores them in Firebase under loadConditions/<slot>.
-         Restore writes those three ranges back to the SAME positions,
-         except the slot's own name is written to Load_Editor!R148
-         instead of back into BALLASTPLAN(mT) row 7 (row 7 stays as the
-         label row and is never overwritten by Restore).
+         Restore writes those two ranges back to the SAME positions.
+         The time value is handled differently: it is NOT part of the
+         saved snapshot — instead, restoring slot i re-reads LIVE
+         BALLASTPLAN(mT) column (F + i) row 177 (slot 0/"STEP00" = F177,
+         slot 1/"STEP01" = G177, slot 2/"STEP02" = H177, ...) and writes
+         it straight into the single cell Load_Editor!R148. The restored
+         condition's name itself is written to Load_Editor!R14 instead
+         of back into BALLASTPLAN(mT) row 7 (row 7 stays as the label
+         row and is never overwritten by Restore).
          ============================================================ -->
     <div class="tg-overlay" id="lcOverlay" onclick="if(event.target===this) closeLoadConditionsModal()">
         <div class="tg-modal" id="lcModal">
@@ -8726,15 +8730,18 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 onward (one name per column, until the first blank cell) — these
                 are the "steps" compared in the tables further down.
                 <strong>Save</strong> captures the current
-                <strong>Load_Editor!D14:D..</strong> (tank Filling[mT]),
-                <strong>Load_Editor!E124:F..</strong> (axle Xpos[m]/Ypos[m])
-                and <strong>BALLASTPLAN(mT)!F177:..</strong> (time values)
+                <strong>Load_Editor!D14:D..</strong> (tank Filling[mT]) and
+                <strong>Load_Editor!D124:G..</strong> (axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m])
                 and keeps them in Firebase under that name.
                 <strong>Restore</strong> pushes a saved condition's tank
                 weights and axle positions back to those same Load_Editor
-                positions, and pushes the BALLASTPLAN(mT) row&nbsp;177 time
-                values to <strong>Load_Editor!R148:..</strong> instead of back
-                into BALLASTPLAN(mT) &mdash; the restored condition's name
+                positions. The time value works differently: restoring
+                slot <em>i</em> re-reads the LIVE BALLASTPLAN(mT) column
+                (F&nbsp;+&nbsp;i) at row&nbsp;177 &mdash; e.g. "STEP00" reads
+                <strong>F177</strong>, "STEP01" reads <strong>G177</strong>,
+                "STEP02" reads <strong>H177</strong>, and so on &mdash; and
+                writes it straight into <strong>Load_Editor!R148</strong>
+                (not from the saved snapshot). The restored condition's name
                 itself goes to <strong>Load_Editor!R14</strong>. Add or
                 rename slots by editing row&nbsp;7 in Excel, then use
                 "↻ Refresh names" below.
@@ -8764,10 +8771,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <div class="lc-table-scroll" id="lcMergedAxles"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
                         <div class="lc-preview-section-title">Start time of step</div>
                         <div class="lc-table-scroll" id="lcMergedTime"><div class="tg-modal-sub">Click "Refresh comparison" to load.</div></div>
-                        <div class="tg-train-list-actions">
-                            <button type="button" class="tg-add-train-btn" onclick="restoreStepStartTimesToLoadEditor()">↩ Restore to Load_Editor!R148</button>
-                        </div>
-                        <div class="lc-msg" id="lcStepStartMsg"></div>
                     </div>
                 </div>
             </div>
@@ -8975,7 +8978,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <button type="button" class="tg-add-train-btn" onclick="restoreLoadCondition(${i})">↩ Restore "${safe}" to Excel</button>
                     </div>
                     <div class="lc-confirm-row" id="lcConfirm_${i}">
-                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.., D${AXLE_START_ROW}:G.., and Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. with "${safe}"?</span>
+                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.., D${AXLE_START_ROW}:G.., and Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW} with "${safe}"?</span>
                         <button type="button" class="tg-add-train-btn" onclick="confirmRestoreLoadCondition(${i})">✓ Yes, restore</button>
                         <button type="button" class="tg-add-train-btn" onclick="cancelRestoreLoadCondition(${i})">✕ Cancel</button>
                     </div>
@@ -9158,45 +9161,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
         }
 
-        // ---- Restore: push the LIVE BALLASTPLAN(mT)!F177:.. time values
-        // straight to Load_Editor!R148:.. (LC_TIME_RESTORE_START_COL /
-        // LC_TIME_RESTORE_ROW), independent of any saved Firebase
-        // condition — this always reflects whatever is currently in the
-        // sheet, re-read fresh on each click. ----
-        async function restoreStepStartTimesToLoadEditor() {
-            const msgEl = document.getElementById('lcStepStartMsg');
-            const setMsg = (text, isError) => {
-                if (!msgEl) return;
-                msgEl.textContent = text;
-                msgEl.classList.remove('lc-msg-ok', 'lc-msg-error');
-                msgEl.classList.add('lc-msg-show', isError ? 'lc-msg-error' : 'lc-msg-ok');
-            };
-            if (!isOfficeInitialized) {
-                setMsg('Open this add-in inside Excel to push data back into the workbook.', true);
-                return;
-            }
-            try {
-                await pullStepStartTimes();
-                if (!lcStepStartValues || lcStepStartValues.length === 0) {
-                    setMsg(`No values found in ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:.. to restore.`, true);
-                    return;
-                }
-                await Excel.run(async (context) => {
-                    const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
-                    const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_TIME_RESTORE_START_COL) + lcStepStartValues.length - 1);
-                    const destRange = editorSheet.getRange(`${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:${endCol}${LC_TIME_RESTORE_ROW}`);
-                    destRange.values = [lcStepStartValues];
-                    destRange.numberFormat = [lcStepStartValues.map((_, idx) => lcStepStartFormats[idx] || "h:mm")];
-                    await context.sync();
-                });
-                setMsg(`✓ Restored ${lcStepStartValues.length} value(s) → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:..`, false);
-                logAutoBallast(`↩ Restored ${PUMP_SHEET_NAME}!${LC_START_COL}${LC_DATA_ROW}:.. → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. (${lcStepStartValues.length} value(s))`);
-            } catch (e) {
-                console.warn('restoreStepStartTimesToLoadEditor error', e);
-                setMsg('Could not restore step start times: ' + ((e && e.message) || e), true);
-            }
-        }
-
         // ---- Save: Excel -> Firebase ----
         async function saveLoadCondition(i) {
             if (loadConditionBusy) return;
@@ -9352,35 +9316,56 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (statusEl) statusEl.textContent = 'restoring…';
             lcClearMsg(i);
             try {
-                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: "no-store" });
-                if (!res.ok) throw new Error("HTTP " + res.status);
-                const data = await res.json();
-                loadConditionDataCache[i] = data;
-                if (!data) {
-                    lcShowMsg(i, `No saved data found for "${name}" yet — use Save first.`, true);
-                    if (statusEl) statusEl.textContent = 'not saved yet';
-                    return;
-                }
-
-                const weights = data.weights || [];
-                const axles = data.axles || [];
-                const planRow = data.planRow || [];
-                const planFormats = data.planFormats || [];
-
-                if (weights.length === 0 && axles.length === 0 && planRow.length === 0) {
-                    lcShowMsg(i, `"${name}" has no saved values in any of the three ranges.`, true);
-                    if (statusEl) statusEl.textContent = 'nothing to restore';
-                    return;
-                }
-
-                // Each range is written in its OWN Excel.run/context.sync()
-                // so one bad value (e.g. a stray formula/text) can't abort
-                // the other two ranges — Office.js only commits everything
-                // queued in a context together at sync() time, so batching
-                // all three into one Excel.run meant a single failure could
-                // silently cancel the whole restore.
+                // Each range/value is written in its OWN Excel.run/context.sync()
+                // so one bad value (e.g. a stray formula/text) can't abort the
+                // others — Office.js only commits everything queued in a
+                // context together at sync() time, so batching them into one
+                // Excel.run meant a single failure could silently cancel the
+                // whole restore.
                 const results = [];
                 let anyWritten = false;
+
+                // ---- Time value: LIVE from BALLASTPLAN(mT) — NOT the saved
+                // Firebase snapshot. Slot i's column is (LC_START_COL + i):
+                // slot 0 ("STEP00") reads F177, slot 1 ("STEP01") reads
+                // G177, slot 2 ("STEP02") reads H177, and so on — written
+                // into the single cell Load_Editor!R148
+                // (LC_TIME_RESTORE_START_COL/LC_TIME_RESTORE_ROW). ----
+                const srcCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + i);
+                try {
+                    await Excel.run(async (context) => {
+                        const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
+                        const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                        const srcCell = planSheet.getRange(`${srcCol}${LC_DATA_ROW}`);
+                        srcCell.load("values, numberFormat");
+                        await context.sync();
+
+                        const destCell = editorSheet.getRange(`${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}`);
+                        destCell.values = srcCell.values;
+                        destCell.numberFormat = srcCell.numberFormat;
+                        await context.sync();
+                    });
+                    results.push(`✓ ${PUMP_SHEET_NAME}!${srcCol}${LC_DATA_ROW} → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}`);
+                    anyWritten = true;
+                } catch (e) {
+                    console.warn('restore live time value failed', e);
+                    results.push(`✗ ${PUMP_SHEET_NAME}!${srcCol}${LC_DATA_ROW} → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW} failed (${(e && e.message) || e})`);
+                }
+
+                // ---- Tank weights / axle positions: still from the saved
+                // Firebase snapshot for this named condition, as before. ----
+                let data = null;
+                try {
+                    const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(lcSlugify(name))}.json`, { cache: "no-store" });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    data = await res.json();
+                    loadConditionDataCache[i] = data;
+                } catch (e) {
+                    console.warn(`could not load saved data for "${name}"`, e);
+                }
+
+                const weights = (data && data.weights) || [];
+                const axles = (data && data.axles) || [];
 
                 if (weights.length > 0) {
                     try {
@@ -9411,27 +9396,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     } catch (e) {
                         console.warn('restore axles failed', e);
                         results.push(`✗ axle positions failed (${(e && e.message) || e})`);
-                    }
-                }
-
-                if (planRow.length > 0) {
-                    try {
-                        await Excel.run(async (context) => {
-                            const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
-                            const endCol = lcColIndexToLetter(lcColLetterToIndex(LC_TIME_RESTORE_START_COL) + planRow.length - 1);
-                            const destRange = editorSheet.getRange(`${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:${endCol}${LC_TIME_RESTORE_ROW}`);
-                            destRange.values = [planRow];
-                            // Re-apply the time format captured on Save — this
-                            // is a fresh destination (Load_Editor!R14:..) with
-                            // no pre-existing time formatting of its own.
-                            destRange.numberFormat = [planRow.map((_, idx) => planFormats[idx] || "h:mm")];
-                            await context.sync();
-                        });
-                        results.push(`✓ BALLASTPLAN(mT) row 177 time values → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. (${planRow.length} value(s))`);
-                        anyWritten = true;
-                    } catch (e) {
-                        console.warn('restore plan row failed', e);
-                        results.push(`✗ BALLASTPLAN(mT) row 177 → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}:.. failed (${(e && e.message) || e})`);
                     }
                 }
 
