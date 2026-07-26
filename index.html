@@ -1565,7 +1565,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-59(Rev.01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-59(Rev.02)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8715,9 +8715,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
          BALLASTPLAN(mT) column (F + i) row 177 (slot 0/"STEP00" = F177,
          slot 1/"STEP01" = G177, slot 2/"STEP02" = H177, ...) and writes
          it straight into the single cell Load_Editor!R148. The restored
-         condition's name itself is written to Load_Editor!R14 instead
-         of back into BALLASTPLAN(mT) row 7 (row 7 stays as the label
-         row and is never overwritten by Restore).
+         condition's name is NOT written anywhere in Load_Editor (this
+         was disabled per user request — it used to be written to R14).
+         It is also never written back into BALLASTPLAN(mT) row 7 (row 7
+         stays as the label row and is never overwritten by Restore).
          ============================================================ -->
     <div class="tg-overlay" id="lcOverlay" onclick="if(event.target===this) closeLoadConditionsModal()">
         <div class="tg-modal" id="lcModal">
@@ -8742,7 +8743,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 "STEP02" reads <strong>H177</strong>, and so on &mdash; and
                 writes it straight into <strong>Load_Editor!R148</strong>
                 (not from the saved snapshot). The restored condition's name
-                itself goes to <strong>Load_Editor!R14</strong>. Add or
+                is not written back to Load_Editor. Add or
                 rename slots by editing row&nbsp;7 in Excel, then use
                 "↻ Refresh names" below.
             </p>
@@ -9399,21 +9400,11 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     }
                 }
 
-                // Slot NAME never goes back into BALLASTPLAN(mT) row
-                // LC_NAME_ROW (that row stays put as the label row) —
-                // instead it's recorded here as "currently restored
-                // condition", per the modal description above.
-                try {
-                    await Excel.run(async (context) => {
-                        const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
-                        editorSheet.getRange(LC_RESTORE_NAME_CELL).values = [[name]];
-                        await context.sync();
-                    });
-                    results.push(`✓ name → Load_Editor!${LC_RESTORE_NAME_CELL}`);
-                } catch (e) {
-                    console.warn('restore name-cell failed', e);
-                    results.push(`✗ could not write name to Load_Editor!${LC_RESTORE_NAME_CELL} (${(e && e.message) || e})`);
-                }
+                // Slot NAME write to Load_Editor!R14 DISABLED per user request
+                // (previously wrote the restored condition's name there as a
+                // "currently restored condition" marker; no longer sent).
+                // Slot NAME also never goes back into BALLASTPLAN(mT) row
+                // LC_NAME_ROW (that row stays put as the label row).
 
                 const allOk = results.every(r => r.startsWith('✓'));
                 lcShowMsg(i, results.join(' · '), !allOk);
