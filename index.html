@@ -1565,7 +1565,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-59(Rev.02)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-59(Rev.03)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8710,15 +8710,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
            - Load_Editor!D124:G..       (axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m])
          and stores them in Firebase under loadConditions/<slot>.
          Restore writes those two ranges back to the SAME positions.
-         The time value is handled differently: it is NOT part of the
-         saved snapshot — instead, restoring slot i re-reads LIVE
-         BALLASTPLAN(mT) column (F + i) row 177 (slot 0/"STEP00" = F177,
-         slot 1/"STEP01" = G177, slot 2/"STEP02" = H177, ...) and writes
-         it straight into the single cell Load_Editor!R148. The restored
-         condition's name is NOT written anywhere in Load_Editor (this
-         was disabled per user request — it used to be written to R14).
-         It is also never written back into BALLASTPLAN(mT) row 7 (row 7
-         stays as the label row and is never overwritten by Restore).
+         Restore does NOT touch anything else: the time-value step
+         (which used to read BALLASTPLAN(mT) row 177 and write
+         Load_Editor!R148) and the name-write step (which used to write
+         to Load_Editor!R14) are both disabled per user request.
+         BALLASTPLAN(mT) row 7 (the label row) is never touched by
+         Restore either way.
          ============================================================ -->
     <div class="tg-overlay" id="lcOverlay" onclick="if(event.target===this) closeLoadConditionsModal()">
         <div class="tg-modal" id="lcModal">
@@ -8736,14 +8733,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 and keeps them in Firebase under that name.
                 <strong>Restore</strong> pushes a saved condition's tank
                 weights and axle positions back to those same Load_Editor
-                positions. The time value works differently: restoring
-                slot <em>i</em> re-reads the LIVE BALLASTPLAN(mT) column
-                (F&nbsp;+&nbsp;i) at row&nbsp;177 &mdash; e.g. "STEP00" reads
-                <strong>F177</strong>, "STEP01" reads <strong>G177</strong>,
-                "STEP02" reads <strong>H177</strong>, and so on &mdash; and
-                writes it straight into <strong>Load_Editor!R148</strong>
-                (not from the saved snapshot). The restored condition's name
-                is not written back to Load_Editor. Add or
+                positions. It does not write anything else — the time
+                value from BALLASTPLAN(mT) row&nbsp;177 and the condition's
+                name are no longer written back to Load_Editor. Add or
                 rename slots by editing row&nbsp;7 in Excel, then use
                 "↻ Refresh names" below.
             </p>
@@ -8800,9 +8792,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const LC_WEIGHT_MAX_ROWS = 200;        // generous over-read for Load_Editor!D14:D.. (tank weights)
         const LC_WEIGHT_LABEL_COL = "B";       // Load_Editor column holding each tank's name/label, row 14+
         const LC_AXLE_LABEL_COL = "B";         // Load_Editor column holding each axle row's name/label, row 124+
-        const LC_TIME_RESTORE_ROW = 148;       // Load_Editor row that receives BALLASTPLAN(mT)!F177:.. on Restore
-        const LC_TIME_RESTORE_START_COL = "R"; // Load_Editor column that receives BALLASTPLAN(mT)!F177:.. on Restore
-        const LC_RESTORE_NAME_CELL = "R14";    // Load_Editor cell that receives the restored slot's name (moved off R148 so it doesn't collide with the time-row values above)
         const LC_FIREBASE_BASE = `${FIREBASE_URL}/loadConditions`;
 
         let loadConditionNames = [];
@@ -8979,7 +8968,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         <button type="button" class="tg-add-train-btn" onclick="restoreLoadCondition(${i})">↩ Restore "${safe}" to Excel</button>
                     </div>
                     <div class="lc-confirm-row" id="lcConfirm_${i}">
-                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.., D${AXLE_START_ROW}:G.., and Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW} with "${safe}"?</span>
+                        <span>Overwrite Load_Editor!D${EXCEL_START_ROW}:D.. and D${AXLE_START_ROW}:G.. with "${safe}"?</span>
                         <button type="button" class="tg-add-train-btn" onclick="confirmRestoreLoadCondition(${i})">✓ Yes, restore</button>
                         <button type="button" class="tg-add-train-btn" onclick="cancelRestoreLoadCondition(${i})">✕ Cancel</button>
                     </div>
@@ -9326,32 +9315,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const results = [];
                 let anyWritten = false;
 
-                // ---- Time value: LIVE from BALLASTPLAN(mT) — NOT the saved
-                // Firebase snapshot. Slot i's column is (LC_START_COL + i):
-                // slot 0 ("STEP00") reads F177, slot 1 ("STEP01") reads
-                // G177, slot 2 ("STEP02") reads H177, and so on — written
-                // into the single cell Load_Editor!R148
-                // (LC_TIME_RESTORE_START_COL/LC_TIME_RESTORE_ROW). ----
-                const srcCol = lcColIndexToLetter(lcColLetterToIndex(LC_START_COL) + i);
-                try {
-                    await Excel.run(async (context) => {
-                        const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
-                        const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
-                        const srcCell = planSheet.getRange(`${srcCol}${LC_DATA_ROW}`);
-                        srcCell.load("values, numberFormat");
-                        await context.sync();
-
-                        const destCell = editorSheet.getRange(`${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}`);
-                        destCell.values = srcCell.values;
-                        destCell.numberFormat = srcCell.numberFormat;
-                        await context.sync();
-                    });
-                    results.push(`✓ ${PUMP_SHEET_NAME}!${srcCol}${LC_DATA_ROW} → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW}`);
-                    anyWritten = true;
-                } catch (e) {
-                    console.warn('restore live time value failed', e);
-                    results.push(`✗ ${PUMP_SHEET_NAME}!${srcCol}${LC_DATA_ROW} → Load_Editor!${LC_TIME_RESTORE_START_COL}${LC_TIME_RESTORE_ROW} failed (${(e && e.message) || e})`);
-                }
+                // ---- Time value restore DISABLED per user request.
+                // This step used to read the LIVE time value from
+                // BALLASTPLAN(mT) row 177 (slot 0/"STEP00" = F177,
+                // slot 1/"STEP01" = G177, slot 2/"STEP02" = H177, ...)
+                // and write it into Load_Editor!R148. Restore no longer
+                // reads from BALLASTPLAN(mT) row 177 or writes to R148
+                // at all. ----
 
                 // ---- Tank weights / axle positions: still from the saved
                 // Firebase snapshot for this named condition, as before. ----
