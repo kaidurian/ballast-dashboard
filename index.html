@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-60(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-60(Rev.01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1603,10 +1603,10 @@
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
             <button type="button" class="tg-btn" title="Save/restore named load conditions (Load_Editor!D14:D.., E124:F.., and BALLASTPLAN(mT)!F177:..) to/from Firebase" onclick="openLoadConditionsModal()">💾 Load Conditions</button>
-            <div class="toggle-container step-loader-group" title="One button per name found in BALLASTPLAN(mT)!E7:.. (until the first blank cell). Click a button (e.g. STEP00) to pull that SAME-NAME sheet's data into Load_Editor: col D (row 21 on) → Load_Editor!D14:.., cols P:S (row 21 on) → Load_Editor!D124:G.., and AB29/AB30 → Load_Editor!R147/R148.">
+            <div class="toggle-container step-loader-group" title="One button per name found in BALLASTPLAN(mT)!F7:.. (until the first blank cell). Click a button (e.g. STEP00) to pull that SAME-NAME sheet's data into Load_Editor: col D (row 21 on) → Load_Editor!D14:.., cols P:S (row 21 on) → Load_Editor!D124:G.., and AB29/AB30 → Load_Editor!R147/R148.">
                 <span>📥 Step Data</span>
                 <div class="step-loader-btn-group" id="stepLoaderBtnGroup"><!-- buttons rendered by renderStepLoaderButtons() --></div>
-                <button type="button" class="tg-btn" title="Refresh step names from BALLASTPLAN(mT)!E7:.." onclick="pullStepLoaderNames()">↻</button>
+                <button type="button" class="tg-btn" title="Refresh step names from BALLASTPLAN(mT)!F7:.." onclick="pullStepLoaderNames()">↻</button>
             </div>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
@@ -9508,7 +9508,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
     <script>
         // ============================================================
         // STEP DATA LOADER — one button per name found in
-        // BALLASTPLAN(mT)!E7:.. (until the first blank cell). Clicking
+        // BALLASTPLAN(mT)!F7:.. (until the first blank cell). Clicking
         // a button (e.g. "STEP00") pulls data from the sheet of that
         // SAME name into Load_Editor:
         //   <StepSheet>!D21:D..   (until first blank in D) -> Load_Editor!D14:D..
@@ -9527,7 +9527,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // ============================================================
         const STEP_NAME_SHEET = PUMP_SHEET_NAME;   // "BALLASTPLAN(mT)"
         const STEP_NAME_ROW = 7;                   // row holding step names
-        const STEP_NAME_START_COL = "E";           // start column for step names (until blank)
+        const STEP_NAME_START_COL = "F";           // start column for step names (until blank)
         const STEP_NAME_MAX_COLS = 60;             // generous over-read, trimmed at first blank cell
 
         const STEP_SRC_D_START_ROW = 21;           // source sheet: col D, start row (until blank)
@@ -9547,7 +9547,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         let stepLoaderNames = [];
         let stepLoaderBusy = false;
 
-        // ---- Read step names from BALLASTPLAN(mT)!E7:.. (until blank) ----
+        // ---- Read step names from BALLASTPLAN(mT)!F7:.. (until blank) ----
         async function pullStepLoaderNames() {
             if (!isOfficeInitialized) {
                 renderStepLoaderButtons();
