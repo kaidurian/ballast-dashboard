@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-60(Rev.04)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-61-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1603,6 +1603,7 @@
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
             <button type="button" class="tg-btn" title="Save/restore named load conditions (Load_Editor!D14:D.., E124:F.., and BALLASTPLAN(mT)!F177:..) to/from Firebase" onclick="openLoadConditionsModal()">💾 Load Conditions</button>
+            <button type="button" class="tg-btn" title="View saved load conditions straight from Firebase — no Excel connection needed. Refresh + view-only Restore." onclick="openLoadConditionsViewerModal()">📄 Load Conditions Viewer</button>
             <div class="toggle-container step-loader-group" title="One button per name found in BALLASTPLAN(mT)!F7:.. (until the first blank cell). Click a button (e.g. STEP00) to pull that SAME-NAME sheet's data into Load_Editor: col D (row 21 on) → Load_Editor!D14:.., cols P:S (row 21 on) → Load_Editor!D124:G.., AB29 → Load_Editor!R147, and AB30 → Load_Editor!R148.">
                 <span>📥 Step Data</span>
                 <div class="step-loader-btn-group" id="stepLoaderBtnGroup"><!-- buttons rendered by renderStepLoaderButtons() --></div>
@@ -8795,6 +8796,70 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         </div>
     </div>
 
+    <!-- ============================================================
+         LOAD CONDITIONS VIEWER MODAL (markup)
+         Firebase-only view of the same loadConditions/<slug> data the
+         modal above saves — reads directly from Firebase with no
+         Excel/Office.js dependency, so it works identically whether
+         this page is opened as the Excel add-in or as a standalone
+         webpage. Deliberately only two actions per condition:
+           ↻ Refresh — re-fetch that one condition's data from Firebase
+           ↩ Restore — there's nothing to write back into from a
+                        standalone page, so this just opens/shows the
+                        saved values (tank weights, axle table, time
+                        value) inline for viewing.
+         "Save" is intentionally NOT here — saving still only happens
+         from the "💾 Load Conditions" modal above, which reads live
+         Excel data. Reuses FIREBASE_URL, LC_FIREBASE_BASE,
+         EXCEL_START_ROW, AXLE_START_ROW, and the tg-*/lc-* CSS classes
+         already defined for the modal above.
+         ============================================================ -->
+    <div class="tg-overlay" id="lcvOverlay" onclick="if(event.target===this) closeLoadConditionsViewerModal()">
+        <div class="tg-modal" id="lcvModal">
+            <div class="tg-modal-header">
+                <h2>📄 Load Conditions Viewer</h2>
+                <button type="button" class="tg-close-x" title="Close" onclick="closeLoadConditionsViewerModal()">✕</button>
+            </div>
+            <p class="tg-modal-sub">
+                Every condition below was saved from the
+                <strong>💾 Load Conditions</strong> panel into Firebase
+                (tank <strong>Filling[mT]</strong>, axle
+                <strong>Line load[t]/Xpos[m]/Ypos[m]/VCG[m]</strong>, and
+                <strong>BALLASTPLAN(mT)</strong> time values). This viewer only
+                reads that Firebase data, so it works even without an Excel
+                connection — <strong>Restore</strong> here just opens the
+                saved values for viewing rather than writing them into a
+                workbook.
+            </p>
+
+            <div class="tg-modal-body">
+                <div class="tg-modal-col-left" style="flex: 1 1 100%; max-width: none;">
+                    <div class="tg-train-list-actions">
+                        <button type="button" class="tg-add-train-btn" onclick="lcvRefreshAll()">↻ Refresh</button>
+                    </div>
+                    <div id="lcvSlotList"><div class="tg-modal-sub">Loading saved conditions…</div></div>
+
+                    <div class="tg-train-card" style="margin-top: 14px;">
+                        <div class="tg-train-card-header">
+                            <strong>📊 Compare saved steps</strong>
+                            <span class="tg-train-summary" id="lcvCompareStatus">not loaded yet</span>
+                        </div>
+                        <div class="lc-preview-section-title">Load_Editor!D14:D.. — Tank Filling[mT] by step</div>
+                        <div class="lc-table-scroll" id="lcvMergedWeights"><div class="tg-modal-sub">Click "Refresh" to load.</div></div>
+                        <div class="lc-preview-section-title">Load_Editor!D124:G.. — Axle Line load[t]/Xpos[m]/Ypos[m]/VCG[m] by step</div>
+                        <div class="lc-table-scroll" id="lcvMergedAxles"><div class="tg-modal-sub">Click "Refresh" to load.</div></div>
+                        <div class="lc-preview-section-title">BALLASTPLAN(mT)!F177:.. — Start time of step</div>
+                        <div class="lc-table-scroll" id="lcvMergedTime"><div class="tg-modal-sub">Click "Refresh" to load.</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tg-footer">
+                <button type="button" class="tg-btn" onclick="closeLoadConditionsViewerModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // ============================================================
         // LOAD CONDITIONS — named save/restore snapshots via Firebase
@@ -9251,6 +9316,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (statusEl) statusEl.textContent = 'saving…';
             try {
                 let weights = [], axles = [], planRow = [], planFormats = [];
+                let weightLabels = [], axleLabels = [];
                 await Excel.run(async (context) => {
                     const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
                     const planSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
@@ -9260,10 +9326,20 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const rangeW = editorSheet.getRange(`D${EXCEL_START_ROW}:D${wEndRow}`);
                     rangeW.load("values");
 
+                    // 1b) Load_Editor!B14:B.. — tank name/label column, read
+                    // alongside the weights in the same batch so the labels
+                    // are guaranteed to line up with the weights being saved.
+                    const rangeWLabel = editorSheet.getRange(`${LC_WEIGHT_LABEL_COL}${EXCEL_START_ROW}:${LC_WEIGHT_LABEL_COL}${wEndRow}`);
+                    rangeWLabel.load("values");
+
                     // 2) Load_Editor!E124:F.. — axle Xpos[m]/Ypos[m], over-read then trim at first blank
                     const aEndRow = AXLE_START_ROW + AXLE_MAX_ROWS - 1;
                     const rangeA = editorSheet.getRange(`E${AXLE_START_ROW}:F${aEndRow}`);
                     rangeA.load("values");
+
+                    // 2b) Load_Editor!B124:B.. — axle name/label column
+                    const rangeALabel = editorSheet.getRange(`${LC_AXLE_LABEL_COL}${AXLE_START_ROW}:${LC_AXLE_LABEL_COL}${aEndRow}`);
+                    rangeALabel.load("values");
 
                     // 3) BALLASTPLAN(mT)!F177:.. — one data row (time-formatted),
                     // over-read then trim at first blank. numberFormat is
@@ -9276,17 +9352,23 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
                     await context.sync();
 
+                    const wLabelVals = rangeWLabel.values || [];
                     for (const r of rangeW.values) {
                         const v = r[0];
                         if (v === '' || v === null || v === undefined) break;
                         weights.push(v);
+                        const lv = wLabelVals[weights.length - 1] && wLabelVals[weights.length - 1][0];
+                        weightLabels.push((lv === '' || lv === null || lv === undefined) ? '' : String(lv));
                     }
+                    const aLabelVals = rangeALabel.values || [];
                     for (const r of rangeA.values) {
                         const [x, y] = r;
                         const xBlank = (x === '' || x === null || x === undefined);
                         const yBlank = (y === '' || y === null || y === undefined);
                         if (xBlank && yBlank) break;
                         axles.push({ x: xBlank ? null : x, y: yBlank ? null : y });
+                        const lv = aLabelVals[axles.length - 1] && aLabelVals[axles.length - 1][0];
+                        axleLabels.push((lv === '' || lv === null || lv === undefined) ? '' : String(lv));
                     }
                     const planValuesRow = (rangeP.values && rangeP.values[0]) || [];
                     const planFormatsRow = (rangeP.numberFormat && rangeP.numberFormat[0]) || [];
@@ -9321,7 +9403,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const payload = {
                     name: name,
                     weights: weights,
+                    weightLabels: weightLabels,
                     axles: axles,
+                    axleLabels: axleLabels,
                     planRow: planRow,
                     planFormats: planFormats,
                     savedAt: new Date().toISOString(),
@@ -9502,6 +9586,295 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             } finally {
                 loadConditionBusy = false;
             }
+        }
+    </script>
+
+    <script>
+        // ============================================================
+        // LOAD CONDITIONS VIEWER — standalone Firebase-only view
+        // See the modal markup above for the full description. Reads
+        // the SAME Firebase node the "💾 Load Conditions" panel above
+        // writes to (loadConditions/<slug>, i.e. LC_FIREBASE_BASE), so
+        // any condition saved from Excel shows up here automatically —
+        // with no Office.js/Excel connection required to view it. This
+        // is the same code as the standalone "load-conditions.html"
+        // viewer, folded into this file and renamed with an "lcv"
+        // prefix so it can't collide with the "lc"-prefixed Save/
+        // Restore-to-Excel functions above (both scripts share one
+        // global scope). Reuses FIREBASE_URL, LC_FIREBASE_BASE,
+        // EXCEL_START_ROW, AXLE_START_ROW, and lcEscapeHtml already
+        // defined above.
+        //
+        // Deliberately only two actions per condition, per request:
+        //   ↻ Refresh  — re-fetch that one condition's data from Firebase
+        //   ↩ Restore  — there's no workbook to write into from a
+        //                standalone page, so this just opens/shows the
+        //                saved values (tank weights, axle table, time
+        //                value) inline instead.
+        // "Save" is intentionally NOT included here — saving still only
+        // happens from the "💾 Load Conditions" panel, which reads live
+        // Excel data.
+        // ============================================================
+        let lcvConditions = [];      // [{slug, name, data}], sorted by name
+        let lcvOpenDetail = {};      // slug -> true/false, which detail panels are expanded
+
+        function openLoadConditionsViewerModal() {
+            document.getElementById('lcvOverlay').classList.add('tg-open');
+            lcvRefreshAll();
+        }
+        function closeLoadConditionsViewerModal() {
+            document.getElementById('lcvOverlay').classList.remove('tg-open');
+        }
+
+        function lcvFmtNum(v) {
+            if (v === null || v === undefined || v === '') return '—';
+            const n = Number(v);
+            return Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : lcEscapeHtml(String(v));
+        }
+
+        // BALLASTPLAN(mT) row 177 holds time-formatted values — an
+        // Excel time serial is a fraction of a 24h day — render as H:MM.
+        function lcvFmtTime(v) {
+            if (v === null || v === undefined || v === '') return '—';
+            const n = Number(v);
+            if (!Number.isFinite(n)) return lcEscapeHtml(String(v));
+            const totalMinutes = Math.round(n * 24 * 60);
+            const h = Math.floor(totalMinutes / 60);
+            const m = ((totalMinutes % 60) + 60) % 60;
+            return `${h}:${String(m).padStart(2, '0')}`;
+        }
+
+        // ---- Load everything from Firebase in one shot ----
+        async function lcvRefreshAll() {
+            const listEl = document.getElementById('lcvSlotList');
+            const statusEl = document.getElementById('lcvCompareStatus');
+            if (listEl) listEl.innerHTML = '<div class="tg-modal-sub">Loading saved conditions…</div>';
+            if (statusEl) statusEl.textContent = 'loading…';
+
+            try {
+                const res = await fetch(`${LC_FIREBASE_BASE}.json`, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const root = await res.json();
+
+                const entries = Object.entries(root || {}).map(([slug, data]) => ({
+                    slug,
+                    name: (data && data.name) ? String(data.name) : slug,
+                    data
+                }));
+                entries.sort((a, b) => a.name.localeCompare(b.name));
+                lcvConditions = entries;
+
+                lcvRenderSlotList();
+                lcvRenderMergedWeightsTable();
+                lcvRenderMergedAxlesTable();
+                lcvRenderMergedTimeTable();
+                if (statusEl) statusEl.textContent = 'updated ' + new Date().toLocaleString();
+            } catch (e) {
+                console.warn('lcvRefreshAll error', e);
+                if (listEl) listEl.innerHTML = `<div class="tg-modal-sub">Could not reach Firebase: ${lcEscapeHtml((e && e.message) || e)}</div>`;
+                if (statusEl) statusEl.textContent = 'failed to load';
+            }
+        }
+
+        // ---- Refresh a single condition's data from Firebase ----
+        async function lcvRefreshOne(slug) {
+            const statusEl = document.getElementById('lcvStatus_' + slug);
+            if (statusEl) statusEl.textContent = 'refreshing…';
+            try {
+                const res = await fetch(`${LC_FIREBASE_BASE}/${encodeURIComponent(slug)}.json`, { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const entry = lcvConditions.find(c => c.slug === slug);
+                if (entry) entry.data = data;
+                lcvRenderSlotStatus(slug);
+                if (lcvOpenDetail[slug]) lcvRenderSlotDetail(slug);
+            } catch (e) {
+                console.warn(`lcvRefreshOne(${slug}) error`, e);
+                if (statusEl) statusEl.textContent = 'status unknown';
+            }
+        }
+
+        function lcvStatusText(data) {
+            if (!data || !data.savedAt) return 'not saved yet';
+            const wCount = (data.weights || []).length;
+            const aCount = (data.axles || []).length;
+            const tCount = (data.planRow || []).filter(v => v !== null && v !== undefined && v !== '').length;
+            return `saved ${new Date(data.savedAt).toLocaleString()} — ${wCount} wt · ${aCount} axle · ${tCount} time`;
+        }
+
+        function lcvRenderSlotStatus(slug) {
+            const el = document.getElementById('lcvStatus_' + slug);
+            const entry = lcvConditions.find(c => c.slug === slug);
+            if (!el || !entry) return;
+            el.textContent = lcvStatusText(entry.data);
+        }
+
+        // ---- Card list ----
+        function lcvRenderSlotList() {
+            const listEl = document.getElementById('lcvSlotList');
+            if (!listEl) return;
+            if (!lcvConditions || lcvConditions.length === 0) {
+                listEl.innerHTML = '<div class="tg-modal-sub">No saved load conditions found in Firebase yet. Save one from the "💾 Load Conditions" panel first.</div>';
+                return;
+            }
+            listEl.innerHTML = lcvConditions.map(({ slug, name, data }) => {
+                const safe = lcEscapeHtml(name);
+                return `
+                <div class="tg-train-card">
+                    <div class="tg-train-card-header">
+                        <strong>${safe}</strong>
+                        <span class="tg-train-summary" id="lcvStatus_${slug}">${lcEscapeHtml(lcvStatusText(data))}</span>
+                    </div>
+                    <div class="tg-train-list-actions">
+                        <button type="button" class="tg-add-train-btn" onclick="lcvRefreshOne('${slug}')">↻ Refresh</button>
+                        <button type="button" class="tg-add-train-btn" onclick="lcvToggleDetail('${slug}')" id="lcvRestoreBtn_${slug}">↩ Restore (view)</button>
+                    </div>
+                    <div class="lc-msg lc-msg-show" id="lcvMsg_${slug}" style="color: var(--text-muted); background: none; border: none;"></div>
+                    <div id="lcvDetail_${slug}" style="display:none; margin-top: 10px;"></div>
+                </div>`;
+            }).join('');
+        }
+
+        // ---- "Restore" here has nothing to write into, so it just
+        // expands/collapses a read-only view of the saved snapshot. ----
+        function lcvToggleDetail(slug) {
+            lcvOpenDetail[slug] = !lcvOpenDetail[slug];
+            const btn = document.getElementById('lcvRestoreBtn_' + slug);
+            const wrap = document.getElementById('lcvDetail_' + slug);
+            if (btn) btn.textContent = lcvOpenDetail[slug] ? '↩ Hide' : '↩ Restore (view)';
+            if (lcvOpenDetail[slug]) {
+                lcvRenderSlotDetail(slug);
+                if (wrap) wrap.style.display = 'block';
+            } else {
+                if (wrap) wrap.style.display = 'none';
+            }
+        }
+
+        function lcvRenderSlotDetail(slug) {
+            const wrap = document.getElementById('lcvDetail_' + slug);
+            const msgEl = document.getElementById('lcvMsg_' + slug);
+            if (!wrap) return;
+            const entry = lcvConditions.find(c => c.slug === slug);
+            const data = entry && entry.data;
+            if (!data || !data.savedAt) {
+                wrap.innerHTML = '<div class="tg-modal-sub">Nothing saved for this condition yet.</div>';
+                if (msgEl) msgEl.textContent = '';
+                return;
+            }
+
+            const weights = data.weights || [];
+            const weightLabels = data.weightLabels || [];
+            const axles = data.axles || [];
+            const axleLabels = data.axleLabels || [];
+            const planRow = data.planRow || [];
+
+            let html = '';
+
+            html += '<div class="lc-preview-section-title">Tank Filling[mT]</div>';
+            if (weights.length === 0) {
+                html += '<div class="tg-modal-sub">No tank weights saved.</div>';
+            } else {
+                const rows = weights.map((w, r) => {
+                    const lbl = weightLabels[r];
+                    const name = (lbl === undefined || lbl === null || lbl === '') ? `Row ${EXCEL_START_ROW + r}` : lcEscapeHtml(String(lbl));
+                    return `<tr><td>${name}</td><td>${lcvFmtNum(w)}</td></tr>`;
+                }).join('');
+                html += `<div class="lc-table-scroll"><table class="lc-table"><thead><tr><th>Tank</th><th>Filling[mT]</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            }
+
+            html += '<div class="lc-preview-section-title">Trailer arrangement</div>';
+            if (axles.length === 0) {
+                html += '<div class="tg-modal-sub">No axle data saved.</div>';
+            } else {
+                const rows = axles.map((a, r) => {
+                    const lbl = axleLabels[r];
+                    const name = (lbl === undefined || lbl === null || lbl === '') ? `Row ${AXLE_START_ROW + r}` : lcEscapeHtml(String(lbl));
+                    return `<tr><td>${name}</td><td>${lcvFmtNum(a.load)}</td><td>${lcvFmtNum(a.x)}</td><td>${lcvFmtNum(a.y)}</td><td>${lcvFmtNum(a.vcg)}</td></tr>`;
+                }).join('');
+                html += `<div class="lc-table-scroll"><table class="lc-table"><thead><tr><th>Axle line</th><th>Load[t]</th><th>Xpos[m]</th><th>Ypos[m]</th><th>VCG[m]</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            }
+
+            html += '<div class="lc-preview-section-title">Start time of step</div>';
+            const timeVals = planRow.filter(v => v !== null && v !== undefined && v !== '');
+            if (timeVals.length === 0) {
+                html += '<div class="tg-modal-sub">No time value saved.</div>';
+            } else {
+                const cells = planRow.map(v => `<td>${lcvFmtTime(v)}</td>`).join('');
+                html += `<div class="lc-table-scroll"><table class="lc-table"><tbody><tr>${cells}</tr></tbody></table></div>`;
+            }
+
+            wrap.innerHTML = html;
+            if (msgEl) msgEl.textContent = `Viewing saved snapshot from ${new Date(data.savedAt).toLocaleString()}.`;
+        }
+
+        // ---- Merged comparison tables across all saved conditions.
+        // Row labels prefer each condition's own saved weightLabels/
+        // axleLabels (written by saveLoadCondition from Load_Editor!B..),
+        // falling back to generic "Row N" numbering for older snapshots
+        // saved before labels were captured — the row COUNT is the
+        // longest weights/axles array found across all saved conditions.
+        function lcvRowLabelFor(r, key, startRow) {
+            for (const c of lcvConditions) {
+                const labels = c.data && c.data[key];
+                const lbl = labels && labels[r];
+                if (lbl !== undefined && lbl !== null && lbl !== '') return lcEscapeHtml(String(lbl));
+            }
+            return `Row ${startRow + r}`;
+        }
+        function lcvRenderMergedWeightsTable() {
+            const el = document.getElementById('lcvMergedWeights');
+            if (!el) return;
+            const maxRows = lcvConditions.reduce((m, c) => Math.max(m, (c.data && c.data.weights) ? c.data.weights.length : 0), 0);
+            if (maxRows === 0 || lcvConditions.length === 0) {
+                el.innerHTML = '<div class="tg-modal-sub">No saved tank weights to compare yet.</div>';
+                return;
+            }
+            const header = `<tr><th>Tank</th>${lcvConditions.map(c => `<th>${lcEscapeHtml(c.name)}</th>`).join('')}</tr>`;
+            let body = '';
+            for (let r = 0; r < maxRows; r++) {
+                const cells = lcvConditions.map(c => {
+                    const w = c.data && c.data.weights ? c.data.weights[r] : undefined;
+                    return `<td>${lcvFmtNum(w)}</td>`;
+                }).join('');
+                body += `<tr><td>${lcvRowLabelFor(r, 'weightLabels', EXCEL_START_ROW)}</td>${cells}</tr>`;
+            }
+            el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+        }
+
+        function lcvRenderMergedAxlesTable() {
+            const el = document.getElementById('lcvMergedAxles');
+            if (!el) return;
+            const maxRows = lcvConditions.reduce((m, c) => Math.max(m, (c.data && c.data.axles) ? c.data.axles.length : 0), 0);
+            if (maxRows === 0 || lcvConditions.length === 0) {
+                el.innerHTML = '<div class="tg-modal-sub">No saved axle data to compare yet.</div>';
+                return;
+            }
+            const header = `<tr><th>Axle line</th>${lcvConditions.map(c => `<th>${lcEscapeHtml(c.name)} Load</th><th>${lcEscapeHtml(c.name)} X</th><th>${lcEscapeHtml(c.name)} Y</th><th>${lcEscapeHtml(c.name)} VCG</th>`).join('')}</tr>`;
+            let body = '';
+            for (let r = 0; r < maxRows; r++) {
+                const cells = lcvConditions.map(c => {
+                    const a = c.data && c.data.axles ? c.data.axles[r] : undefined;
+                    return `<td>${lcvFmtNum(a ? a.load : undefined)}</td><td>${lcvFmtNum(a ? a.x : undefined)}</td><td>${lcvFmtNum(a ? a.y : undefined)}</td><td>${lcvFmtNum(a ? a.vcg : undefined)}</td>`;
+                }).join('');
+                body += `<tr><td>${lcvRowLabelFor(r, 'axleLabels', AXLE_START_ROW)}</td>${cells}</tr>`;
+            }
+            el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+        }
+
+        function lcvRenderMergedTimeTable() {
+            const el = document.getElementById('lcvMergedTime');
+            if (!el) return;
+            if (lcvConditions.length === 0) {
+                el.innerHTML = '<div class="tg-modal-sub">No saved conditions to compare yet.</div>';
+                return;
+            }
+            const header = `<tr>${lcvConditions.map(c => `<th>${lcEscapeHtml(c.name)}</th>`).join('')}</tr>`;
+            const body = `<tr>${lcvConditions.map(c => {
+                const pr = (c.data && c.data.planRow) || [];
+                const firstVal = pr.find(v => v !== null && v !== undefined && v !== '');
+                return `<td>${lcvFmtTime(firstVal)}</td>`;
+            }).join('')}</tr>`;
+            el.innerHTML = `<table class="lc-table"><thead>${header}</thead><tbody>${body}</tbody></table>`;
         }
     </script>
 
