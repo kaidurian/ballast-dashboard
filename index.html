@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-62-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-63-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1607,6 +1607,7 @@
                 <span>📥 Step Data</span>
                 <div class="step-loader-btn-group" id="stepLoaderBtnGroup"><!-- buttons rendered by renderStepLoaderButtons() --></div>
                 <button type="button" class="tg-btn" title="Refresh step names from BALLASTPLAN(mT)!F7:.." onclick="pullStepLoaderNames()">↻</button>
+                <span id="activeStepLabel" title="Name of the last-loaded step, plus the current Load_Editor!R147 (Date) / R148 (Time)" style="font-size:10px; color:var(--text-muted); white-space:nowrap; margin-left:4px;"></span>
             </div>
             <div class="toggle-container">
                 <span>📐 Dimensions</span>
@@ -3954,6 +3955,7 @@
                     excelSunDateRaw = cellSunDate.values[0][0];
                     excelSunTimeRaw = cellSunTime.values[0][0];
                     if (realSunEnabled) updateRealSun3D();
+                    updateActiveStepLabel(); // keep Date/Time on the "active step" label in sync with R147/R148
                     bargeCornerLabels = rangeCornerLabels.values.map(row => (row[0] !== null && row[0] !== undefined) ? String(row[0]) : '');
                     updateCurrentDeckFromLabels();
 
@@ -6910,6 +6912,39 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             return `${String(hms.hours).padStart(2, '0')}:${String(hms.minutes).padStart(2, '0')} (R148)`;
         }
 
+        // Display-only label for the status line — shows the actual
+        // Load_Editor!R147 calendar date, formatted YYYY-MM-DD. Same
+        // fallback behaviour as getRealSunTimeLabel() above.
+        function getRealSunDateLabel() {
+            if (excelSunDateRaw === null || excelSunDateRaw === undefined || excelSunDateRaw === '') {
+                return new Date().toLocaleDateString() + ' (system clock)';
+            }
+            if (typeof excelSunDateRaw === 'number') {
+                const ymd = excelSerialToYMD(excelSunDateRaw);
+                return `${ymd.year}-${String(ymd.month).padStart(2, '0')}-${String(ymd.day).padStart(2, '0')} (R147)`;
+            }
+            return `${String(excelSunDateRaw)} (R147)`;
+        }
+
+        // ---- "Active step" label — tracks which named step (from
+        // BALLASTPLAN(mT)!F7:..) was last pulled via a "📥 Step Data"
+        // button, alongside the CURRENT Load_Editor!R147 (Date) and
+        // R148 (Time) — R148 is written directly by that same Step
+        // Data pull, so right after a click this shows the step's own
+        // time value; R147 isn't touched by Step Data (it's a
+        // separately-set vessel date) but is re-read on every routine
+        // Excel sync, so this label stays live either way. ----
+        let activeStepName = '';
+        function updateActiveStepLabel() {
+            const el = document.getElementById('activeStepLabel');
+            if (!el) return;
+            if (!activeStepName) {
+                el.textContent = '';
+                return;
+            }
+            el.textContent = `STEP: ${activeStepName} · Date: ${getRealSunDateLabel()} · Time: ${getRealSunTimeLabel()}`;
+        }
+
         function updateRealSun3D() {
             if (!realSunEnabled || realSunLat === null || realSunLon === null || !scene3d || !dirLight3d) return;
             const now = getRealSunDateTime();
@@ -7774,6 +7809,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 // geometry rebuild happened.
                 updateTrailerGhostVisualization3D();
             }
+            // Axle POSITIONS (x/y) aren't part of the signature above —
+            // only the axle COUNT is — so an edit that changes an
+            // existing axle's Xpos/Ypos (2D overlay, Load_Editor, or a
+            // Step Data pull) left the 3D axle groups stuck at their
+            // last build-time position. Sync every call, same as CoG
+            // below, so the 3D axles always follow the 2D/Excel values.
+            syncAxlePositions3D();
             // CoG isn't tied to the tank/axle/pump-count signature either
             // (LCG/TCG/VCG can change on every Excel sync with the counts
             // unchanged), so it's rebuilt every call, same as the ghost group.
@@ -7781,6 +7823,19 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             update3DFillAndAttitude();
             updateLabelAnchorText3D();
             renderLabels3D();
+        }
+
+        // ---- Keep 3D axle group positions following trailerAxles (the
+        // SAME array the 2D overlay reads) without a full geometry
+        // rebuild. Only applies when the axle COUNT already matches —
+        // a count change is handled by the rebuild above, which also
+        // rebuilds axleGroups3d from scratch. ----
+        function syncAxlePositions3D() {
+            if (!axleGroups3d.length || axleGroups3d.length !== trailerAxles.length) return;
+            trailerAxles.forEach((axle, i) => {
+                const g = axleGroups3d[i];
+                if (g) g.position.set(axle.x, 0, worldYToZ3D(axle.y));
+            });
         }
 
         // ============================================================
@@ -9301,6 +9356,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
                 results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW} → Load_Editor!${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`);
                 logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
+
+                // This step is now the "active" one — updates the
+                // STEP/Date/Time label (Date/Time refresh again, live,
+                // once pullExcelTankData() re-reads R147/R148 below).
+                activeStepName = stepName;
+                updateActiveStepLabel();
 
                 // Refresh the dashboard from the freshly-written Load_Editor data.
                 setTimeout(() => pullExcelTankData(), 300);
