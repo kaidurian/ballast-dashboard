@@ -6942,7 +6942,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 el.textContent = '';
                 return;
             }
-             el.textContent = `Date: ${getRealSunDateLabel()} · Time: ${getRealSunTimeLabel()} · STEP: ${activeStepName} `;
+             el.textContent = `${getRealSunDateLabel()} · : ${getRealSunTimeLabel()} · : ${activeStepName} `;
         }
 
         function updateRealSun3D() {
