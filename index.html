@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-63-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-64-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1741,7 +1741,7 @@
         <div class="tank-grid-container" id="autoBallastPanel">
             <div class="section-title">
                 <span>🎯 Auto Ballast</span>
-                <span id="abPriorityLabel" style="font-size:10px; color:var(--text-muted); text-transform:none;">Priority: Heel → Trim → Deck-Quay</span>
+                <span id="abPriorityLabel" style="font-size:10px; color:var(--text-muted); text-transform:none;">Priority: Heel → Trim → Deck-Quay (Full scope)</span>
                 <label class="toggle-container" style="margin:0; font-size:10px;" title="When ON, the target values below are set here and kept as typed — Sync will no longer overwrite them from CREST_301!P1:P9. When OFF (default), targets always follow whatever is in Excel.">
                     <span>✏ Manual targets</span>
                     <input type="checkbox" id="abManualTargetToggle" onchange="setManualTargetOverride(this.checked)">
@@ -1753,6 +1753,17 @@
                 <button class="ab-mode-btn" data-mode="assist" id="abModeAssist" onclick="setAutoBallastMode('assist')">Assist</button>
                 <button class="ab-mode-btn" data-mode="auto-fixed" id="abModeAutoFixed" onclick="setAutoBallastMode('auto-fixed')">Auto Fixed</button>
                 <button class="ab-mode-btn" data-mode="auto-smart" id="abModeAutoSmart" onclick="setAutoBallastMode('auto-smart')">Auto Smart</button>
+            </div>
+
+            <!-- Auto Ballast SCOPE — which factor(s) the optimizer/focus
+                 logic is allowed to correct. Independent of the mode row
+                 above (mode = HOW moves are executed; scope = WHAT is
+                 being corrected). See determineAutoBallastFocus() and
+                 computeErrorFromState(), both gated on autoBallastScope. -->
+            <div class="ab-mode-row" id="abScopeRow" title="Choose which target(s) Auto Ballast tries to correct">
+                <button class="ab-mode-btn ab-scope-btn ab-mode-active" data-scope="all" id="abScopeAll" onclick="setAutoBallastScope('all')">Full (Heel+Trim+Deck)</button>
+                <button class="ab-mode-btn ab-scope-btn" data-scope="trim-heel" id="abScopeTrimHeel" onclick="setAutoBallastScope('trim-heel')">Trim &amp; Heel only</button>
+                <button class="ab-mode-btn ab-scope-btn" data-scope="deck" id="abScopeDeck" onclick="setAutoBallastScope('deck')">Deck corners only</button>
             </div>
 
             <div class="ab-stat-grid">
@@ -2598,6 +2609,14 @@
         }
 
         let autoBallastMode = 'manual';       // 'manual' | 'assist' | 'auto-fixed' | 'auto-smart'
+        // Scope = WHAT determineAutoBallastFocus()/computeErrorFromState()
+        // are allowed to correct, independent of `autoBallastMode` (which
+        // is HOW moves get executed). 'all' = original behavior (Heel >
+        // Trim > Deck-Quay, unchanged). 'trim-heel' = ignore all 6
+        // deck-to-quay corners entirely, correct only heel/trim.
+        // 'deck' = ignore heel/trim entirely, correct only the 6 deck-to-
+        // quay corners (AFT-PS, PS, FWD-PS, AFT-SB, SB, FWD-SB).
+        let autoBallastScope = 'all';         // 'all' | 'trim-heel' | 'deck'
         let autoBallastRunning = false;
         let autoBallastIteration = 0;
         let autoBallastTotalTransferredT = 0; // cumulative |Δ| tonnes applied this session, for §14 time estimate
@@ -4633,9 +4652,12 @@
             const trimErr = state.trim - targetTrimDegrees;
             const deckVals = state.deckLabels.map(extractDeckNumberFromLabel);
             const deckErrs = DECK_KEYS.map((k, i) => deckVals[i] - targetDeck[k]);
-            const total = abHeelWeight * heelErr * heelErr
-                        + abTrimWeight * trimErr * trimErr
-                        + deckErrs.reduce((s, e, i) => s + (abDeckWeights[DECK_KEYS[i]] ?? 100) * e * e, 0);
+            // §7 scope gate — 'trim-heel' zeroes deck's contribution to the
+            // error score, 'deck' zeroes heel/trim's. 'all' is unchanged.
+            const includeHeelTrim = autoBallastScope !== 'deck';
+            const includeDeck = autoBallastScope !== 'trim-heel';
+            const total = (includeHeelTrim ? (abHeelWeight * heelErr * heelErr + abTrimWeight * trimErr * trimErr) : 0)
+                        + (includeDeck ? deckErrs.reduce((s, e, i) => s + (abDeckWeights[DECK_KEYS[i]] ?? 100) * e * e, 0) : 0);
             return { total, heelErr, trimErr, deckErrs };
         }
 
@@ -4651,9 +4673,11 @@
         // (Heel > Trim > Deck-to-quay). Returns null once everything is
         // within tolerance (§13) — i.e. target reached.
         function determineAutoBallastFocus(err) {
-            if (Math.abs(err.heelErr) > AB_HEEL_TOLERANCE) return 'heel';
-            if (Math.abs(err.trimErr) > AB_TRIM_TOLERANCE) return 'trim';
-            if (err.deckErrs.some(e => Math.abs(e) > AB_DECK_TOLERANCE)) return 'deck';
+            const includeHeelTrim = autoBallastScope !== 'deck';       // false when scope === 'deck'
+            const includeDeck = autoBallastScope !== 'trim-heel';     // false when scope === 'trim-heel'
+            if (includeHeelTrim && Math.abs(err.heelErr) > AB_HEEL_TOLERANCE) return 'heel';
+            if (includeHeelTrim && Math.abs(err.trimErr) > AB_TRIM_TOLERANCE) return 'trim';
+            if (includeDeck && err.deckErrs.some(e => Math.abs(e) > AB_DECK_TOLERANCE)) return 'deck';
             return null;
         }
 
@@ -4914,6 +4938,33 @@
                 (mode === 'manual' ? 'Readout only — no automatic moves.' :
                  mode === 'assist' ? 'Click "Suggest Move" for one recommended change at a time.' :
                  'Click Start to run the greedy optimizer automatically.');
+        }
+
+        // ---- Scope selector — "Trim & Heel only" / "Deck corners only" -
+        // Toggles which factor(s) determineAutoBallastFocus() and
+        // computeErrorFromState() are allowed to act on. Safe to switch
+        // mid-run (just stops the run first, same as changing mode).
+        function setAutoBallastScope(scope) {
+            if (autoBallastRunning) stopAutoBallast();
+            autoBallastScope = scope;
+            abSuggestedMove = null;
+            document.querySelectorAll('.ab-scope-btn').forEach(b => {
+                b.classList.toggle('ab-mode-active', b.dataset.scope === scope);
+            });
+            const priorityEl = document.getElementById('abPriorityLabel');
+            if (priorityEl) {
+                priorityEl.textContent = scope === 'trim-heel'
+                    ? 'Priority: Heel → Trim (Trim & Heel only — deck-to-quay ignored)'
+                    : scope === 'deck'
+                    ? 'Priority: Deck-Quay only (AFT-PS, PS, FWD-PS, AFT-SB, SB, FWD-SB — heel/trim ignored)'
+                    : 'Priority: Heel → Trim → Deck-Quay (Full scope)';
+            }
+            logAutoBallast(scope === 'trim-heel'
+                ? '🎯 Scope set to Trim & Heel only — deck-to-quay corners will no longer be corrected.'
+                : scope === 'deck'
+                ? '🎯 Scope set to Deck corners only (AFT-PS, PS, FWD-PS, AFT-SB, SB, FWD-SB) — heel/trim will no longer be corrected.'
+                : '🎯 Scope set to Full — heel, trim and all 6 deck-to-quay corners will be corrected (original priority order).');
+            refreshAutoBallastUI();
         }
 
         function updateAutoBallastButtons() {
@@ -5873,6 +5924,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // grouped (THREE.Group) so the group's own position is the axle
         // LINE's real (x,y) center from Excel — unchanged meaning.
         const EACH_AXLE_BOX = { x: AXLE_WIDTH_X, y: AXLE_RECT_HEIGHT_Y, z: 1.4 }; // one tire's envelope (m) — fallback box, used only if the STL below fails to load/parse
+        // Fallback 3D tire is now a true circular wheel (cylinder), not a
+        // box — diameter 0.875m as specified, axial width unchanged
+        // (EACH_AXLE_BOX.y, 0.325m) so overall axle-line footprint is
+        // unaffected. See the tire-building loop below (getAxleSTLGeometry
+        // fallback) for how this is used.
+        const TIRE_DIAMETER_M = 0.875;
+        const TIRE_RADIUS_M = TIRE_DIAMETER_M / 2;
 
         // ---- real SPMT axle geometry (SPMT-19943D-1axle.stl) ----
         // Embedded as base64 (single-file constraint — see project notes)
@@ -6942,8 +7000,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 el.textContent = '';
                 return;
             }
-             el.textContent = `${getRealSunDateLabel()} · : ${getRealSunTimeLabel()} · : ${activeStepName} `;
-        }
+            el.textContent = `${getRealSunDateLabel()} · ${getRealSunTimeLabel()} · ${activeStepName} `;   
+            }
 
         function updateRealSun3D() {
             if (!realSunEnabled || realSunLat === null || realSunLon === null || !scene3d || !dirLight3d) return;
@@ -7243,20 +7301,31 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         return;
                     }
 
-                    // ---- fallback: simplified box+hub (STL unavailable) ----
-                    // This axle's 2 tires, flanking its own hub.
+                    // ---- fallback: simplified circular-tire+hub (STL unavailable) ----
+                    // This axle's 2 tires, flanking its own hub. Each tire
+                    // is a true circular wheel (CylinderGeometry), diameter
+                    // TIRE_DIAMETER_M (0.875m) — NOT a rectangular box.
+                    // The cylinder's default axis is Y (vertical); rotating
+                    // it 90° about X swings that axis onto Z, which is the
+                    // tire-spacing/axial direction here (axleOffsetY +
+                    // tireOffsetY is a Z position — see axleGroup.position
+                    // below), so the wheel stands upright with its flat
+                    // circular face visible from the side, matching a real
+                    // tire's orientation.
                     [-halfTireOffset, halfTireOffset].forEach((tireOffsetY) => {
-                        const box = new THREE.Mesh(
-                            new THREE.BoxGeometry(EACH_AXLE_BOX.x, boxHeight3d, EACH_AXLE_BOX.y),
+                        const tireGeom = new THREE.CylinderGeometry(TIRE_RADIUS_M, TIRE_RADIUS_M, EACH_AXLE_BOX.y, 24);
+                        tireGeom.rotateX(Math.PI / 2);
+                        const tire = new THREE.Mesh(
+                            tireGeom,
                             new THREE.MeshPhongMaterial({
                                 color: axleColor3d,
                                 transparent: AXLE_STYLE_3D.transparent,
                                 opacity: AXLE_STYLE_3D.opacity
                             })
                         );
-                        box.position.set(0, DECK_TOP_Y + boxHeight3d / 2, axleOffsetY + tireOffsetY);
-                        axleGroup.add(box);
-                        axleMeshes3d.push(box);
+                        tire.position.set(0, DECK_TOP_Y + TIRE_RADIUS_M, axleOffsetY + tireOffsetY);
+                        axleGroup.add(tire);
+                        axleMeshes3d.push(tire);
                     });
 
                     // Hub — this axle's own center reference point, drawn
@@ -7264,10 +7333,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     // the rectangle-circle-rectangle glyph used in the 2D
                     // overlay (drawAxleGroupShape) for the SAME axle.
                     const hub = new THREE.Mesh(
-                        new THREE.CylinderGeometry(hubRadius3d, hubRadius3d, boxHeight3d * 0.4, 16),
+                        new THREE.CylinderGeometry(hubRadius3d, hubRadius3d, TIRE_DIAMETER_M * 0.4, 16),
                         new THREE.MeshPhongMaterial({ color: 0x0f1115 })
                     );
-                    hub.position.set(0, DECK_TOP_Y + boxHeight3d + (boxHeight3d * 0.2), axleOffsetY);
+                    hub.position.set(0, DECK_TOP_Y + TIRE_DIAMETER_M + (TIRE_DIAMETER_M * 0.2), axleOffsetY);
                     axleGroup.add(hub);
                     axleMeshes3d.push(hub);
                 });
@@ -7277,14 +7346,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 // (mirrors the 2D overlay's connector line).
                 if (connectorLength > 0.02) {
                     const connector = new THREE.Mesh(
-                        new THREE.BoxGeometry(EACH_AXLE_BOX.x * 0.35, boxHeight3d * 0.5, connectorLength),
+                        new THREE.BoxGeometry(EACH_AXLE_BOX.x * 0.35, TIRE_DIAMETER_M * 0.5, connectorLength),
                         new THREE.MeshPhongMaterial({
                             color: axleColor3d,
                             transparent: AXLE_STYLE_3D.transparent,
                             opacity: AXLE_STYLE_3D.opacity * 0.8
                         })
                     );
-                    connector.position.set(0, DECK_TOP_Y + boxHeight3d * 0.25, 0);
+                    connector.position.set(0, DECK_TOP_Y + TIRE_DIAMETER_M * 0.25, 0);
                     axleGroup.add(connector);
                     axleMeshes3d.push(connector);
                 }
