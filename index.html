@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-60(Rev.02)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-60(Rev.01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1603,7 +1603,7 @@
             <button type="button" class="tg-btn" title="Build multi-train trailer line data and write it to Load_Editor!B and D:G" onclick="openTrailerGeneratorModal()">🚂 Generate Trailer</button>
             <div class="tg-legend" id="trailerGroupLegend"><!-- populated by renderTrailerGroupLegend() when a generated trailer has custom load groups --></div>
             <button type="button" class="tg-btn" title="Save/restore named load conditions (Load_Editor!D14:D.., E124:F.., and BALLASTPLAN(mT)!F177:..) to/from Firebase" onclick="openLoadConditionsModal()">💾 Load Conditions</button>
-            <div class="toggle-container step-loader-group" title="One button per name found in BALLASTPLAN(mT)!F7:.. (until the first blank cell). Click a button (e.g. STEP00) to pull that SAME-NAME sheet's data into Load_Editor: col D (row 21 on) → Load_Editor!D14:.., cols P:S (row 21 on) → Load_Editor!D124:G.., and BALLASTPLAN(mT)!F(177 + button position) → Load_Editor!R148 (STEP00→F177, STEP01→F178, ...).">
+            <div class="toggle-container step-loader-group" title="One button per name found in BALLASTPLAN(mT)!F7:.. (until the first blank cell). Click a button (e.g. STEP00) to pull that SAME-NAME sheet's data into Load_Editor: col D (row 21 on) → Load_Editor!D14:.., cols P:S (row 21 on) → Load_Editor!D124:G.., and AB29/AB30 → Load_Editor!R147/R148.">
                 <span>📥 Step Data</span>
                 <div class="step-loader-btn-group" id="stepLoaderBtnGroup"><!-- buttons rendered by renderStepLoaderButtons() --></div>
                 <button type="button" class="tg-btn" title="Refresh step names from BALLASTPLAN(mT)!F7:.." onclick="pullStepLoaderNames()">↻</button>
@@ -9513,8 +9513,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // SAME name into Load_Editor:
         //   <StepSheet>!D21:D..   (until first blank in D) -> Load_Editor!D14:D..
         //   <StepSheet>!P21:S..   (until first blank in P) -> Load_Editor!D124:G..
-        //   BALLASTPLAN(mT)!F(177+stepIndex) (fixed col F, row varies per step,
-        //   not the STEP sheet itself)                    -> Load_Editor!R148
+        //   <StepSheet>!AB29, AB30                          -> Load_Editor!R147, R148
         // This is distinct from the "Load Conditions" Firebase
         // save/restore feature above: it reads live directly from
         // another Excel sheet (no Firebase involved), and the sheet
@@ -9535,16 +9534,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const STEP_SRC_D_MAX_ROWS = 300;
         const STEP_SRC_PQRS_START_ROW = 21;        // source sheet: cols P:S, start row (until blank in P)
         const STEP_SRC_PQRS_MAX_ROWS = 300;
-        const STEP_SRC_TIME_SHEET = PUMP_SHEET_NAME; // "BALLASTPLAN(mT)" — fixed sheet, not the stepName sheet
-        const STEP_SRC_TIME_COL = "F";              // BALLASTPLAN(mT) column F (fixed)
-        const STEP_SRC_TIME_ROW_BASE = 177;         // row for the 1st step (STEP00); row = BASE + step index, so STEP01 -> 178, STEP02 -> 179, ...
+        const STEP_SRC_AB_ROW_1 = 29;               // source sheet: single cell AB29
+        const STEP_SRC_AB_ROW_2 = 30;               // source sheet: single cell AB30
 
         const STEP_DEST_D_START_ROW = EXCEL_START_ROW;   // Load_Editor!D14:.. (14)
         const STEP_DEST_D_MAX_ROWS = 300;                 // block cleared before writing
         const STEP_DEST_DG_START_ROW = AXLE_START_ROW;   // Load_Editor!D124:G.. (124)
         const STEP_DEST_DG_MAX_ROWS = 300;                // block cleared before writing
-        const STEP_DEST_TIME_ROW = 148;             // Load_Editor!R148 <- BALLASTPLAN(mT)!F177
-        const STEP_DEST_TIME_COL = "R";
+        const STEP_DEST_R_ROW_1 = 147;              // Load_Editor!R147 <- source AB29
+        const STEP_DEST_R_ROW_2 = 148;              // Load_Editor!R148 <- source AB30
 
         let stepLoaderNames = [];
         let stepLoaderBusy = false;
@@ -9584,16 +9582,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 el.innerHTML = `<span class="tg-modal-sub" style="font-size:10px;">No names found in ${STEP_NAME_SHEET}!${STEP_NAME_START_COL}${STEP_NAME_ROW}:..</span>`;
                 return;
             }
-            el.innerHTML = stepLoaderNames.map((name, idx) =>
-                `<button type="button" class="tg-btn step-loader-btn" title="Pull ${lcEscapeHtml(name)}!D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., and ${STEP_SRC_TIME_SHEET}!${STEP_SRC_TIME_COL}${STEP_SRC_TIME_ROW_BASE + idx} into Load_Editor" onclick="loadStepDataToLoadEditor('${lcEscapeHtml(name).replace(/'/g, "\\'")}', this, ${idx})">${lcEscapeHtml(name)}</button>`
+            el.innerHTML = stepLoaderNames.map(name =>
+                `<button type="button" class="tg-btn step-loader-btn" title="Pull ${lcEscapeHtml(name)}!D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., AB${STEP_SRC_AB_ROW_1}/${STEP_SRC_AB_ROW_2} into Load_Editor" onclick="loadStepDataToLoadEditor('${lcEscapeHtml(name).replace(/'/g, "\\'")}', this)">${lcEscapeHtml(name)}</button>`
             ).join('');
         }
 
         // ---- Click handler: pull <name> sheet data into Load_Editor ----
-        // stepIndex = the button's 0-based position among the names read
-        // from BALLASTPLAN(mT)!F7:.. — used to pick the per-step time row
-        // (BALLASTPLAN(mT)!F(177+stepIndex)).
-        async function loadStepDataToLoadEditor(stepName, btnEl, stepIndex) {
+        async function loadStepDataToLoadEditor(stepName, btnEl) {
             if (!isOfficeInitialized) {
                 alert('Not connected to Excel — Step Data can only be pulled while running as an Excel add-in.');
                 return;
@@ -9606,11 +9601,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             try {
                 let dValues = [];       // Load_Editor!D14:.. source column
                 let pqrsValues = [];    // Load_Editor!D124:G.. source 4 columns (from P:S)
-                let timeVal = null;     // BALLASTPLAN(mT)!F(timeRow) -> Load_Editor!R148
-                const stepIdx = Number.isInteger(stepIndex) ? stepIndex : 0;
-                const timeRow = STEP_SRC_TIME_ROW_BASE + stepIdx; // STEP00->177, STEP01->178, ...
+                let ab1 = null, ab2 = null;
 
-                // --- 1) Read D and P:S from the source (stepName) sheet ---
+                // --- 1) Read everything from the source (stepName) sheet ---
                 await Excel.run(async (context) => {
                     let srcSheet;
                     try {
@@ -9627,6 +9620,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const rangePQRS = srcSheet.getRange(`P${STEP_SRC_PQRS_START_ROW}:S${pqrsEndRow}`);
                     rangePQRS.load("values");
 
+                    const rangeAB = srcSheet.getRange(`AB${STEP_SRC_AB_ROW_1}:AB${STEP_SRC_AB_ROW_2}`);
+                    rangeAB.load("values");
+
                     await context.sync();
 
                     // Trim D column at first blank cell.
@@ -9642,26 +9638,17 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         if (v === '' || v === null || v === undefined) break;
                         pqrsValues.push([r[0], r[1], r[2], r[3]]);
                     }
+
+                    const abv = rangeAB.values || [];
+                    ab1 = (abv[0] && abv[0][0] !== undefined) ? abv[0][0] : null;
+                    ab2 = (abv[1] && abv[1][0] !== undefined) ? abv[1][0] : null;
                 });
 
-                // --- 2) Read BALLASTPLAN(mT)!F(timeRow) — fixed sheet/column,
-                // but the ROW varies per step (STEP00 -> 177, STEP01 -> 178,
-                // STEP02 -> 179, ... based on the button's position in
-                // BALLASTPLAN(mT)!F7:..). ---
-                await Excel.run(async (context) => {
-                    const timeSheet = context.workbook.worksheets.getItem(STEP_SRC_TIME_SHEET);
-                    const rangeTime = timeSheet.getRange(`${STEP_SRC_TIME_COL}${timeRow}`);
-                    rangeTime.load("values");
-                    await context.sync();
-                    const tv = rangeTime.values;
-                    timeVal = (tv && tv[0] && tv[0][0] !== undefined) ? tv[0][0] : null;
-                });
-
-                if (dValues.length === 0 && pqrsValues.length === 0 && timeVal === null) {
-                    throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or ${STEP_SRC_TIME_SHEET}!${STEP_SRC_TIME_COL}${timeRow}`);
+                if (dValues.length === 0 && pqrsValues.length === 0 && ab1 === null && ab2 === null) {
+                    throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or AB${STEP_SRC_AB_ROW_1}/${STEP_SRC_AB_ROW_2}`);
                 }
 
-                // --- 3) Write everything into Load_Editor ---
+                // --- 2) Write everything into Load_Editor ---
                 await Excel.run(async (context) => {
                     const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
 
@@ -9683,15 +9670,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = pqrsValues;
                     }
 
-                    // R148 — single cell, always overwritten directly.
-                    editorSheet.getRange(`${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`).values = [[timeVal]];
+                    // R147 / R148 — single cells, always overwritten directly.
+                    editorSheet.getRange(`R${STEP_DEST_R_ROW_1}`).values = [[ab1]];
+                    editorSheet.getRange(`R${STEP_DEST_R_ROW_2}`).values = [[ab2]];
 
                     await context.sync();
                 });
 
                 results.push(`✓ D${STEP_SRC_D_START_ROW}:.. → Load_Editor!D${STEP_DEST_D_START_ROW}:.. (${dValues.length} value(s))`);
                 results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
-                results.push(`✓ ${STEP_SRC_TIME_SHEET}!${STEP_SRC_TIME_COL}${timeRow} → Load_Editor!${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`);
+                results.push(`✓ AB${STEP_SRC_AB_ROW_1}/${STEP_SRC_AB_ROW_2} → Load_Editor!R${STEP_DEST_R_ROW_1}/R${STEP_DEST_R_ROW_2}`);
                 logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
 
                 // Refresh the dashboard from the freshly-written Load_Editor data.
