@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-64-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-65-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -9382,26 +9382,35 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         console.warn('Step Data Loader: could not read/unprotect Load_Editor protection state', e);
                     }
 
-                    // D14:D.. — clear the generous block first, then write
-                    // only the rows actually read (same convention as the
-                    // Trailer Generator's D:G124 clear-then-write above).
-                    const dBlockEndRow = STEP_DEST_D_START_ROW + STEP_DEST_D_MAX_ROWS - 1;
-                    editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dBlockEndRow}`).clear(Excel.ClearApplyTo.contents);
+                    // D14:D.. — write only the rows actually read. No
+                    // block-clear beforehand: clearing would itself blank
+                    // out destination cells, which is exactly what we're
+                    // trying to avoid. dValues is already trimmed to stop
+                    // at the first blank cell (see readStepSourceData
+                    // above), so every entry here is real data.
                     if (dValues.length > 0) {
                         const dWriteEndRow = STEP_DEST_D_START_ROW + dValues.length - 1;
                         editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dWriteEndRow}`).values = dValues.map(v => [v]);
                     }
 
-                    // D124:G.. — same clear-then-write pattern, 4 columns.
-                    const dgBlockEndRow = STEP_DEST_DG_START_ROW + STEP_DEST_DG_MAX_ROWS - 1;
-                    editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgBlockEndRow}`).clear(Excel.ClearApplyTo.contents);
+                    // D124:G.. — same "write only, don't clear" approach.
+                    // Individual blank cells within pqrsValues (e.g. a row
+                    // where P has a value but Q/R/S don't) are converted to
+                    // null rather than '' — Office.js treats null in a
+                    // values array as "leave this cell unchanged", while ''
+                    // would blank out whatever is already there.
                     if (pqrsValues.length > 0) {
+                        const isBlank = v => (v === '' || v === null || v === undefined);
                         const dgWriteEndRow = STEP_DEST_DG_START_ROW + pqrsValues.length - 1;
-                        editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = pqrsValues;
+                        const dgWriteValues = pqrsValues.map(row => row.map(v => isBlank(v) ? null : v));
+                        editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = dgWriteValues;
                     }
 
-                    // R148 — single cell, always overwritten directly.
-                    editorSheet.getRange(`${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`).values = [[timeVal]];
+                    // R148 — single cell, only written if the source value
+                    // isn't blank (same "don't push blank data" rule).
+                    if (!(timeVal === '' || timeVal === null || timeVal === undefined)) {
+                        editorSheet.getRange(`${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`).values = [[timeVal]];
+                    }
 
                     await context.sync();
 
