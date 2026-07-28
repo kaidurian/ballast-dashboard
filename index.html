@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-66-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-66(01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -7064,6 +7064,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         function update3DTimeDashboardLabel() {
             const curEl = document.getElementById('dash3dCurrentTime');
             const useEl = document.getElementById('dash3dTimeUsage');
+            const wrapEl = document.getElementById('dash3dTimeLabel');
             if (!curEl || !useEl) return;
             if (typeof lcFmtTime !== 'function') return; // not yet loaded
 
@@ -7071,14 +7072,34 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const factor = (typeof abTimeUsageFactorD178 === 'number' && !isNaN(abTimeUsageFactorD178)) ? abTimeUsageFactorD178 : 0;
                 const opMinutes = (typeof pumpCapacityMTPerHr === 'number' && pumpCapacityMTPerHr > 0)
                     ? (autoBallastTotalTransferredT / pumpCapacityMTPerHr) * 60 : 0;
-                const usage = factor * opMinutes;
+                // D178 is a plain multiplier (e.g. an efficiency/margin
+                // factor), so (D178 × opMinutes) is in MINUTES — the same
+                // unit as opMinutes itself. row177 (and lcFmtTime's input
+                // generally) is an Excel time SERIAL, a fraction of a 24h
+                // day, so the minutes value has to be converted (÷1440)
+                // before it can be added to row177 or handed to
+                // lcFmtTime — otherwise a modest usage like "27 min" gets
+                // read as "27 days" and blows up into something like
+                // "648:00" on screen. This was the earlier bug.
+                const usageMinutes = factor * opMinutes;
+                const usage = usageMinutes / 1440; // -> Excel day-fraction
                 const base = Number(stepTime177Val);
                 const curTime = (Number.isFinite(base) ? base : 0) + usage;
                 curEl.textContent = lcFmtTime(curTime);
                 useEl.textContent = 'usage ' + lcFmtTime(usage);
+                // Diagnostic: raw numbers behind the calc, visible on hover
+                // (and in the console) so a mismatched unit/scale on
+                // BALLASTPLAN(mT)!D178 is easy to spot and report.
+                if (wrapEl) {
+                    wrapEl.title = `Auto Ballast real-time calc — row177(base)=${base} · D178(factor)=${factor} · opMinutes=${opMinutes.toFixed(3)} · usageMinutes(=factor×opMinutes)=${usageMinutes.toFixed(3)} · usage(day-fraction, ÷1440)=${usage} · curTime(=base+usage)=${curTime}`;
+                }
+                console.debug('[3D time label] AB calc:', { base, factor, opMinutes, usageMinutes, usage, curTime, autoBallastTotalTransferredT, pumpCapacityMTPerHr });
             } else {
                 curEl.textContent = lcFmtTime(stepTime177Val);
                 useEl.textContent = 'usage ' + lcFmtTime(stepTime178Val);
+                if (wrapEl) {
+                    wrapEl.title = `Step Data values — row177=${stepTime177Val} · row178=${stepTime178Val}`;
+                }
             }
         }
 
