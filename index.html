@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-66(01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-67-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1969,6 +1969,15 @@
         // old single-rectangle footprint; now represents the OVERALL
         // group footprint along Y (both axles + their own tire spans).
         const AXLE_HEIGHT_Y = AXLE_LINE_SPACING_Y + AXLE_TIRE_SPACING_Y + AXLE_RECT_HEIGHT_Y;
+        // Flat load-spreading plate rendered above EACH axle LINE
+        // (one per Excel-generated trailerAxles entry) in the 3D view.
+        // 1.4m (X) x 2.430m (Y) footprint, 0.315m thick, centered on
+        // the axle line's own center in BOTH X and Y, sitting 1.4m
+        // above the barge deck.
+        const AXLE_PLATE_SIZE_X_M = 1.4;
+        const AXLE_PLATE_SIZE_Y_M = 2.430;
+        const AXLE_PLATE_THICKNESS_M = 0.315;
+        const AXLE_PLATE_HEIGHT_ABOVE_DECK_M = 1.4;
         const AXLE_START_ROW = 124;
         const AXLE_MAX_ROWS = 60;
 
@@ -3615,9 +3624,7 @@
         //     EACH of those 2 axles is itself drawn as 2 tire rectangles
         //     AXLE_TIRE_SPACING_Y (0.62m) apart flanking that axle's own
         //     hub circle (AXLE_HUB_RADIUS_M) — rectangle/circle/rectangle
-        //     per axle, matching the reference drawing. A thin connector
-        //     line ties the two axles' hubs together so the pair reads
-        //     visually as one grouped axle line.
+        //     per axle, matching the reference drawing.
         //
         //     GHOST target footprint(s) + move arrow(s): at Level 2/3,
         //     also draws a dashed/translucent copy of this same footprint
@@ -3761,14 +3768,6 @@
                 ctx.strokeStyle = style.strokeStyle;
                 ctx.lineWidth = style.lineWidth;
                 if (style.dash) ctx.setLineDash(style.dash);
-
-                // Connector between the 2 axles' hubs (the "line" in axle
-                // line), spanning the full 1.45m hub-to-hub distance.
-                ctx.beginPath();
-                ctx.moveTo(sx, sy - lineHalfOffsetPx);
-                ctx.lineTo(sx, sy + lineHalfOffsetPx);
-                ctx.lineWidth = Math.max(style.lineWidth, style.dash ? style.lineWidth : 1.5);
-                ctx.stroke();
 
                 // Each of the 2 offsets below is ONE AXLE, 1.45m apart.
                 // Per the reference drawing/picture, each axle is its own
@@ -7357,14 +7356,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
             // axle markers — each Excel axle-LINE (x,y) is a GROUP of TWO
             // axles spaced AXLE_LINE_SPACING_Y (1.45m) apart center-to-
-            // center (hub-to-hub) along Y (mirrors the 2D plan), with a
-            // thin connector beam tying the two axles' hubs together.
+            // center (hub-to-hub) along Y (mirrors the 2D plan).
             // EACH axle is itself 2 tire boxes AXLE_TIRE_SPACING_Y (0.62m)
             // apart, flanking that axle's own hub cylinder. The overall
             // GROUP's own position is set to the axle line's real (x,y).
             const halfLineOffset = AXLE_LINE_SPACING_Y / 2;
             const halfTireOffset = AXLE_TIRE_SPACING_Y / 2;
-            const connectorLength = AXLE_LINE_SPACING_Y - AXLE_TIRE_SPACING_Y - EACH_AXLE_BOX.y; // gap between the two axles' outer tire edges
             const boxHeight3d = EACH_AXLE_BOX.z * 0.85;
             const hubRadius3d = Math.max(AXLE_HUB_RADIUS_M, Math.min(EACH_AXLE_BOX.x, EACH_AXLE_BOX.y) * 0.3);
             // Same group-color meta used by the 2D overlay (see
@@ -7441,21 +7438,31 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     axleMeshes3d.push(hub);
                 });
 
-                // Thin connector beam between the two AXLES' hubs, along Y,
-                // so the pair reads visually as one grouped axle line
-                // (mirrors the 2D overlay's connector line).
-                if (connectorLength > 0.02) {
-                    const connector = new THREE.Mesh(
-                        new THREE.BoxGeometry(EACH_AXLE_BOX.x * 0.35, TIRE_DIAMETER_M * 0.5, connectorLength),
+                // Load-spreading plate above EACH individual axle (one
+                // per axle LINE generated from Excel, i.e. one per
+                // trailerAxles entry) — a flat box, AXLE_PLATE_SIZE_X_M
+                // (X) x AXLE_PLATE_SIZE_Y_M (Y) x AXLE_PLATE_THICKNESS_M
+                // thick, centered on the axle line's own center in BOTH
+                // X and Y, AXLE_PLATE_HEIGHT_ABOVE_DECK_M above the
+                // barge deck. axleGroup is already positioned at the
+                // axle's real (x,y), so this plate sits at that group's
+                // local origin (no X/Y offset).
+                {
+                    const plate = new THREE.Mesh(
+                        new THREE.BoxGeometry(AXLE_PLATE_SIZE_X_M, AXLE_PLATE_THICKNESS_M, AXLE_PLATE_SIZE_Y_M),
                         new THREE.MeshPhongMaterial({
                             color: axleColor3d,
                             transparent: AXLE_STYLE_3D.transparent,
-                            opacity: AXLE_STYLE_3D.opacity * 0.8
+                            opacity: AXLE_STYLE_3D.opacity
                         })
                     );
-                    connector.position.set(0, DECK_TOP_Y + TIRE_DIAMETER_M * 0.25, 0);
-                    axleGroup.add(connector);
-                    axleMeshes3d.push(connector);
+                    plate.position.set(
+                        0,
+                        DECK_TOP_Y + AXLE_PLATE_HEIGHT_ABOVE_DECK_M,
+                        0
+                    );
+                    axleGroup.add(plate);
+                    axleMeshes3d.push(plate);
                 }
 
                 axleGroup.position.set(axle.x, 0, worldYToZ3D(axle.y));
