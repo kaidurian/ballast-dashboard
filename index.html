@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-65(01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-66-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1660,6 +1660,12 @@
             <div id="viewer3dWrap" style="position:relative; width:100%; height:420px;">
                 <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
                 <div id="labels3d" style="position:absolute; inset:0; pointer-events:none;"></div>
+                <div id="dash3dTimeLabel"
+                     title="Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session)."
+                     style="position:absolute; top:8px; right:8px; text-align:right; background:rgba(15,17,21,0.72); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:5px 9px; pointer-events:none; z-index:5; font-family:inherit;">
+                    <div id="dash3dCurrentTime" style="font-size:13px; font-weight:600; color:#e5e7eb; line-height:1.3;">—:—</div>
+                    <div id="dash3dTimeUsage" style="font-size:10px; color:#9ca3af; line-height:1.3;">usage —</div>
+                </div>
             </div>
         </div>
         </div>
@@ -2347,6 +2353,22 @@
         let targetDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
         let currentDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
         let pumpCapacityMTPerHr = 250; // BALLASTPLAN(mT)!C153, default per §11
+
+        // ---- 3D dashboard time label state ----
+        // Fixed factor cell BALLASTPLAN(mT)!D178, read live from Excel
+        // (not per-step — same single cell regardless of which step is
+        // active). Used only while an Auto Ballast mode is engaged, to
+        // turn the session's "Est. Operation Time" (minutes) into an
+        // Excel time-serial (fraction of a day) delta: usage = D178 *
+        // opMinutes. See update3DTimeDashboardLabel() below.
+        let abTimeUsageFactorD178 = null;
+        // Last-loaded step's BALLASTPLAN(mT) row 177 (current time) / row
+        // 178 (time usage) values — both read from the SAME per-step
+        // column (F + step index) as the existing row-177 Step Data
+        // pull, by readStepSourceData(). Static display values used
+        // whenever Auto Ballast is in 'manual' mode.
+        let stepTime177Val = null;
+        let stepTime178Val = null;
 
         // When true, the operator has typed one or more target values by
         // hand (heel/trim/deck inputs in the Auto Ballast panel, or the
@@ -3965,6 +3987,15 @@
                         rangePumpCap.load("values");
                     } catch (e) { /* sheet not found — pump capacity stays at last-known value */ }
 
+                    // 3D dashboard time label — Auto Ballast time-usage
+                    // factor: BALLASTPLAN(mT)!D178 (fixed cell, not per-step).
+                    let rangeTimeUsageFactor = null;
+                    try {
+                        const timeFactorSheet = context.workbook.worksheets.getItem(PUMP_SHEET_NAME);
+                        rangeTimeUsageFactor = timeFactorSheet.getRange("D178");
+                        rangeTimeUsageFactor.load("values");
+                    } catch (e) { /* sheet not found — factor stays at last-known value */ }
+
                     await context.sync();
 
                     BARGE_NAME = crestSheet.name || CREST_SHEET_NAME;
@@ -4008,6 +4039,11 @@
                     if (rangePumpCap) {
                         pumpCapacityMTPerHr = parseFloat(rangePumpCap.values[0][0]) || pumpCapacityMTPerHr;
                     }
+                    if (rangeTimeUsageFactor) {
+                        const tuf = parseFloat(rangeTimeUsageFactor.values[0][0]);
+                        if (!isNaN(tuf)) abTimeUsageFactorD178 = tuf;
+                    }
+                    if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
 
                     // Parse pump rows until column A is blank
                     if (rangePumps) {
@@ -5054,6 +5090,7 @@
 
             const opMinutes = pumpCapacityMTPerHr > 0 ? (autoBallastTotalTransferredT / pumpCapacityMTPerHr) * 60 : 0;
             setText('abOpTime', opMinutes.toFixed(0) + ' min (' + autoBallastTotalTransferredT.toFixed(0) + 't @ ' + pumpCapacityMTPerHr + ' mT/hr)');
+            if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
 
             renderAutoBallastDeckGrid();
             renderPumpStatusChips();
@@ -7002,6 +7039,48 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             }
             el.textContent = `${getRealSunDateLabel()} · ${getRealSunTimeLabel()} · ${activeStepName} `;   
             }
+
+        // ---- 3D dashboard time label (top-right corner of #viewer3dWrap) ----
+        // Two lines: "current time" and "time usage".
+        //
+        // Manual mode (default, or right after a "📥 Step Data" pull):
+        //   current time = BALLASTPLAN(mT) row 177, active step's column
+        //   time usage    = BALLASTPLAN(mT) row 178, active step's column
+        //   (both captured into stepTime177Val/stepTime178Val by
+        //   loadStepDataToLoadEditor() via readStepSourceData()).
+        //
+        // Auto Ballast engaged (any autoBallastMode other than 'manual'):
+        //   time usage    = BALLASTPLAN(mT)!D178 (fixed cell) × Est.
+        //                    Operation Time (session), i.e. the same
+        //                    opMinutes shown in the "abOpTime" stat.
+        //   current time = row 177 of the active step + time usage
+        //   (both real-time — recomputed on every refreshAutoBallastUI()).
+        //
+        // Uses lcFmtTime() (defined later, in the Load Conditions Viewer
+        // script block) to render Excel time-serial values as H:MM —
+        // safe to call here since this only ever runs after full page
+        // load (button click / auto-ballast loop tick), by which point
+        // every script block has executed and lcFmtTime is defined.
+        function update3DTimeDashboardLabel() {
+            const curEl = document.getElementById('dash3dCurrentTime');
+            const useEl = document.getElementById('dash3dTimeUsage');
+            if (!curEl || !useEl) return;
+            if (typeof lcFmtTime !== 'function') return; // not yet loaded
+
+            if (typeof autoBallastMode !== 'undefined' && autoBallastMode !== 'manual') {
+                const factor = (typeof abTimeUsageFactorD178 === 'number' && !isNaN(abTimeUsageFactorD178)) ? abTimeUsageFactorD178 : 0;
+                const opMinutes = (typeof pumpCapacityMTPerHr === 'number' && pumpCapacityMTPerHr > 0)
+                    ? (autoBallastTotalTransferredT / pumpCapacityMTPerHr) * 60 : 0;
+                const usage = factor * opMinutes;
+                const base = Number(stepTime177Val);
+                const curTime = (Number.isFinite(base) ? base : 0) + usage;
+                curEl.textContent = lcFmtTime(curTime);
+                useEl.textContent = 'usage ' + lcFmtTime(usage);
+            } else {
+                curEl.textContent = lcFmtTime(stepTime177Val);
+                useEl.textContent = 'usage ' + lcFmtTime(stepTime178Val);
+            }
+        }
 
         function updateRealSun3D() {
             if (!realSunEnabled || realSunLat === null || realSunLon === null || !scene3d || !dirLight3d) return;
@@ -9214,7 +9293,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const STEP_SRC_PQRS_START_ROW = 21;        // source sheet: cols P:S, start row (until blank in P)
         const STEP_SRC_PQRS_MAX_ROWS = 300;
         const STEP_SRC_TIME_SHEET = PUMP_SHEET_NAME; // "BALLASTPLAN(mT)" — fixed sheet, not the stepName sheet
-        const STEP_SRC_TIME_ROW = 177;               // BALLASTPLAN(mT) row 177 (fixed)
+        const STEP_SRC_TIME_ROW = 177;               // BALLASTPLAN(mT) row 177 (fixed) — "current time"
+        const STEP_SRC_TIME_ROW2 = 178;              // BALLASTPLAN(mT) row 178 (fixed) — "time usage", same per-step column as row 177
         const STEP_SRC_TIME_START_COL = "F";         // column for the 1st step (STEP00); col = START_COL + step index, so STEP01 -> G, STEP02 -> H, ...
 
         const STEP_DEST_D_START_ROW = EXCEL_START_ROW;   // Load_Editor!D14:.. (14)
@@ -9289,7 +9369,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         async function readStepSourceData(stepName, stepIndex) {
             let dValues = [];       // <-> Load_Editor!D14:.. (tank Filling[mT])
             let pqrsValues = [];    // <-> Load_Editor!D124:G.. (4 columns, from P:S)
-            let timeVal = null;     // <-> Load_Editor!R148 (single cell)
+            let timeVal = null;     // <-> Load_Editor!R148 (single cell) — row 177, "current time"
+            let timeVal178 = null;  // 3D dashboard "time usage" label — row 178, same per-step column as timeVal
             const stepIdx = Number.isInteger(stepIndex) ? stepIndex : 0;
             const timeCol = lcColIndexToLetter(lcColLetterToIndex(STEP_SRC_TIME_START_COL) + stepIdx); // STEP00->F, STEP01->G, ...
 
@@ -9335,12 +9416,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const timeSheet = context.workbook.worksheets.getItem(STEP_SRC_TIME_SHEET);
                 const rangeTime = timeSheet.getRange(`${timeCol}${STEP_SRC_TIME_ROW}`);
                 rangeTime.load("values");
+                const rangeTime178 = timeSheet.getRange(`${timeCol}${STEP_SRC_TIME_ROW2}`);
+                rangeTime178.load("values");
                 await context.sync();
                 const tv = rangeTime.values;
                 timeVal = (tv && tv[0] && tv[0][0] !== undefined) ? tv[0][0] : null;
+                const tv178 = rangeTime178.values;
+                timeVal178 = (tv178 && tv178[0] && tv178[0][0] !== undefined) ? tv178[0][0] : null;
             });
 
-            return { dValues, pqrsValues, timeVal, timeCol };
+            return { dValues, pqrsValues, timeVal, timeVal178, timeCol };
         }
 
         // ---- Click handler: pull <name> sheet data into Load_Editor ----
@@ -9362,7 +9447,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const dValues = src.dValues;
                 const pqrsValues = src.pqrsValues;
                 const timeVal = src.timeVal;
+                const timeVal178 = src.timeVal178;
                 const timeCol = src.timeCol;
+
+                // 3D dashboard time label ("current time" / "time usage")
+                // — same per-step column (row 177 / row 178) just read
+                // above. Kept even if this pull is otherwise empty below,
+                // since a step with only a time value is still valid.
+                stepTime177Val = timeVal;
+                stepTime178Val = timeVal178;
 
                 if (dValues.length === 0 && pqrsValues.length === 0 && timeVal === null) {
                     throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW}`);
@@ -9463,7 +9556,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 results.push(`✓ D${STEP_SRC_D_START_ROW}:.. → Load_Editor!D${STEP_DEST_D_START_ROW}:.. (${dValues.length} value(s))`);
                 results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
                 results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW} → Load_Editor!${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`);
+                results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW2} → 3D dashboard time-usage label`);
                 logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
+                if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
 
                 // This step is now the "active" one — updates the
                 // STEP/Date/Time label (Date/Time refresh again, live,
