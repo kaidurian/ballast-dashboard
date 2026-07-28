@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-67-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-68-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1607,6 +1607,9 @@
                 <span>📥 Step Data</span>
                 <div class="step-loader-btn-group" id="stepLoaderBtnGroup"><!-- buttons rendered by renderStepLoaderButtons() --></div>
                 <button type="button" class="tg-btn" title="Refresh step names from BALLASTPLAN(mT)!F7:.." onclick="pullStepLoaderNames()">↻</button>
+                <button type="button" class="tg-btn" title="Export EVERY step's data (D/P:S/time, one entry per step) as a single .json file — usable to replay all steps on a standalone copy of this page with no Excel connection." onclick="exportAllStepsToFile()">⬇ Export All Steps</button>
+                <button type="button" class="tg-btn" title="Import a steps .json produced by 'Export All Steps'. On a standalone copy of this page (no Excel), this lets the step buttons above replay every step from the file instead of failing with 'not connected to Excel'." onclick="document.getElementById('stepsImportFile').click()">⬆ Import Steps</button>
+                <input type="file" id="stepsImportFile" accept=".json" style="display:none;" onchange="importStepsFromFile(this.files[0]); this.value='';">
                 <span id="activeStepLabel" title="Name of the last-loaded step, plus the current Load_Editor!R147 (Date) / R148 (Time)" style="font-size:10px; color:var(--text-muted); white-space:nowrap; margin-left:4px;"></span>
             </div>
             <div class="toggle-container">
@@ -9335,6 +9338,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         let stepLoaderNames = [];
         let stepLoaderBusy = false;
 
+        // Populated by importStepsFromFile() from a .json produced by
+        // exportAllStepsToFile(). Map<stepName, {dValues,pqrsValues,
+        // timeVal,timeVal178}>. When set AND not connected to Excel,
+        // readStepSourceData() serves from here instead of Excel.run(),
+        // and loadStepDataToLoadEditor() applies the result straight to
+        // the in-memory dashboard model instead of writing Excel cells —
+        // see the isOfficeInitialized branch there.
+        let importedStepsData = null;
+
         // Remembers exactly how many rows THIS loader itself wrote into
         // Load_Editor on the previous pull, per destination block. Used to
         // clear only genuine leftover/stale rows from a shorter follow-up
@@ -9385,6 +9397,103 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             ).join('');
         }
 
+        // ---- EXPORT ALL STEPS — reads every step in stepLoaderNames via
+        // readStepSourceData() (same read used by the individual step
+        // buttons and the Load Conditions tables) and bundles them into
+        // one downloadable .json. Requires a live Excel connection, since
+        // that's the only place the data can be read from. ----
+        async function exportAllStepsToFile() {
+            if (!isOfficeInitialized) {
+                alert('Not connected to Excel — Export All Steps needs a live Excel connection to read each step\'s data. (Already have a file? Use Import Steps instead.)');
+                return;
+            }
+            if (!stepLoaderNames || stepLoaderNames.length === 0) {
+                alert(`No step names loaded yet — click ↻ to read step names from ${STEP_NAME_SHEET} first.`);
+                return;
+            }
+            if (stepLoaderBusy) return;
+            stepLoaderBusy = true;
+            const exportBtn = document.querySelector('button[onclick="exportAllStepsToFile()"]');
+            if (exportBtn) exportBtn.classList.add('busy');
+            try {
+                const steps = [];
+                for (let i = 0; i < stepLoaderNames.length; i++) {
+                    const name = stepLoaderNames[i];
+                    try {
+                        const src = await readStepSourceData(name, i);
+                        steps.push({ name, dValues: src.dValues, pqrsValues: src.pqrsValues, timeVal: src.timeVal, timeVal178: src.timeVal178 });
+                    } catch (e) {
+                        console.warn(`Export All Steps: failed to read "${name}"`, e);
+                        logAutoBallast(`✗ Export All Steps: skipped "${name}" (${(e && e.message) || e})`);
+                    }
+                }
+                if (steps.length === 0) {
+                    alert('Nothing was read successfully — see the log for details.');
+                    return;
+                }
+                const payload = { type: 'load-editor-steps-export', version: 1, exportedAt: new Date().toISOString(), sourceSheet: STEP_NAME_SHEET, steps };
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'load-editor-steps.json';
+                document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(url);
+                logAutoBallast(`⬇ Exported ${steps.length} step(s) (of ${stepLoaderNames.length}) to load-editor-steps.json.`);
+            } finally {
+                stepLoaderBusy = false;
+                if (exportBtn) exportBtn.classList.remove('busy');
+            }
+        }
+
+        // ---- IMPORT STEPS — loads a .json produced by exportAllStepsToFile()
+        // into importedStepsData (in-memory cache), and (re)renders the step
+        // buttons from the names found in the file. On a standalone page
+        // (isOfficeInitialized === false) this is what makes the step
+        // buttons work at all — see readStepSourceData() and
+        // loadStepDataToLoadEditor() below, both of which check
+        // importedStepsData before/instead of touching Excel. ----
+        async function importStepsFromFile(file) {
+            if (!file) return;
+            let data;
+            try {
+                data = JSON.parse(await file.text());
+            } catch (e) {
+                alert('Could not read that file — is it a valid .json export from "Export All Steps"?');
+                return;
+            }
+            const steps = Array.isArray(data.steps) ? data.steps : null;
+            if (!steps || steps.length === 0) {
+                alert('No steps found in that file.');
+                return;
+            }
+            importedStepsData = new Map();
+            const names = [];
+            steps.forEach(s => {
+                if (!s || !s.name) return;
+                importedStepsData.set(s.name, {
+                    dValues: Array.isArray(s.dValues) ? s.dValues : [],
+                    pqrsValues: Array.isArray(s.pqrsValues) ? s.pqrsValues : [],
+                    timeVal: (s.timeVal !== undefined) ? s.timeVal : null,
+                    timeVal178: (s.timeVal178 !== undefined) ? s.timeVal178 : null,
+                    timeCol: null
+                });
+                names.push(s.name);
+            });
+            if (names.length === 0) {
+                alert('No valid, named steps found in that file.');
+                importedStepsData = null;
+                return;
+            }
+            // Only take over the button list if we're not live-connected to
+            // Excel — when connected, the real BALLASTPLAN(mT)!F7:.. names
+            // stay in charge and imported data is just a same-name fallback.
+            if (!isOfficeInitialized) {
+                stepLoaderNames = names;
+                renderStepLoaderButtons();
+            }
+            logAutoBallast(`⬆ Imported ${names.length} step(s) from "${file.name}"${isOfficeInitialized ? '' : ' — click a step button above to replay it (no Excel needed).'}`);
+        }
+
         // ---- Read <name> sheet's source data (D21:.., P21:S..) plus
         // BALLASTPLAN(mT)!(timeCol)177 — pure read, no writes. Shared by
         // loadStepDataToLoadEditor() below (which writes the result into
@@ -9395,6 +9504,14 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // 177, column F+stepIndex). Throws if the sheet named stepName
         // doesn't exist. ----
         async function readStepSourceData(stepName, stepIndex) {
+            // Standalone (no Excel) mode: serve from the imported cache
+            // instead of touching Excel.run(). When connected to Excel,
+            // the live sheet stays the source of truth even if a steps
+            // file was also imported.
+            if (!isOfficeInitialized && importedStepsData && importedStepsData.has(stepName)) {
+                return importedStepsData.get(stepName);
+            }
+
             let dValues = [];       // <-> Load_Editor!D14:.. (tank Filling[mT])
             let pqrsValues = [];    // <-> Load_Editor!D124:G.. (4 columns, from P:S)
             let timeVal = null;     // <-> Load_Editor!R148 (single cell) — row 177, "current time"
@@ -9461,8 +9578,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // from BALLASTPLAN(mT)!F7:.. — used to pick the per-step time row
         // (BALLASTPLAN(mT) row 177, column F+stepIndex).
         async function loadStepDataToLoadEditor(stepName, btnEl, stepIndex) {
-            if (!isOfficeInitialized) {
-                alert('Not connected to Excel — Step Data can only be pulled while running as an Excel add-in.');
+            const hasImportedStep = !!(importedStepsData && importedStepsData.has(stepName));
+            if (!isOfficeInitialized && !hasImportedStep) {
+                alert('Not connected to Excel — Step Data can only be pulled while running as an Excel add-in (or import a steps .json first via "⬆ Import Steps").');
                 return;
             }
             if (stepLoaderBusy) return;
@@ -9489,113 +9607,161 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW}`);
                 }
 
-                // --- 3) Write everything into Load_Editor ---
-                // Load_Editor may be sheet-protected (Review > Protect Sheet,
-                // blank/no password). Protection blocks writes but not reads,
-                // so: check protection state, unprotect if needed, write,
-                // then silently restore the same protection afterward —
-                // no dialog/prompt, nothing visible to the user either way.
-                await Excel.run(async (context) => {
-                    const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
+                if (isOfficeInitialized) {
+                    // --- 3) Write everything into Load_Editor ---
+                    // Load_Editor may be sheet-protected (Review > Protect Sheet,
+                    // blank/no password). Protection blocks writes but not reads,
+                    // so: check protection state, unprotect if needed, write,
+                    // then silently restore the same protection afterward —
+                    // no dialog/prompt, nothing visible to the user either way.
+                    await Excel.run(async (context) => {
+                        const editorSheet = context.workbook.worksheets.getItem("Load_Editor");
 
-                    let wasProtected = false;
-                    let savedProtectionOptions = null;
-                    try {
-                        editorSheet.protection.load("protected,options");
-                        await context.sync();
-                        wasProtected = !!editorSheet.protection.protected;
-                        if (wasProtected) {
-                            savedProtectionOptions = editorSheet.protection.options;
-                            editorSheet.protection.unprotect(); // no password on this sheet
-                            await context.sync();
-                        }
-                    } catch (e) {
-                        console.warn('Step Data Loader: could not read/unprotect Load_Editor protection state', e);
-                    }
-
-                    // D14:D.. — write only the rows actually read. dValues
-                    // is already trimmed to stop at the first blank cell
-                    // (see readStepSourceData above), so every entry here
-                    // is real data.
-                    let dWriteEndRow = null;
-                    if (dValues.length > 0) {
-                        dWriteEndRow = STEP_DEST_D_START_ROW + dValues.length - 1;
-                        editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dWriteEndRow}`).values = dValues.map(v => [v]);
-                    }
-                    // Clear ONLY leftover rows from a previous, longer pull
-                    // by this same loader — bounded by stepLoaderLastDEndRow,
-                    // which this loader set on its own prior write. Never a
-                    // fixed/guessed row count, so this can't reach into rows
-                    // the loader never wrote (e.g. a sum-formula row below
-                    // the tank list).
-                    if (stepLoaderLastDEndRow !== null) {
-                        const clearFromRow = (dWriteEndRow !== null ? dWriteEndRow : STEP_DEST_D_START_ROW - 1) + 1;
-                        if (stepLoaderLastDEndRow >= clearFromRow) {
-                            editorSheet.getRange(`D${clearFromRow}:D${stepLoaderLastDEndRow}`).clear(Excel.ClearApplyTo.contents);
-                        }
-                    }
-                    stepLoaderLastDEndRow = dWriteEndRow;
-
-                    // D124:G.. — same approach. Individual blank cells
-                    // within pqrsValues (e.g. a row where P has a value but
-                    // Q/R/S don't) are converted to null rather than '' —
-                    // Office.js treats null in a values array as "leave
-                    // this cell unchanged", while '' would blank out
-                    // whatever is already there.
-                    let dgWriteEndRow = null;
-                    if (pqrsValues.length > 0) {
-                        const isBlank = v => (v === '' || v === null || v === undefined);
-                        dgWriteEndRow = STEP_DEST_DG_START_ROW + pqrsValues.length - 1;
-                        const dgWriteValues = pqrsValues.map(row => row.map(v => isBlank(v) ? null : v));
-                        editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = dgWriteValues;
-                    }
-                    if (stepLoaderLastDGEndRow !== null) {
-                        const clearFromRow = (dgWriteEndRow !== null ? dgWriteEndRow : STEP_DEST_DG_START_ROW - 1) + 1;
-                        if (stepLoaderLastDGEndRow >= clearFromRow) {
-                            editorSheet.getRange(`D${clearFromRow}:G${stepLoaderLastDGEndRow}`).clear(Excel.ClearApplyTo.contents);
-                        }
-                    }
-                    stepLoaderLastDGEndRow = dgWriteEndRow;
-
-                    // R148 — single cell, only written if the source value
-                    // isn't blank (same "don't push blank data" rule).
-                    if (!(timeVal === '' || timeVal === null || timeVal === undefined)) {
-                        editorSheet.getRange(`${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`).values = [[timeVal]];
-                    }
-
-                    await context.sync();
-
-                    // Silently restore protection to how it was found —
-                    // "no any happen" from the user's point of view.
-                    if (wasProtected) {
+                        let wasProtected = false;
+                        let savedProtectionOptions = null;
                         try {
-                            if (savedProtectionOptions) {
-                                editorSheet.protection.protect(savedProtectionOptions);
-                            } else {
-                                editorSheet.protection.protect();
-                            }
+                            editorSheet.protection.load("protected,options");
                             await context.sync();
+                            wasProtected = !!editorSheet.protection.protected;
+                            if (wasProtected) {
+                                savedProtectionOptions = editorSheet.protection.options;
+                                editorSheet.protection.unprotect(); // no password on this sheet
+                                await context.sync();
+                            }
                         } catch (e) {
-                            console.warn('Step Data Loader: could not re-protect Load_Editor after write', e);
+                            console.warn('Step Data Loader: could not read/unprotect Load_Editor protection state', e);
                         }
+
+                        // D14:D.. — write only the rows actually read. dValues
+                        // is already trimmed to stop at the first blank cell
+                        // (see readStepSourceData above), so every entry here
+                        // is real data.
+                        let dWriteEndRow = null;
+                        if (dValues.length > 0) {
+                            dWriteEndRow = STEP_DEST_D_START_ROW + dValues.length - 1;
+                            editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dWriteEndRow}`).values = dValues.map(v => [v]);
+                        }
+                        // Clear ONLY leftover rows from a previous, longer pull
+                        // by this same loader — bounded by stepLoaderLastDEndRow,
+                        // which this loader set on its own prior write. Never a
+                        // fixed/guessed row count, so this can't reach into rows
+                        // the loader never wrote (e.g. a sum-formula row below
+                        // the tank list).
+                        if (stepLoaderLastDEndRow !== null) {
+                            const clearFromRow = (dWriteEndRow !== null ? dWriteEndRow : STEP_DEST_D_START_ROW - 1) + 1;
+                            if (stepLoaderLastDEndRow >= clearFromRow) {
+                                editorSheet.getRange(`D${clearFromRow}:D${stepLoaderLastDEndRow}`).clear(Excel.ClearApplyTo.contents);
+                            }
+                        }
+                        stepLoaderLastDEndRow = dWriteEndRow;
+
+                        // D124:G.. — same approach. Individual blank cells
+                        // within pqrsValues (e.g. a row where P has a value but
+                        // Q/R/S don't) are converted to null rather than '' —
+                        // Office.js treats null in a values array as "leave
+                        // this cell unchanged", while '' would blank out
+                        // whatever is already there.
+                        let dgWriteEndRow = null;
+                        if (pqrsValues.length > 0) {
+                            const isBlank = v => (v === '' || v === null || v === undefined);
+                            dgWriteEndRow = STEP_DEST_DG_START_ROW + pqrsValues.length - 1;
+                            const dgWriteValues = pqrsValues.map(row => row.map(v => isBlank(v) ? null : v));
+                            editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = dgWriteValues;
+                        }
+                        if (stepLoaderLastDGEndRow !== null) {
+                            const clearFromRow = (dgWriteEndRow !== null ? dgWriteEndRow : STEP_DEST_DG_START_ROW - 1) + 1;
+                            if (stepLoaderLastDGEndRow >= clearFromRow) {
+                                editorSheet.getRange(`D${clearFromRow}:G${stepLoaderLastDGEndRow}`).clear(Excel.ClearApplyTo.contents);
+                            }
+                        }
+                        stepLoaderLastDGEndRow = dgWriteEndRow;
+
+                        // R148 — single cell, only written if the source value
+                        // isn't blank (same "don't push blank data" rule).
+                        if (!(timeVal === '' || timeVal === null || timeVal === undefined)) {
+                            editorSheet.getRange(`${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`).values = [[timeVal]];
+                        }
+
+                        await context.sync();
+
+                        // Silently restore protection to how it was found —
+                        // "no any happen" from the user's point of view.
+                        if (wasProtected) {
+                            try {
+                                if (savedProtectionOptions) {
+                                    editorSheet.protection.protect(savedProtectionOptions);
+                                } else {
+                                    editorSheet.protection.protect();
+                                }
+                                await context.sync();
+                            } catch (e) {
+                                console.warn('Step Data Loader: could not re-protect Load_Editor after write', e);
+                            }
+                        }
+                    });
+
+                    results.push(`✓ D${STEP_SRC_D_START_ROW}:.. → Load_Editor!D${STEP_DEST_D_START_ROW}:.. (${dValues.length} value(s))`);
+                    results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
+                    results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW} → Load_Editor!${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`);
+                    results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW2} → 3D dashboard time-usage label`);
+                    logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
+                    if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
+
+                    // This step is now the "active" one — updates the
+                    // STEP/Date/Time label (Date/Time refresh again, live,
+                    // once pullExcelTankData() re-reads R147/R148 below).
+                    activeStepName = stepName;
+                    updateActiveStepLabel();
+
+                    // Refresh the dashboard from the freshly-written Load_Editor data.
+                    setTimeout(() => pullExcelTankData(), 300);
+                } else {
+                    // --- 3-standalone) No Excel connection — this step's
+                    // values came from importedStepsData (readStepSourceData
+                    // already served them from there). Apply them straight
+                    // to the in-memory dashboard model instead of writing
+                    // Excel cells, mirroring importProjectFromCAD()'s
+                    // mock-mode branch. Deliberately does NOT call
+                    // pullExcelTankData()/generateMockSystemValues() here,
+                    // since that would reseed tankData and wipe the values
+                    // we're about to apply.
+                    if (!tankData || tankData.length === 0) generateMockSystemValues();
+
+                    dValues.forEach((v, idx) => {
+                        const t = tankData[idx];
+                        if (!t) return;
+                        const w = parseFloat(v) || 0;
+                        t.weight = w.toFixed(2);
+                        const cap = parseFloat(t.capacity) || 0;
+                        t.percent = cap > 0 ? Math.max(0, Math.min(w / cap, 1)) : 0;
+                        if (typeof noteFlowWeightChange === 'function') noteFlowWeightChange(t.row, t.weight);
+                    });
+
+                    if (pqrsValues.length > 0) {
+                        trailerAxles = pqrsValues.map((row, idx) => ({
+                            row: STEP_DEST_DG_START_ROW + idx,
+                            x: parseFloat(row[1]) || 0,
+                            y: parseFloat(row[2]) || 0
+                        }));
+                        trailerAxleMeta = pqrsValues.map(row => ({ load: parseFloat(row[0]) || 0 }));
                     }
-                });
 
-                results.push(`✓ D${STEP_SRC_D_START_ROW}:.. → Load_Editor!D${STEP_DEST_D_START_ROW}:.. (${dValues.length} value(s))`);
-                results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
-                results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW} → Load_Editor!${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`);
-                results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW2} → 3D dashboard time-usage label`);
-                logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
-                if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
+                    results.push(`✓ ${dValues.length} tank fill value(s) applied to the dashboard`);
+                    results.push(`✓ ${pqrsValues.length} trailer axle row(s) applied to the dashboard`);
+                    results.push(`✓ time value applied`);
+                    logAutoBallast(`📥 Step Data "${stepName}" (imported — no Excel): ${results.join(' · ')}`);
+                    if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
 
-                // This step is now the "active" one — updates the
-                // STEP/Date/Time label (Date/Time refresh again, live,
-                // once pullExcelTankData() re-reads R147/R148 below).
-                activeStepName = stepName;
-                updateActiveStepLabel();
+                    activeStepName = stepName;
+                    updateActiveStepLabel();
 
-                // Refresh the dashboard from the freshly-written Load_Editor data.
-                setTimeout(() => pullExcelTankData(), 300);
+                    initTankMatrix();
+                    drawAttitudeGraphics();
+                    refreshPlanView();
+                    if (typeof refresh3DView === 'function') refresh3DView();
+                    if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
+                    if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
+                }
             } catch (e) {
                 console.warn(`Step Data Loader: failed for "${stepName}"`, e);
                 alert(`Could not pull Step Data from "${stepName}": ${(e && e.message) || e}`);
