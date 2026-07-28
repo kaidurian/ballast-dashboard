@@ -1138,6 +1138,7 @@
         .step-loader-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
         .step-loader-btn-group { display: flex; flex-wrap: wrap; gap: 4px; }
         .step-loader-btn.busy { opacity: 0.5; pointer-events: none; }
+        .tg-btn.busy { opacity: 0.75; }
 
         .tg-overlay {
             display: none;
@@ -1580,7 +1581,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-68-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-69-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1610,6 +1611,7 @@
                 <button type="button" class="tg-btn" title="Export EVERY step's data (D/P:S/time, one entry per step) as a single .json file — usable to replay all steps on a standalone copy of this page with no Excel connection." onclick="exportAllStepsToFile()">⬇ Export All Steps</button>
                 <button type="button" class="tg-btn" title="Import a steps .json produced by 'Export All Steps'. On a standalone copy of this page (no Excel), this lets the step buttons above replay every step from the file instead of failing with 'not connected to Excel'." onclick="document.getElementById('stepsImportFile').click()">⬆ Import Steps</button>
                 <input type="file" id="stepsImportFile" accept=".json" style="display:none;" onchange="importStepsFromFile(this.files[0]); this.value='';">
+                <button type="button" class="tg-btn" title="Animate through every step in order — tank fills and trailer axles glide smoothly from each step's values to the next instead of jump-cutting. Display only: never writes to Excel, works the same whether connected to Excel or replaying an imported steps file." onclick="playAllStepsAnimated(this)">▶ Play All Steps</button>
                 <span id="activeStepLabel" title="Name of the last-loaded step, plus the current Load_Editor!R147 (Date) / R148 (Time)" style="font-size:10px; color:var(--text-muted); white-space:nowrap; margin-left:4px;"></span>
             </div>
             <div class="toggle-container">
@@ -9577,6 +9579,48 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // stepIndex = the button's 0-based position among the names read
         // from BALLASTPLAN(mT)!F7:.. — used to pick the per-step time row
         // (BALLASTPLAN(mT) row 177, column F+stepIndex).
+        // ---- Snap the in-memory dashboard model (tankData, trailerAxles)
+        // straight to one step's exact values, with the full visual
+        // refresh (rebuilds tank cards, plan view, 3D view, legend). No
+        // Excel involved — this is the "no live Excel connection" path,
+        // shared by loadStepDataToLoadEditor()'s standalone branch above
+        // and by playAllStepsAnimated() below (called once per step, when
+        // each tween lands exactly on that step's values). ----
+        function applyStepDataToDashboard(stepName, src) {
+            const dValues = src.dValues || [];
+            const pqrsValues = src.pqrsValues || [];
+            if (!tankData || tankData.length === 0) generateMockSystemValues();
+
+            dValues.forEach((v, idx) => {
+                const t = tankData[idx];
+                if (!t) return;
+                const w = parseFloat(v) || 0;
+                t.weight = w.toFixed(2);
+                const cap = parseFloat(t.capacity) || 0;
+                t.percent = cap > 0 ? Math.max(0, Math.min(w / cap, 1)) : 0;
+                if (typeof noteFlowWeightChange === 'function') noteFlowWeightChange(t.row, t.weight);
+            });
+
+            if (pqrsValues.length > 0) {
+                trailerAxles = pqrsValues.map((row, idx) => ({
+                    row: STEP_DEST_DG_START_ROW + idx,
+                    x: parseFloat(row[1]) || 0,
+                    y: parseFloat(row[2]) || 0
+                }));
+                trailerAxleMeta = pqrsValues.map(row => ({ load: parseFloat(row[0]) || 0 }));
+            }
+
+            activeStepName = stepName;
+            updateActiveStepLabel();
+
+            initTankMatrix();
+            drawAttitudeGraphics();
+            refreshPlanView();
+            if (typeof refresh3DView === 'function') refresh3DView();
+            if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
+            if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
+        }
+
         async function loadStepDataToLoadEditor(stepName, btnEl, stepIndex) {
             const hasImportedStep = !!(importedStepsData && importedStepsData.has(stepName));
             if (!isOfficeInitialized && !hasImportedStep) {
@@ -9716,51 +9760,17 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     // Refresh the dashboard from the freshly-written Load_Editor data.
                     setTimeout(() => pullExcelTankData(), 300);
                 } else {
-                    // --- 3-standalone) No Excel connection — this step's
-                    // values came from importedStepsData (readStepSourceData
-                    // already served them from there). Apply them straight
-                    // to the in-memory dashboard model instead of writing
-                    // Excel cells, mirroring importProjectFromCAD()'s
-                    // mock-mode branch. Deliberately does NOT call
-                    // pullExcelTankData()/generateMockSystemValues() here,
-                    // since that would reseed tankData and wipe the values
-                    // we're about to apply.
-                    if (!tankData || tankData.length === 0) generateMockSystemValues();
-
-                    dValues.forEach((v, idx) => {
-                        const t = tankData[idx];
-                        if (!t) return;
-                        const w = parseFloat(v) || 0;
-                        t.weight = w.toFixed(2);
-                        const cap = parseFloat(t.capacity) || 0;
-                        t.percent = cap > 0 ? Math.max(0, Math.min(w / cap, 1)) : 0;
-                        if (typeof noteFlowWeightChange === 'function') noteFlowWeightChange(t.row, t.weight);
-                    });
-
-                    if (pqrsValues.length > 0) {
-                        trailerAxles = pqrsValues.map((row, idx) => ({
-                            row: STEP_DEST_DG_START_ROW + idx,
-                            x: parseFloat(row[1]) || 0,
-                            y: parseFloat(row[2]) || 0
-                        }));
-                        trailerAxleMeta = pqrsValues.map(row => ({ load: parseFloat(row[0]) || 0 }));
-                    }
+                    // --- 3-standalone) No Excel connection — apply the
+                    // step's values straight to the in-memory dashboard
+                    // model (shared with the "Play All Steps" animation
+                    // below), instead of writing Excel cells.
+                    applyStepDataToDashboard(stepName, { dValues, pqrsValues });
 
                     results.push(`✓ ${dValues.length} tank fill value(s) applied to the dashboard`);
                     results.push(`✓ ${pqrsValues.length} trailer axle row(s) applied to the dashboard`);
                     results.push(`✓ time value applied`);
                     logAutoBallast(`📥 Step Data "${stepName}" (imported — no Excel): ${results.join(' · ')}`);
                     if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
-
-                    activeStepName = stepName;
-                    updateActiveStepLabel();
-
-                    initTankMatrix();
-                    drawAttitudeGraphics();
-                    refreshPlanView();
-                    if (typeof refresh3DView === 'function') refresh3DView();
-                    if (typeof refreshAutoBallastUI === 'function') refreshAutoBallastUI();
-                    if (typeof renderTrailerGroupLegend === 'function') renderTrailerGroupLegend();
                 }
             } catch (e) {
                 console.warn(`Step Data Loader: failed for "${stepName}"`, e);
@@ -9769,6 +9779,163 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             } finally {
                 stepLoaderBusy = false;
                 if (btnEl) btnEl.classList.remove('busy');
+            }
+        }
+    </script>
+
+    <script>
+        // ============================================================
+        // STEP ANIMATION — plays through stepLoaderNames in order,
+        // smoothly tweening tank fills and trailer axle positions from
+        // one step's values to the next (instead of jump-cutting), then
+        // landing exactly on each step via applyStepDataToDashboard()
+        // (defined above, in the Step Data Loader script block).
+        //
+        // Read-only w.r.t. Excel in BOTH modes: it always reads through
+        // readStepSourceData() (which itself picks Excel vs the imported
+        // .json cache — see readStepSourceData()/importedStepsData
+        // above) but never calls the Excel-WRITE branch inside
+        // loadStepDataToLoadEditor(). So playback never touches the
+        // workbook — it's a visualization pass over the same data the
+        // step buttons already read.
+        //
+        // Per-frame tank updates go through setTankFillVisualOnly() —
+        // direct style/tankData mutation, NOT initTankMatrix() (which
+        // rebuilds all tank card DOM and would be far too slow at 60fps)
+        // and NOT noteFlowWeightChange() (which would spam a flow arrow
+        // every frame instead of once per landed step).
+        // ============================================================
+        let animationPlaying = false;
+        let animationStopRequested = false;
+        const STEP_ANIM_TWEEN_MS = 900;   // time to glide from one step to the next
+        const STEP_ANIM_PAUSE_MS = 350;   // pause once landed on a step, before gliding to the next
+
+        function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+        function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+        // Lightweight per-frame tank visual update: no Excel write, no
+        // DOM rebuild, no flow-arrow logging — just the fill bar height,
+        // the percent label, and the in-memory tankData record (so the
+        // 3D view's per-frame refresh reads the tweened value too).
+        function setTankFillVisualOnly(row, weight) {
+            const cfg = TANK_CONFIG.find(t => t.id === row);
+            if (!cfg) return;
+            const cap = cfg.capacity || 1000;
+            const pct = Math.max(0, Math.min(weight / cap, 1.0));
+            const pctNum = pct * 100;
+
+            const card = document.getElementById(`tank_card_${row}`);
+            if (card) {
+                const water = card.querySelector('.tank-water-level');
+                const label = document.getElementById(`lbl_Load${row}`);
+                if (water) {
+                    water.style.height = `${pctNum}%`;
+                    water.classList.toggle('tank-water-high', pctNum >= 85);
+                }
+                if (label) label.textContent = `${pctNum.toFixed(0)}% (Cap. ${cfg.capacity}t)`;
+            }
+            const tankRecord = tankData.find(t => t.row === row);
+            if (tankRecord) {
+                tankRecord.weight = weight.toFixed(2);
+                tankRecord.percent = pct;
+            }
+        }
+
+        // Glides tankData/trailerAxles from their CURRENT values to
+        // target's over durationMs, redrawing every animation frame.
+        // Tank fills are matched by index (same alignment readStepSourceData
+        // already relies on: dValues[idx] <-> tankData[idx]). Axles are
+        // also matched by index; an axle present in one step but not the
+        // other just holds still / snaps rather than animating, since
+        // there's no meaningful "from" or "to" position for it.
+        function tweenToStep(target, durationMs) {
+            const fromTankWeights = tankData.map(t => parseFloat(t.weight) || 0);
+            const toTankValues = target.dValues || [];
+            const fromAxles = trailerAxles.map(a => ({ x: a.x, y: a.y }));
+            const toAxleRows = target.pqrsValues || [];
+            const axleCount = Math.max(fromAxles.length, toAxleRows.length);
+
+            return new Promise(resolve => {
+                const start = performance.now();
+                function frame(now) {
+                    if (animationStopRequested) { resolve(); return; }
+                    const t = Math.min((now - start) / durationMs, 1);
+                    const e = easeInOutQuad(t);
+
+                    tankData.forEach((tank, idx) => {
+                        const fromW = fromTankWeights[idx] || 0;
+                        const toW = (toTankValues[idx] !== undefined) ? (parseFloat(toTankValues[idx]) || 0) : fromW;
+                        setTankFillVisualOnly(tank.row, fromW + (toW - fromW) * e);
+                    });
+
+                    for (let i = 0; i < axleCount; i++) {
+                        const from = fromAxles[i];
+                        const toRow = toAxleRows[i];
+                        const to = toRow ? { x: parseFloat(toRow[1]) || 0, y: parseFloat(toRow[2]) || 0 } : null;
+                        if (from && to) {
+                            if (!trailerAxles[i]) trailerAxles[i] = { row: STEP_DEST_DG_START_ROW + i, x: from.x, y: from.y };
+                            trailerAxles[i].x = from.x + (to.x - from.x) * e;
+                            trailerAxles[i].y = from.y + (to.y - from.y) * e;
+                        } else if (!from && to) {
+                            // Axle only exists in the target step — snap it
+                            // in at the target position (nothing to glide from).
+                            trailerAxles[i] = { row: STEP_DEST_DG_START_ROW + i, x: to.x, y: to.y };
+                        }
+                        // from && !to: axle only exists in the current step —
+                        // hold still; applyStepDataToDashboard() drops it
+                        // when landing.
+                    }
+                    drawAxleOverlay();
+
+                    if (t < 1 && !animationStopRequested) {
+                        requestAnimationFrame(frame);
+                    } else {
+                        resolve();
+                    }
+                }
+                requestAnimationFrame(frame);
+            });
+        }
+
+        // ---- Play/Stop toggle for the "▶ Play All Steps" button ----
+        async function playAllStepsAnimated(btnEl) {
+            if (animationPlaying) {
+                animationStopRequested = true; // acts as Stop
+                return;
+            }
+            if (!stepLoaderNames || stepLoaderNames.length < 2) {
+                alert(`Need at least 2 steps loaded to animate — click ↻ (or Import Steps) first.`);
+                return;
+            }
+
+            animationPlaying = true;
+            animationStopRequested = false;
+            if (btnEl) { btnEl.textContent = '⏸ Stop'; btnEl.classList.add('busy'); }
+            logAutoBallast(`▶ Playing ${stepLoaderNames.length} step(s) as an animation (display only — Excel is not written during playback).`);
+
+            try {
+                const first = await readStepSourceData(stepLoaderNames[0], 0);
+                applyStepDataToDashboard(stepLoaderNames[0], first);
+                await sleep(STEP_ANIM_PAUSE_MS);
+
+                for (let i = 1; i < stepLoaderNames.length; i++) {
+                    if (animationStopRequested) break;
+                    const toName = stepLoaderNames[i];
+                    const target = await readStepSourceData(toName, i);
+                    if (animationStopRequested) break;
+                    await tweenToStep(target, STEP_ANIM_TWEEN_MS);
+                    if (animationStopRequested) break;
+                    applyStepDataToDashboard(toName, target); // land exactly on this step's real values
+                    await sleep(STEP_ANIM_PAUSE_MS);
+                }
+                logAutoBallast(animationStopRequested ? `⏸ Animation stopped.` : `⏹ Animation finished (${stepLoaderNames.length} step(s)).`);
+            } catch (e) {
+                console.warn('Play All Steps: failed', e);
+                logAutoBallast(`✗ Animation stopped: ${(e && e.message) || e}`);
+            } finally {
+                animationPlaying = false;
+                animationStopRequested = false;
+                if (btnEl) { btnEl.textContent = '▶ Play All Steps'; btnEl.classList.remove('busy'); }
             }
         }
     </script>
