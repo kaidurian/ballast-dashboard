@@ -1580,7 +1580,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-65-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-65(01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -9227,6 +9227,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         let stepLoaderNames = [];
         let stepLoaderBusy = false;
 
+        // Remembers exactly how many rows THIS loader itself wrote into
+        // Load_Editor on the previous pull, per destination block. Used to
+        // clear only genuine leftover/stale rows from a shorter follow-up
+        // pull — never a fixed/guessed row count — so we can never clear
+        // into rows we didn't write (e.g. a sum-formula row sitting just
+        // below the tank list, or anything else below the axle block).
+        // null = "no prior pull this session", i.e. nothing to clean up.
+        let stepLoaderLastDEndRow = null;    // last Load_Editor!D.. row written (D14 block)
+        let stepLoaderLastDGEndRow = null;   // last Load_Editor!D..G.. row written (D124 block)
+
         // ---- Read step names from BALLASTPLAN(mT)!F7:.. (until blank) ----
         async function pullStepLoaderNames() {
             if (!isOfficeInitialized) {
@@ -9382,29 +9392,49 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         console.warn('Step Data Loader: could not read/unprotect Load_Editor protection state', e);
                     }
 
-                    // D14:D.. — write only the rows actually read. No
-                    // block-clear beforehand: clearing would itself blank
-                    // out destination cells, which is exactly what we're
-                    // trying to avoid. dValues is already trimmed to stop
-                    // at the first blank cell (see readStepSourceData
-                    // above), so every entry here is real data.
+                    // D14:D.. — write only the rows actually read. dValues
+                    // is already trimmed to stop at the first blank cell
+                    // (see readStepSourceData above), so every entry here
+                    // is real data.
+                    let dWriteEndRow = null;
                     if (dValues.length > 0) {
-                        const dWriteEndRow = STEP_DEST_D_START_ROW + dValues.length - 1;
+                        dWriteEndRow = STEP_DEST_D_START_ROW + dValues.length - 1;
                         editorSheet.getRange(`D${STEP_DEST_D_START_ROW}:D${dWriteEndRow}`).values = dValues.map(v => [v]);
                     }
+                    // Clear ONLY leftover rows from a previous, longer pull
+                    // by this same loader — bounded by stepLoaderLastDEndRow,
+                    // which this loader set on its own prior write. Never a
+                    // fixed/guessed row count, so this can't reach into rows
+                    // the loader never wrote (e.g. a sum-formula row below
+                    // the tank list).
+                    if (stepLoaderLastDEndRow !== null) {
+                        const clearFromRow = (dWriteEndRow !== null ? dWriteEndRow : STEP_DEST_D_START_ROW - 1) + 1;
+                        if (stepLoaderLastDEndRow >= clearFromRow) {
+                            editorSheet.getRange(`D${clearFromRow}:D${stepLoaderLastDEndRow}`).clear(Excel.ClearApplyTo.contents);
+                        }
+                    }
+                    stepLoaderLastDEndRow = dWriteEndRow;
 
-                    // D124:G.. — same "write only, don't clear" approach.
-                    // Individual blank cells within pqrsValues (e.g. a row
-                    // where P has a value but Q/R/S don't) are converted to
-                    // null rather than '' — Office.js treats null in a
-                    // values array as "leave this cell unchanged", while ''
-                    // would blank out whatever is already there.
+                    // D124:G.. — same approach. Individual blank cells
+                    // within pqrsValues (e.g. a row where P has a value but
+                    // Q/R/S don't) are converted to null rather than '' —
+                    // Office.js treats null in a values array as "leave
+                    // this cell unchanged", while '' would blank out
+                    // whatever is already there.
+                    let dgWriteEndRow = null;
                     if (pqrsValues.length > 0) {
                         const isBlank = v => (v === '' || v === null || v === undefined);
-                        const dgWriteEndRow = STEP_DEST_DG_START_ROW + pqrsValues.length - 1;
+                        dgWriteEndRow = STEP_DEST_DG_START_ROW + pqrsValues.length - 1;
                         const dgWriteValues = pqrsValues.map(row => row.map(v => isBlank(v) ? null : v));
                         editorSheet.getRange(`D${STEP_DEST_DG_START_ROW}:G${dgWriteEndRow}`).values = dgWriteValues;
                     }
+                    if (stepLoaderLastDGEndRow !== null) {
+                        const clearFromRow = (dgWriteEndRow !== null ? dgWriteEndRow : STEP_DEST_DG_START_ROW - 1) + 1;
+                        if (stepLoaderLastDGEndRow >= clearFromRow) {
+                            editorSheet.getRange(`D${clearFromRow}:G${stepLoaderLastDGEndRow}`).clear(Excel.ClearApplyTo.contents);
+                        }
+                    }
+                    stepLoaderLastDGEndRow = dgWriteEndRow;
 
                     // R148 — single cell, only written if the source value
                     // isn't blank (same "don't push blank data" rule).
