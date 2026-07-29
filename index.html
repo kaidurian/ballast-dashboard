@@ -3945,19 +3945,18 @@
             // every OTHER train, so multi-train layouts get one readout
             // per train instead of just the very first axle overall.
             function drawAxlePosLabel(axle, color) {
-                // Positioned directly on the axle itself (this axle's own
-                // real x,y screen position) — anchored/centered there
-                // rather than floating above the axle group, so the label
-                // reads as sitting on the first axle line, centered on
-                // the train.
+                // Left edge of the label sits at the center of the first
+                // axle line (this axle's own real x,y screen position) —
+                // text grows rightward from there, vertically centered on
+                // the axle line.
                 const p = worldToScreen(axle.x, axle.y);
                 ctx.save();
                 ctx.fillStyle = color || (isLight ? '#0f172a' : '#e2e8f0');
                 ctx.font = 'bold 9px Calibri, sans-serif';
-                ctx.textAlign = 'center';
+                ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(
-                    `Xpos[m] ${axle.x.toFixed(2)}  Ypos[m] ${axle.y.toFixed(2)}`,
+                    `X ${axle.x.toFixed(2)}  Y ${axle.y.toFixed(2)}`,
                     p.sx, p.sy
                 );
                 ctx.restore();
@@ -8137,7 +8136,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     if (!axle) return;
                     const meta = (trailerAxleMeta.length === trailerAxles.length) ? trailerAxleMeta[idx] : null;
                     const color = (meta && meta.color) ? meta.color : '#e2e8f0';
-                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:${color}; background:rgba(15,17,21,0.6); padding:1px 5px; border-radius:4px; white-space:nowrap; z-index:30;">Xpos[m] ${axle.x.toFixed(2)} · Ypos[m] ${axle.y.toFixed(2)}</div>`;
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(0,-50%); font-size:10px; font-weight:700; color:${color}; background:rgba(15,17,21,0.6); padding:1px 5px; border-radius:4px; white-space:nowrap; z-index:30;">X ${axle.x.toFixed(2)} · Y ${axle.y.toFixed(2)}</div>`;
                 } else if (a.cls === 'quaycenter') {
                     const text = formatCornerLabelText((quayCenterLabel || '').trim());
                     if (!text) return;
