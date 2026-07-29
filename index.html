@@ -1581,7 +1581,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-69-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-70-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2348,6 +2348,17 @@
         // (not the quay wall).
         let bargeCornerLabels = ['', '', '', '', '', ''];
 
+        // 7th free-text label, positioned at the CENTER of the barge's
+        // Y-span but on the QUAY side (rendered inside the quay wall box
+        // itself — see renderBargeCornerLabels()/buildLabelAnchors3D()).
+        // Unlike bargeCornerLabels[] (a fixed Load_Editor!I1:I6 live read),
+        // this one is per-STEP: sourced from sheet REPORT's merged cell
+        // J75:76 for STEP00, J140:141 for STEP01, +65 rows per step after
+        // that (see STEP_SRC_QUAY_* constants) — so it's only populated
+        // when a step is loaded (step buttons, Play All Steps, or an
+        // imported steps .json), not by the regular Excel sync.
+        let quayCenterLabel = '';
+
         // ============================================================
         // AUTO BALLAST — data sources & state
         // Per AUTO_BALLAST_DASHBOARD_PROJECT.docx §3, §13, §15.
@@ -3075,6 +3086,22 @@
                 }
                 container.appendChild(lbl);
             });
+
+            // 7th label — quay-side, centered on the barge's Y-span (see
+            // quayCenterLabel above). Rendered INSIDE the quay wall box
+            // itself (which already spans the barge's full Y extent and
+            // is centered via flexbox), not the barge's own bounding box,
+            // so it visually reads as a midship deck-to-quay value living
+            // where the quay wall physically is.
+            if (quayCenterLabel) {
+                const quayBox = container.querySelector('.quay-structure-box');
+                if (quayBox) {
+                    const qLbl = document.createElement('div');
+                    qLbl.className = 'quay-coords-badge quay-center-label';
+                    qLbl.textContent = formatCornerLabelText(quayCenterLabel);
+                    quayBox.appendChild(qLbl);
+                }
+            }
 
             // AFT / FWD tags at each end of the barge, vertically centered.
             // IDs let updateTrimHeelGridLabels() append the trim value
@@ -7724,6 +7751,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             addAnchor('corner4', midX,        cornerLabelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I5 mid-SB
             addAnchor('corner5', BARGE_X_MAX, cornerLabelY, worldYToZ3D(BARGE_Y_MIN), '', 'corner'); // I6 FWD-SB
 
+            // 7th label — quay-side, centered on the barge's Y-span (REPORT
+            // sheet, per-step — see quayCenterLabel above). Positioned at
+            // the quay wall's own X footprint (not the barge's), midway
+            // between QUAY_X_START/QUAY_X_END, same Y-center as the barge.
+            addAnchor('quaycenter', (QUAY_X_START + QUAY_X_END) / 2, cornerLabelY, worldYToZ3D((BARGE_Y_MIN + BARGE_Y_MAX) / 2), '', 'quaycenter');
+
             // Per-tank %-fill label anchor, lifted just above the tank's
             // deck-level position so it floats over each tank, matching
             // the 2D plan's on-card "XX% (Cap. Yt)" readout. Kept at the
@@ -7829,6 +7862,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const text = formatCornerLabelText((bargeCornerLabels[idx] || '').trim());
                     if (!text) return;
                     html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:11px; color:#cbd5e1; background:rgba(15,17,21,0.5); padding:1px 5px; border-radius:4px; white-space:nowrap; z-index:30;">${text}</div>`;
+                } else if (a.cls === 'quaycenter') {
+                    const text = formatCornerLabelText((quayCenterLabel || '').trim());
+                    if (!text) return;
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:11px; color:#fda4af; background:rgba(15,17,21,0.55); padding:1px 5px; border-radius:4px; white-space:nowrap; z-index:30;">${text}</div>`;
                 } else if (a.cls === 'pct') {
                     const cfgId = parseInt(a.id.replace('pct_', ''), 10);
                     const td = tankData.find(t => t.row === cfgId);
@@ -9330,6 +9367,26 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         const STEP_SRC_TIME_ROW2 = 178;              // BALLASTPLAN(mT) row 178 (fixed) — "time usage", same per-step column as row 177
         const STEP_SRC_TIME_START_COL = "F";         // column for the 1st step (STEP00); col = START_COL + step index, so STEP01 -> G, STEP02 -> H, ...
 
+        // Trim/Heel per step — BALLASTPLAN(mT) rows 11 (trim) / 12 (heel),
+        // SAME per-step column as the time value above (STEP_SRC_TIME_START_COL
+        // + step index: STEP00 -> F, STEP01 -> G, ...). Drives
+        // currentTrimDegrees/currentHeelDegrees when a step is loaded.
+        const STEP_SRC_TRIM_ROW = 11;   // BALLASTPLAN(mT) row 11 -> trim (deg)
+        const STEP_SRC_HEEL_ROW = 12;   // BALLASTPLAN(mT) row 12 -> heel (deg)
+
+        // 7th deck-quay label (quayCenterLabel) per step — sheet REPORT,
+        // column J, a 2-row MERGED cell whose starting row is
+        // STEP_SRC_QUAY_ROW_START + (stepIndex * STEP_SRC_QUAY_ROW_STEP):
+        // STEP00 -> J75:76, STEP01 -> J140:141, STEP02 -> J205:206, ...
+        // (i.e. +65 rows per step, matching the merge cells the user
+        // supplied for STEP00..STEP20). If that merged cell is blank for
+        // a given step, quayCenterVal comes back null and no value is
+        // exported/applied for that step (see readStepSourceData()).
+        const STEP_SRC_QUAY_SHEET = "REPORT";
+        const STEP_SRC_QUAY_COL = "J";
+        const STEP_SRC_QUAY_ROW_START = 75;
+        const STEP_SRC_QUAY_ROW_STEP = 65;
+
         const STEP_DEST_D_START_ROW = EXCEL_START_ROW;   // Load_Editor!D14:.. (14)
         const STEP_DEST_D_MAX_ROWS = 300;                 // block cleared before writing
         const STEP_DEST_DG_START_ROW = AXLE_START_ROW;   // Load_Editor!D124:G.. (124)
@@ -9423,7 +9480,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     const name = stepLoaderNames[i];
                     try {
                         const src = await readStepSourceData(name, i);
-                        steps.push({ name, dValues: src.dValues, pqrsValues: src.pqrsValues, timeVal: src.timeVal, timeVal178: src.timeVal178 });
+                        const stepObj = { name, dValues: src.dValues, pqrsValues: src.pqrsValues, timeVal: src.timeVal, timeVal178: src.timeVal178 };
+                        // Trim/Heel/quay-center are only included when the
+                        // source cell actually had a value — "blank merge
+                        // cell -> no export" for the quay-center label, and
+                        // the same rule kept consistent for trim/heel.
+                        if (src.trimVal !== null && src.trimVal !== undefined && src.trimVal !== '') stepObj.trimVal = src.trimVal;
+                        if (src.heelVal !== null && src.heelVal !== undefined && src.heelVal !== '') stepObj.heelVal = src.heelVal;
+                        if (src.quayCenterVal !== null && src.quayCenterVal !== undefined && src.quayCenterVal !== '') stepObj.quayCenterVal = src.quayCenterVal;
+                        steps.push(stepObj);
                     } catch (e) {
                         console.warn(`Export All Steps: failed to read "${name}"`, e);
                         logAutoBallast(`✗ Export All Steps: skipped "${name}" (${(e && e.message) || e})`);
@@ -9477,6 +9542,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     pqrsValues: Array.isArray(s.pqrsValues) ? s.pqrsValues : [],
                     timeVal: (s.timeVal !== undefined) ? s.timeVal : null,
                     timeVal178: (s.timeVal178 !== undefined) ? s.timeVal178 : null,
+                    trimVal: (s.trimVal !== undefined) ? s.trimVal : null,
+                    heelVal: (s.heelVal !== undefined) ? s.heelVal : null,
+                    quayCenterVal: (s.quayCenterVal !== undefined) ? s.quayCenterVal : null,
                     timeCol: null
                 });
                 names.push(s.name);
@@ -9518,6 +9586,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             let pqrsValues = [];    // <-> Load_Editor!D124:G.. (4 columns, from P:S)
             let timeVal = null;     // <-> Load_Editor!R148 (single cell) — row 177, "current time"
             let timeVal178 = null;  // 3D dashboard "time usage" label — row 178, same per-step column as timeVal
+            let trimVal = null;     // BALLASTPLAN(mT)!(timeCol)11 -> currentTrimDegrees
+            let heelVal = null;     // BALLASTPLAN(mT)!(timeCol)12 -> currentHeelDegrees
+            let quayCenterVal = null; // REPORT!(quayCol)(quayRow):(quayRow+1) merged -> quayCenterLabel
             const stepIdx = Number.isInteger(stepIndex) ? stepIndex : 0;
             const timeCol = lcColIndexToLetter(lcColLetterToIndex(STEP_SRC_TIME_START_COL) + stepIdx); // STEP00->F, STEP01->G, ...
 
@@ -9565,14 +9636,48 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 rangeTime.load("values");
                 const rangeTime178 = timeSheet.getRange(`${timeCol}${STEP_SRC_TIME_ROW2}`);
                 rangeTime178.load("values");
+                // Trim/Heel — same per-step column (timeCol), rows 11/12
+                // (fixed rows, like rows 177/178 above).
+                const rangeTrim = timeSheet.getRange(`${timeCol}${STEP_SRC_TRIM_ROW}`);
+                rangeTrim.load("values");
+                const rangeHeel = timeSheet.getRange(`${timeCol}${STEP_SRC_HEEL_ROW}`);
+                rangeHeel.load("values");
                 await context.sync();
                 const tv = rangeTime.values;
                 timeVal = (tv && tv[0] && tv[0][0] !== undefined) ? tv[0][0] : null;
                 const tv178 = rangeTime178.values;
                 timeVal178 = (tv178 && tv178[0] && tv178[0][0] !== undefined) ? tv178[0][0] : null;
+                const trv = rangeTrim.values;
+                trimVal = (trv && trv[0] && trv[0][0] !== '' && trv[0][0] !== null && trv[0][0] !== undefined) ? trv[0][0] : null;
+                const hev = rangeHeel.values;
+                heelVal = (hev && hev[0] && hev[0][0] !== '' && hev[0][0] !== null && hev[0][0] !== undefined) ? hev[0][0] : null;
             });
 
-            return { dValues, pqrsValues, timeVal, timeVal178, timeCol };
+            // --- 3) Read the 7th deck-quay label from sheet REPORT —
+            // column J, a 2-row merged cell whose start row depends on
+            // stepIdx (see STEP_SRC_QUAY_* above). Wrapped in its own
+            // try/catch: REPORT may not exist in every workbook, and a
+            // missing sheet here shouldn't fail the whole step pull.
+            // "Blank merge cell -> no value" per spec: quayCenterVal
+            // simply stays null and nothing is exported/applied for it.
+            const quayRow = STEP_SRC_QUAY_ROW_START + (stepIdx * STEP_SRC_QUAY_ROW_STEP);
+            try {
+                await Excel.run(async (context) => {
+                    const reportSheet = context.workbook.worksheets.getItem(STEP_SRC_QUAY_SHEET);
+                    const rangeQuay = reportSheet.getRange(`${STEP_SRC_QUAY_COL}${quayRow}:${STEP_SRC_QUAY_COL}${quayRow + 1}`);
+                    rangeQuay.load("values");
+                    await context.sync();
+                    const rows = rangeQuay.values || [];
+                    for (const r of rows) {
+                        const v = r[0];
+                        if (v !== '' && v !== null && v !== undefined) { quayCenterVal = v; break; }
+                    }
+                });
+            } catch (e) {
+                console.warn(`Step Data Loader: could not read quay-center label from ${STEP_SRC_QUAY_SHEET}!${STEP_SRC_QUAY_COL}${quayRow}`, e);
+            }
+
+            return { dValues, pqrsValues, timeVal, timeVal178, trimVal, heelVal, quayCenterVal, timeCol };
         }
 
         // ---- Click handler: pull <name> sheet data into Load_Editor ----
@@ -9590,6 +9695,21 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             const dValues = src.dValues || [];
             const pqrsValues = src.pqrsValues || [];
             if (!tankData || tankData.length === 0) generateMockSystemValues();
+
+            // Trim/Heel — BALLASTPLAN(mT) rows 11/12 (same per-step column
+            // as the time value). Only overwritten when the step actually
+            // carried a value, so a step exported without one leaves
+            // trim/heel exactly as they already were.
+            if (src.trimVal !== null && src.trimVal !== undefined && src.trimVal !== '') {
+                currentTrimDegrees = parseFloat(src.trimVal) || 0;
+            }
+            if (src.heelVal !== null && src.heelVal !== undefined && src.heelVal !== '') {
+                currentHeelDegrees = parseFloat(src.heelVal) || 0;
+            }
+            // 7th deck-quay label — REPORT!J<row>:<row+1>, one per step.
+            // Cleared (not left stale) when this step's cell is blank.
+            quayCenterLabel = (src.quayCenterVal !== null && src.quayCenterVal !== undefined && src.quayCenterVal !== '')
+                ? String(src.quayCenterVal) : '';
 
             dValues.forEach((v, idx) => {
                 const t = tankData[idx];
@@ -9639,6 +9759,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const timeVal = src.timeVal;
                 const timeVal178 = src.timeVal178;
                 const timeCol = src.timeCol;
+                const trimVal = src.trimVal;
+                const heelVal = src.heelVal;
+                const quayCenterVal = src.quayCenterVal;
 
                 // 3D dashboard time label ("current time" / "time usage")
                 // — same per-step column (row 177 / row 178) just read
@@ -9744,10 +9867,29 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         }
                     });
 
+                    // Trim/Heel (BALLASTPLAN(mT) rows 11/12) and the 7th
+                    // quay-center label (REPORT!J..) are applied straight
+                    // to the in-memory display right away — they aren't
+                    // Load_Editor cells, so there's nothing to write to
+                    // Excel for them. Trim/heel will still be confirmed
+                    // (and corrected, if different) a moment later by the
+                    // delayed pullExcelTankData() re-read of Load_Editor!
+                    // E8/E9 below; quayCenterLabel is untouched by that
+                    // re-read and simply stays at what was read here.
+                    if (trimVal !== null && trimVal !== undefined && trimVal !== '') currentTrimDegrees = parseFloat(trimVal) || 0;
+                    if (heelVal !== null && heelVal !== undefined && heelVal !== '') currentHeelDegrees = parseFloat(heelVal) || 0;
+                    quayCenterLabel = (quayCenterVal !== null && quayCenterVal !== undefined && quayCenterVal !== '') ? String(quayCenterVal) : '';
+                    initTankMatrix();
+                    drawAttitudeGraphics();
+                    refreshPlanView();
+                    if (typeof refresh3DView === 'function') refresh3DView();
+
                     results.push(`✓ D${STEP_SRC_D_START_ROW}:.. → Load_Editor!D${STEP_DEST_D_START_ROW}:.. (${dValues.length} value(s))`);
                     results.push(`✓ P:S${STEP_SRC_PQRS_START_ROW}:.. → Load_Editor!D${STEP_DEST_DG_START_ROW}:G.. (${pqrsValues.length} row(s))`);
                     results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW} → Load_Editor!${STEP_DEST_TIME_COL}${STEP_DEST_TIME_ROW}`);
                     results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW2} → 3D dashboard time-usage label`);
+                    results.push(`✓ ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TRIM_ROW}/${STEP_SRC_HEEL_ROW} → trim/heel`);
+                    results.push(quayCenterLabel ? `✓ ${STEP_SRC_QUAY_SHEET}!${STEP_SRC_QUAY_COL}.. → quay-center label` : `· ${STEP_SRC_QUAY_SHEET}!${STEP_SRC_QUAY_COL}.. blank — quay-center label cleared`);
                     logAutoBallast(`📥 Step Data "${stepName}": ${results.join(' · ')}`);
                     if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
 
@@ -9763,12 +9905,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     // --- 3-standalone) No Excel connection — apply the
                     // step's values straight to the in-memory dashboard
                     // model (shared with the "Play All Steps" animation
-                    // below), instead of writing Excel cells.
-                    applyStepDataToDashboard(stepName, { dValues, pqrsValues });
+                    // below), instead of writing Excel cells. Pass the
+                    // FULL src object through (not just dValues/pqrsValues)
+                    // so trim/heel/quay-center travel with it too.
+                    applyStepDataToDashboard(stepName, src);
 
                     results.push(`✓ ${dValues.length} tank fill value(s) applied to the dashboard`);
                     results.push(`✓ ${pqrsValues.length} trailer axle row(s) applied to the dashboard`);
                     results.push(`✓ time value applied`);
+                    results.push((trimVal !== null && trimVal !== undefined && trimVal !== '') || (heelVal !== null && heelVal !== undefined && heelVal !== '') ? `✓ trim/heel applied` : `· trim/heel unchanged (no value for this step)`);
+                    results.push(quayCenterLabel ? `✓ quay-center label applied` : `· quay-center label cleared (blank for this step)`);
                     logAutoBallast(`📥 Step Data "${stepName}" (imported — no Excel): ${results.join(' · ')}`);
                     if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
                 }
@@ -9855,6 +10001,17 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             const toAxleRows = target.pqrsValues || [];
             const axleCount = Math.max(fromAxles.length, toAxleRows.length);
 
+            // Trim/Heel glide from the CURRENT values to the target
+            // step's BALLASTPLAN(mT) row 11/12 values (if the target step
+            // has them — a step without a trim/heel value just holds at
+            // the current angle rather than snapping to 0).
+            const fromTrim = currentTrimDegrees;
+            const fromHeel = currentHeelDegrees;
+            const hasToTrim = target.trimVal !== null && target.trimVal !== undefined && target.trimVal !== '';
+            const hasToHeel = target.heelVal !== null && target.heelVal !== undefined && target.heelVal !== '';
+            const toTrim = hasToTrim ? (parseFloat(target.trimVal) || 0) : fromTrim;
+            const toHeel = hasToHeel ? (parseFloat(target.heelVal) || 0) : fromHeel;
+
             return new Promise(resolve => {
                 const start = performance.now();
                 function frame(now) {
@@ -9886,6 +10043,12 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         // when landing.
                     }
                     drawAxleOverlay();
+
+                    if (hasToTrim || hasToHeel) {
+                        currentTrimDegrees = fromTrim + (toTrim - fromTrim) * e;
+                        currentHeelDegrees = fromHeel + (toHeel - fromHeel) * e;
+                        drawAttitudeGraphics();
+                    }
 
                     if (t < 1 && !animationStopRequested) {
                         requestAnimationFrame(frame);
