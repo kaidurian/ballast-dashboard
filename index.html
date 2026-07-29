@@ -417,6 +417,17 @@
             font-family: inherit;
         }
 
+        .dash-time-tag {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            padding: 1px 4px;
+            white-space: nowrap;
+        }
+
         .dash-time-date {
             font-size: 11px;
             font-weight: 600;
@@ -1638,7 +1649,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-70-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-71-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -1695,21 +1706,25 @@
         </div>
     </header>
     <div class="main-layout">
-        <!-- Unified 2D + 3D dashboard time label row — both readouts,
+        <!-- Unified 2D + 3D dashboard time label row — exactly ONE
+             label for the 2D barge view and exactly ONE for the 3D
+             barge view (tagged "2D"/"3D" below so that's unambiguous),
              same font/color/background, side by side in ONE row at the
              top-middle of the 2D+3D view area (see .unified-time-label-row /
              .dash-time-label CSS). Each shows Date · Time · Usage · STEP,
              Date sourced from Load_Editor!R147 (see getCompactSunDateLabel()). -->
         <div class="unified-time-label-row" id="unifiedTimeLabelRow">
             <div id="dash2dTimeLabel" class="dash-time-label"
-                 title="Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
+                 title="2D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
+                <div class="dash-time-tag">2D</div>
                 <div id="dash2dDate" class="dash-time-date">—</div>
                 <div id="dash2dCurrentTime" class="dash-time-current">—:—</div>
                 <div id="dash2dTimeUsage" class="dash-time-usage">usage —</div>
                 <div id="dash2dStepLabel" class="dash-time-step"></div>
             </div>
             <div id="dash3dTimeLabel" class="dash-time-label"
-                 title="Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
+                 title="3D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
+                <div class="dash-time-tag">3D</div>
                 <div id="dash3dDate" class="dash-time-date">—</div>
                 <div id="dash3dCurrentTime" class="dash-time-current">—:—</div>
                 <div id="dash3dTimeUsage" class="dash-time-usage">usage —</div>
@@ -2257,11 +2272,11 @@
         // comment above). valid=false until a real read has succeeded,
         // so the sign simply doesn't draw before the first sync.
         let bargeCoG = { lcg: 0, tcg: 0, vcg: 0, valid: false };
-        // ---- STEP00/STEP01 CoG sign rule state (see readStepSourceData
+        // ---- STEP00+ CoG sign rule state (see readStepSourceData
         // callers / pullExcelTankData's Load_Editor!N18:N27 lookup) ----
         let activeStepIndexGlobal = null;   // 0-based index of the last-loaded step (STEP00=0, STEP01=1, ...)
         let step00CoGPoint = null;          // { x, y } CoG sign position captured for STEP00
-        let prevStepFirstAxlePoint = null;  // { x, y } first axle position BEFORE the just-applied step, for STEP01's delta
+        let cogOffsetFromFirstAxle = null;  // { x, y } STEP00's CoG sign position MINUS STEP00's first axle position — kept constant for every later step, so the CoG sign follows the axle/train at that same distance
         // Row picker — used when Load_Editor!N18:N27 has MORE THAN ONE
         // row equal to 0, so the operator chooses which row's P/Q feeds
         // STEP00's CoG sign position instead of the code guessing.
@@ -4284,16 +4299,21 @@
                     }
                     trailerAxles = parsedAxles;
 
-                    // ---- STEP00/STEP01 CoG sign rule ----
+                    // ---- STEP00+ CoG sign rule ----
                     // STEP00: scan Load_Editor!N18:N27 for a row equal to
                     // 0; that row's P value is the CoG sign's X distance
                     // from the barge origin (0,0), and its Q value is the
                     // CoG sign's Y distance from the barge centerline —
                     // this becomes STEP00's CoG sign position (overrides
-                    // the plain P31/Q31 read above for that step only).
-                    // STEP01: CoG sign position = STEP00's CoG sign
-                    // position + the change in the first axle's (X,Y)
-                    // between STEP01 and the previously-loaded step.
+                    // the plain P31/Q31 read above for STEP00 only). The
+                    // CoG sign's (X,Y) offset FROM the first axle at that
+                    // moment is captured too (cogOffsetFromFirstAxle).
+                    // Every step AFTER STEP00: the CoG sign follows the
+                    // first axle/train, keeping that SAME offset it had
+                    // from the first axle back at STEP00 — i.e. CoG sign
+                    // position = current first axle position + the
+                    // STEP00 offset (not a running delta vs. whatever
+                    // step loaded immediately before).
                     if (rangeCogN && rangeCogN.values) {
                         const nVals = rangeCogN.values;
                         const pVals = (rangeCogP && rangeCogP.values) || [];
@@ -4330,22 +4350,23 @@
                                     applyStep00CoGPoint(chosen);
                                 });
                             }
-                        } else if (activeStepIndexGlobal === 1 && step00CoGPoint && trailerAxles.length && prevStepFirstAxlePoint) {
-                            const dx = trailerAxles[0].x - prevStepFirstAxlePoint.x;
-                            const dy = trailerAxles[0].y - prevStepFirstAxlePoint.y;
-                            bargeCoG.lcg = step00CoGPoint.x + dx;
-                            bargeCoG.tcg = step00CoGPoint.y + dy;
+                        } else if (activeStepIndexGlobal !== null && activeStepIndexGlobal !== 0 && cogOffsetFromFirstAxle && trailerAxles.length) {
+                            bargeCoG.lcg = trailerAxles[0].x + cogOffsetFromFirstAxle.x;
+                            bargeCoG.tcg = trailerAxles[0].y + cogOffsetFromFirstAxle.y;
                             bargeCoG.valid = true;
                         }
                     }
 
                     // Applies a chosen/derived STEP00 CoG sign point (either
                     // the single N=0 match, or the operator's pick from
-                    // openCoGRowPickerModal) and re-draws the CoG sign so
-                    // the change is visible immediately, without requiring
-                    // another full Sync.
+                    // openCoGRowPickerModal), captures its offset from the
+                    // first axle (reused by every later step, see above),
+                    // and re-draws the CoG sign immediately.
                     function applyStep00CoGPoint(point) {
                         step00CoGPoint = point;
+                        cogOffsetFromFirstAxle = trailerAxles.length
+                            ? { x: point.x - trailerAxles[0].x, y: point.y - trailerAxles[0].y }
+                            : null;
                         bargeCoG.lcg = point.x;
                         bargeCoG.tcg = point.y;
                         bargeCoG.valid = true;
@@ -10268,12 +10289,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     activeStepName = stepName;
                     updateActiveStepLabel();
 
-                    // Snapshot the PREVIOUS step's first axle position and
-                    // this step's index before pullExcelTankData() below
-                    // refreshes trailerAxles to the new step's values —
-                    // see the STEP00/STEP01 CoG sign rule inside
-                    // pullExcelTankData().
-                    prevStepFirstAxlePoint = trailerAxles[0] ? { x: trailerAxles[0].x, y: trailerAxles[0].y } : null;
+                    // Record which step this is — pullExcelTankData() below
+                    // uses this to decide whether to apply the STEP00 CoG
+                    // lookup or the "follow the axle, keep STEP00's offset"
+                    // rule for every step after it.
                     activeStepIndexGlobal = Number.isInteger(stepIndex) ? stepIndex : null;
 
                     // Refresh the dashboard from the freshly-written Load_Editor data.
