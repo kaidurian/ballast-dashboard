@@ -389,20 +389,18 @@
             font-family: monospace;
         }
 
-        /* ---- Unified 2D/3D dashboard time label row ----
-           Both the 2D-plan and 3D-view "current time / usage / step"
-           readouts live here now, side by side in ONE row, centered at
-           the top-middle of the 2D+3D view area — instead of the 2D one
-           being centered over its own panel and the 3D one floating in
-           the corner of its own panel. Both labels share identical
+        /* ---- Per-panel dashboard time label ----
+           The 2D-plan panel and the 3D-view panel each get their OWN
+           time label — one for 2D, one for 3D, no longer combined into
+           a single shared row (that looked like a duplicate/repeat
+           sitting inside the 2D view). Both still share identical
            font/color/background formatting (see .dash-time-label and
-           children) so the 2D and 3D readouts look like one dashboard. */
-        .unified-time-label-row {
+           children) so the two readouts still look like one dashboard,
+           they're just anchored to their own panel now, top-middle of
+           each. */
+        .dash-time-label-row {
             display: flex;
-            flex-wrap: wrap;
             justify-content: center;
-            align-items: center;
-            gap: 10px;
             margin: 0 0 8px;
         }
 
@@ -415,17 +413,6 @@
             border-radius: 6px;
             padding: 5px 9px;
             font-family: inherit;
-        }
-
-        .dash-time-tag {
-            font-size: 9px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            color: #64748b;
-            background: rgba(255, 255, 255, 0.06);
-            border-radius: 3px;
-            padding: 1px 4px;
-            white-space: nowrap;
         }
 
         .dash-time-date {
@@ -1706,33 +1693,20 @@
         </div>
     </header>
     <div class="main-layout">
-        <!-- Unified 2D + 3D dashboard time label row — exactly ONE
-             label for the 2D barge view and exactly ONE for the 3D
-             barge view (tagged "2D"/"3D" below so that's unambiguous),
-             same font/color/background, side by side in ONE row at the
-             top-middle of the 2D+3D view area (see .unified-time-label-row /
-             .dash-time-label CSS). Each shows Date · Time · Usage · STEP,
-             Date sourced from Load_Editor!R147 (see getCompactSunDateLabel()). -->
-        <div class="unified-time-label-row" id="unifiedTimeLabelRow">
-            <div id="dash2dTimeLabel" class="dash-time-label"
-                 title="2D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
-                <div class="dash-time-tag">2D</div>
-                <div id="dash2dDate" class="dash-time-date">—</div>
-                <div id="dash2dCurrentTime" class="dash-time-current">—:—</div>
-                <div id="dash2dTimeUsage" class="dash-time-usage">usage —</div>
-                <div id="dash2dStepLabel" class="dash-time-step"></div>
-            </div>
-            <div id="dash3dTimeLabel" class="dash-time-label"
-                 title="3D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
-                <div class="dash-time-tag">3D</div>
-                <div id="dash3dDate" class="dash-time-date">—</div>
-                <div id="dash3dCurrentTime" class="dash-time-current">—:—</div>
-                <div id="dash3dTimeUsage" class="dash-time-usage">usage —</div>
-                <div id="dash3dStepLabel" class="dash-time-step"></div>
-            </div>
-        </div>
         <div class="view-2d-3d-row" id="view2d3dRow">
         <div class="tank-grid-container" id="view2dPanel">
+            <!-- 2D barge view's OWN time label — top-middle of this panel
+                 only (not shared with the 3D panel below/beside it). Same
+                 font/color/background as the 3D one via .dash-time-label. -->
+            <div class="dash-time-label-row">
+                <div id="dash2dTimeLabel" class="dash-time-label"
+                     title="2D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
+                    <div id="dash2dDate" class="dash-time-date">—</div>
+                    <div id="dash2dCurrentTime" class="dash-time-current">—:—</div>
+                    <div id="dash2dTimeUsage" class="dash-time-usage">usage —</div>
+                    <div id="dash2dStepLabel" class="dash-time-step"></div>
+                </div>
+            </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
                 <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
@@ -1740,6 +1714,17 @@
         </div>
         <div class="view-2d-3d-resizer" id="view2d3dResizer" title="Drag to resize · double-click to reset"></div>
         <div class="tank-grid-container" id="view3dCanvasPanel">
+            <!-- 3D barge view's OWN time label — top-middle of this panel
+                 only. Same font/color/background as the 2D one above. -->
+            <div class="dash-time-label-row">
+                <div id="dash3dTimeLabel" class="dash-time-label"
+                     title="3D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
+                    <div id="dash3dDate" class="dash-time-date">—</div>
+                    <div id="dash3dCurrentTime" class="dash-time-current">—:—</div>
+                    <div id="dash3dTimeUsage" class="dash-time-usage">usage —</div>
+                    <div id="dash3dStepLabel" class="dash-time-step"></div>
+                </div>
+            </div>
             <div id="viewer3dWrap" style="position:relative; width:100%; height:420px;">
                 <div id="viewer3d" style="width:100%; height:420px; border-radius:8px; overflow:hidden; background:#0f1115;"></div>
                 <div id="labels3d" style="position:absolute; inset:0; pointer-events:none;"></div>
