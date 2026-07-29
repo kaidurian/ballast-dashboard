@@ -1640,31 +1640,18 @@
     <div class="main-layout">
         <div class="view-2d-3d-row" id="view2d3dRow">
         <div class="tank-grid-container" id="view2dPanel">
-            <div class="section-title" style="justify-content: space-between; border-left: none; padding-left: 0;">
-                <div style="width: 1px;"><!-- spacer so the attitude block stays visually centered --></div>
-                <div class="grid-attitude-mini">
-                    <div class="grid-attitude-block">
-                        <span class="grid-side-label" id="lbl_GridAFT">AFT</span>
-                        <canvas id="trimCanvas" class="attitude-canvas-mini" width="120" height="50"></canvas>
-                        <span class="grid-side-label" id="lbl_GridFWD">FWD</span>
-                    </div>
-                    <div class="grid-attitude-block">
-                        <span class="grid-side-label" id="lbl_GridPS">PS</span>
-                        <canvas id="heelCanvas" class="attitude-canvas-mini" width="120" height="50"></canvas>
-                        <span class="grid-side-label" id="lbl_GridSB">SB</span>
-                    </div>
+            <div class="section-title" style="justify-content: center; border-left: none; padding-left: 0;">
+                <div id="dash2dTimeLabel"
+                     title="Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session)."
+                     style="display:flex; align-items:baseline; gap:8px; background:rgba(0,0,0,0.15); border:1px solid var(--panel-border); border-radius:6px; padding:4px 10px; font-family:inherit;">
+                    <div id="dash2dCurrentTime" style="font-size:13px; font-weight:600; color:#e5e7eb; white-space:nowrap;">—:—</div>
+                    <div id="dash2dTimeUsage" style="font-size:12px; color:#9ca3af; white-space:nowrap;">usage —</div>
+                    <div id="dash2dStepLabel" style="font-size:10px; color:#93c5fd; white-space:nowrap;"></div>
                 </div>
             </div>
             <div class="tank-grid-wrap" id="tankGridWrap">
                 <div class="tank-grid" id="tankContainer"></div>
                 <canvas id="axleOverlayCanvas" class="axle-overlay-canvas"></canvas>
-                <div id="dash2dTimeLabel"
-                     title="Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session)."
-                     style="position:absolute; top:8px; right:8px; text-align:right; background:rgba(15,17,21,0.72); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:5px 9px; pointer-events:none; z-index:5; font-family:inherit;">
-                    <div id="dash2dCurrentTime" style="font-size:13px; font-weight:600; color:#e5e7eb; line-height:1.3;">—:—</div>
-                    <div id="dash2dTimeUsage" style="font-size:12px; color:#9ca3af; line-height:1.3;">usage —</div>
-                    <div id="dash2dStepLabel" style="font-size:10px; color:#93c5fd; line-height:1.3;"></div>
-                </div>
             </div>
         </div>
         <div class="view-2d-3d-resizer" id="view2d3dResizer" title="Drag to resize · double-click to reset"></div>
@@ -3101,29 +3088,30 @@
             const aftP = worldToScreen(BARGE_X_MIN, (BARGE_Y_MIN + BARGE_Y_MAX) / 2);
             const fwdP = worldToScreen(BARGE_X_MAX, (BARGE_Y_MIN + BARGE_Y_MAX) / 2);
 
-            const aftLbl = document.createElement('div');
-            aftLbl.className = 'barge-end-label';
-            aftLbl.id = 'lbl_PlanAFT';
-            aftLbl.textContent = 'AFT';
-            aftLbl.style.left = (aftP.sx - 6) + 'px';
-            aftLbl.style.top = aftP.sy + 'px';
-            aftLbl.style.transform = 'translate(-100%, -50%) rotate(-90deg)';
-            container.appendChild(aftLbl);
-
-            // 7th label — quay-side, positioned BESIDE the AFT tag (same
-            // rotated text direction as AFT), but styled like the 6
-            // Load_Editor!I1:I6 corner labels (color/size/background) —
-            // see quayCenterLabel above.
+            // 7th label — quay-side, positioned BETWEEN the barge edge and
+            // the AFT tag (same rotated text direction as AFT), but styled
+            // like the 6 Load_Editor!I1:I6 corner labels (color/size/
+            // background) — see quayCenterLabel above. Drawn before AFT so
+            // it sits closer to the hull, with AFT pushed further outward.
             if (quayCenterLabel) {
                 const qLbl = document.createElement('div');
                 qLbl.className = 'barge-corner-label quay-center-label';
                 qLbl.textContent = formatCornerLabelText(quayCenterLabel);
                 qLbl.style.position = 'absolute';
-                qLbl.style.left = (aftP.sx - 26) + 'px';
+                qLbl.style.left = (aftP.sx - 6) + 'px';
                 qLbl.style.top = aftP.sy + 'px';
                 qLbl.style.transform = 'translate(-100%, -50%) rotate(-90deg)';
                 container.appendChild(qLbl);
             }
+
+            const aftLbl = document.createElement('div');
+            aftLbl.className = 'barge-end-label';
+            aftLbl.id = 'lbl_PlanAFT';
+            aftLbl.textContent = 'AFT';
+            aftLbl.style.left = (aftP.sx - 26) + 'px';
+            aftLbl.style.top = aftP.sy + 'px';
+            aftLbl.style.transform = 'translate(-100%, -50%) rotate(-90deg)';
+            container.appendChild(aftLbl);
 
             const fwdLbl = document.createElement('div');
             fwdLbl.className = 'barge-end-label';
@@ -3869,30 +3857,46 @@
             });
 
             // "First axle of each train" position label — shows the real
-            // Xpos[m]/Ypos[m] (Load_Editor!E/F, same values as axle.x/
-            // axle.y) at ONLY the first axle row belonging to each
-            // distinct train, right at that axle's own position. Needs
-            // trainName in trailerAxleMeta, which is only stamped when
-            // the trailer was built via the 🚂 Generate Trailer modal —
-            // a plain Excel/mock read has no train boundaries to key off.
-            if (metaAligned) {
-                const seenTrains = new Set();
-                trailerAxles.forEach((axle, axleIdx) => {
-                    const meta = trailerAxleMeta[axleIdx];
-                    const trainKey = meta && meta.trainName;
-                    if (!trainKey || seenTrains.has(trainKey)) return;
-                    seenTrains.add(trainKey);
-                    const p = worldToScreen(axle.x, axle.y);
-                    ctx.save();
-                    ctx.fillStyle = meta.color || (isLight ? '#0f172a' : '#e2e8f0');
-                    ctx.font = 'bold 9px Calibri, sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(
-                        `X ${axle.x.toFixed(2)}m  Y ${axle.y.toFixed(2)}m`,
-                        p.sx, p.sy - lineHalfOffsetPx - tireHalfOffsetPx - hubRadiusPx - 8
-                    );
-                    ctx.restore();
-                });
+            // Xpos[m]/Ypos[m] (Load_Editor!E124/F124, same values as
+            // trailerAxles[0].x/.y — mirrors BALLASTPLAN(mT)!F20/F21)
+            // at the FIRST axle row of the whole set, right at that
+            // axle's own position. This one always renders as soon as
+            // there's at least one axle — it does NOT depend on
+            // trailerAxleMeta's trainName (which is only stamped when the
+            // trailer was built via the 🚂 Generate Trailer modal), so a
+            // plain Excel/mock read still shows it.
+            //
+            // If train boundaries ARE known (trainName present), the same
+            // label is additionally mirrored onto the first axle line of
+            // every OTHER train, so multi-train layouts get one readout
+            // per train instead of just the very first axle overall.
+            function drawAxlePosLabel(axle, color) {
+                const p = worldToScreen(axle.x, axle.y);
+                ctx.save();
+                ctx.fillStyle = color || (isLight ? '#0f172a' : '#e2e8f0');
+                ctx.font = 'bold 9px Calibri, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(
+                    `Xpos[m] ${axle.x.toFixed(2)}  Ypos[m] ${axle.y.toFixed(2)}`,
+                    p.sx, p.sy - lineHalfOffsetPx - tireHalfOffsetPx - hubRadiusPx - 8
+                );
+                ctx.restore();
+            }
+            if (trailerAxles.length) {
+                const firstMeta = metaAligned ? trailerAxleMeta[0] : null;
+                drawAxlePosLabel(trailerAxles[0], firstMeta && firstMeta.color);
+
+                if (metaAligned) {
+                    const seenTrains = new Set(firstMeta && firstMeta.trainName ? [firstMeta.trainName] : []);
+                    trailerAxles.forEach((axle, axleIdx) => {
+                        if (axleIdx === 0) return; // already drawn above
+                        const meta = trailerAxleMeta[axleIdx];
+                        const trainKey = meta && meta.trainName;
+                        if (!trainKey || seenTrains.has(trainKey)) return;
+                        seenTrains.add(trainKey);
+                        drawAxlePosLabel(axle, meta.color);
+                    });
+                }
             }
 
             // ---- GHOST target footprint(s) + move arrow(s) — Level 2/3 only ----
@@ -7145,8 +7149,9 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 const usage = usageMinutes / 1440; // -> Excel day-fraction
                 const base = Number(stepTime177Val);
                 const curTime = (Number.isFinite(base) ? base : 0) + usage;
-                // "current time" is a point-in-time clock reading -> 12h + AM/PM.
-                curTimeText = lcFmtClock12(curTime);
+                // "current time" is a point-in-time clock reading -> plain
+                // 24-hour H:MM, no AM/PM.
+                curTimeText = lcFmtTime(curTime);
                 // "time usage" is a duration, not a clock -> h/m units, no AM/PM.
                 usageText = 'usage ' + lcFmtDuration(usage);
                 // Diagnostic: raw numbers behind the calc, visible on hover
@@ -7155,7 +7160,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 tooltipText = `Auto Ballast real-time calc — row177(base)=${base} · D178(factor)=${factor} · opMinutes=${opMinutes.toFixed(3)} · usageMinutes(=factor×opMinutes)=${usageMinutes.toFixed(3)} · usage(day-fraction, ÷1440)=${usage} · curTime(=base+usage)=${curTime}`;
                 console.debug('[3D time label] AB calc:', { base, factor, opMinutes, usageMinutes, usage, curTime, autoBallastTotalTransferredT, pumpCapacityMTPerHr });
             } else {
-                curTimeText = lcFmtClock12(stepTime177Val);
+                curTimeText = lcFmtTime(stepTime177Val);
                 usageText = 'usage ' + lcFmtDuration(stepTime178Val);
                 tooltipText = `Step Data values — row177=${stepTime177Val} · row178=${stepTime178Val}`;
             }
@@ -7796,23 +7801,36 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             // height/Z as AFT so it reads as a companion tag next to it.
             addAnchor('quaycenter', BARGE_X_MIN - 3, edgeLabelY, 0, '', 'quaycenter');
 
-            // Per-train Xpos[m]/Ypos[m] label, at the FIRST axle line
-            // belonging to each distinct train — mirrors the 2D plan's
-            // equivalent label. Needs trainName in trailerAxleMeta,
-            // stamped only when the trailer was built via the
-            // 🚂 Generate Trailer modal. Text is computed live in
-            // renderLabels3D() (cls 'trainpos') from trailerAxles[idx],
-            // so it stays correct even if that axle's x/y changes
-            // without a full geometry rebuild (see refresh3DView()).
-            if (trailerAxleMeta.length === trailerAxles.length) {
-                const seenTrains3d = new Set();
-                trailerAxles.forEach((axle, axleIdx) => {
-                    const meta = trailerAxleMeta[axleIdx];
-                    const trainKey = meta && meta.trainName;
-                    if (!trainKey || seenTrains3d.has(trainKey)) return;
-                    seenTrains3d.add(trainKey);
-                    addAnchor(`trainpos_${axleIdx}`, axle.x, 0.6, worldYToZ3D(axle.y), '', 'trainpos');
-                });
+            // Xpos[m]/Ypos[m] label at the FIRST axle line of the whole
+            // set — Load_Editor!E124/F124 (mirrors BALLASTPLAN(mT)!F20/
+            // F21) — mirrors the 2D plan's equivalent label. This one
+            // always gets an anchor as soon as there's at least one axle;
+            // it does NOT require trainName in trailerAxleMeta (that's
+            // only stamped when the trailer was built via the 🚂 Generate
+            // Trailer modal — a plain Excel/mock read has no train
+            // boundaries to key off, but should still show this label).
+            // When trainName IS available, the same label is additionally
+            // mirrored onto the first axle line of every OTHER train.
+            // Text is computed live in renderLabels3D() (cls 'trainpos')
+            // from trailerAxles[idx], so it stays correct even if that
+            // axle's x/y changes without a full geometry rebuild (see
+            // refresh3DView()).
+            if (trailerAxles.length) {
+                const metaAligned3d = trailerAxleMeta.length === trailerAxles.length;
+                addAnchor('trainpos_0', trailerAxles[0].x, 0.6, worldYToZ3D(trailerAxles[0].y), '', 'trainpos');
+
+                if (metaAligned3d) {
+                    const firstMeta3d = trailerAxleMeta[0];
+                    const seenTrains3d = new Set(firstMeta3d && firstMeta3d.trainName ? [firstMeta3d.trainName] : []);
+                    trailerAxles.forEach((axle, axleIdx) => {
+                        if (axleIdx === 0) return; // already added above
+                        const meta = trailerAxleMeta[axleIdx];
+                        const trainKey = meta && meta.trainName;
+                        if (!trainKey || seenTrains3d.has(trainKey)) return;
+                        seenTrains3d.add(trainKey);
+                        addAnchor(`trainpos_${axleIdx}`, axle.x, 0.6, worldYToZ3D(axle.y), '', 'trainpos');
+                    });
+                }
             }
 
             // Per-tank %-fill label anchor, lifted just above the tank's
@@ -7926,7 +7944,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     if (!axle) return;
                     const meta = (trailerAxleMeta.length === trailerAxles.length) ? trailerAxleMeta[idx] : null;
                     const color = (meta && meta.color) ? meta.color : '#e2e8f0';
-                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:${color}; background:rgba(15,17,21,0.6); padding:1px 5px; border-radius:4px; white-space:nowrap; z-index:30;">X ${axle.x.toFixed(2)}m · Y ${axle.y.toFixed(2)}m</div>`;
+                    html += `<div style="position:absolute; left:${sx}px; top:${sy}px; transform:translate(-50%,-50%); font-size:10px; font-weight:700; color:${color}; background:rgba(15,17,21,0.6); padding:1px 5px; border-radius:4px; white-space:nowrap; z-index:30;">Xpos[m] ${axle.x.toFixed(2)} · Ypos[m] ${axle.y.toFixed(2)}</div>`;
                 } else if (a.cls === 'quaycenter') {
                     const text = formatCornerLabelText((quayCenterLabel || '').trim());
                     if (!text) return;
