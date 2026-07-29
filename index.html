@@ -311,6 +311,7 @@
         }
 
         .tank-grid-container {
+            position: relative;
             background: var(--panel-bg);
             border: 1px solid var(--panel-border);
             border-radius: 6px;
@@ -395,24 +396,32 @@
            a single shared row (that looked like a duplicate/repeat
            sitting inside the 2D view). Both still share identical
            font/color/background formatting (see .dash-time-label and
-           children) so the two readouts still look like one dashboard,
-           they're just anchored to their own panel now, top-middle of
-           each. */
+           children) so the two readouts still look like one dashboard —
+           each floats on the right side, vertically centered, of its
+           own panel (.tank-grid-container is position:relative so this
+           anchors to it) — and Date/Time/Usage/STEP are stacked as
+           separate rows inside the box (see .dash-time-label below),
+           not run together on one line. */
         .dash-time-label-row {
-            display: flex;
-            justify-content: center;
-            margin: 0 0 8px;
+            position: absolute;
+            top: 50%;
+            right: 14px;
+            transform: translateY(-50%);
+            z-index: 20;
+            pointer-events: none;
         }
 
         .dash-time-label {
             display: flex;
-            align-items: baseline;
-            gap: 8px;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
             background: rgba(15, 17, 21, 0.72);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 6px;
-            padding: 5px 9px;
+            padding: 6px 9px;
             font-family: inherit;
+            pointer-events: auto;
         }
 
         .dash-time-date {
@@ -1695,8 +1704,9 @@
     <div class="main-layout">
         <div class="view-2d-3d-row" id="view2d3dRow">
         <div class="tank-grid-container" id="view2dPanel">
-            <!-- 2D barge view's OWN time label — top-middle of this panel
-                 only (not shared with the 3D panel below/beside it). Same
+            <!-- 2D barge view's OWN time label — floats on the right
+                 side, vertically centered, of this panel only (not
+                 shared with the 3D panel below/beside it). Same
                  font/color/background as the 3D one via .dash-time-label. -->
             <div class="dash-time-label-row">
                 <div id="dash2dTimeLabel" class="dash-time-label"
@@ -1714,8 +1724,9 @@
         </div>
         <div class="view-2d-3d-resizer" id="view2d3dResizer" title="Drag to resize · double-click to reset"></div>
         <div class="tank-grid-container" id="view3dCanvasPanel">
-            <!-- 3D barge view's OWN time label — top-middle of this panel
-                 only. Same font/color/background as the 2D one above. -->
+            <!-- 3D barge view's OWN time label — floats on the right
+                 side, vertically centered, of this panel only. Same
+                 font/color/background as the 2D one above. -->
             <div class="dash-time-label-row">
                 <div id="dash3dTimeLabel" class="dash-time-label"
                      title="3D barge view · Date: Load_Editor!R147 · Current time: BALLASTPLAN(mT) row 177 (active step's column) · Time usage: row 178 (active step's column). While an Auto Ballast mode is engaged, both switch to real-time values driven by BALLASTPLAN(mT)!D178 × Est. Operation Time (session).">
