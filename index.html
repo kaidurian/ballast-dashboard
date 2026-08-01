@@ -617,6 +617,32 @@
             white-space: nowrap;
         }
 
+        /* ---- Step-over-step water diff label (pump tanks only) ----
+           Shows how much a tank's target fill changed between the
+           LAST step actually loaded (click history, not fixed
+           STEP00/01/02.. order) and the CURRENT step just loaded. See
+           lastStepLoadTankFills/stepDiffMT and
+           renderTankStepDiffLabels(). Anchored bottom-left so it never
+           collides with the live flow marker (top-left) or pump-name
+           label (top-right). Distinct amber styling keeps it visually
+           separate from the blue/red live flow badge above. */
+        .tank-step-diff-marker {
+            position: absolute;
+            bottom: 2px;
+            left: 2px;
+            z-index: 17;
+            pointer-events: none;
+        }
+        .tank-step-diff-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #431407;
+            background: rgba(251,191,36,0.92);
+            padding: 1px 4px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
         .tank-control-box {
             position: absolute;
             background: var(--tank-box-bg);
@@ -1645,7 +1671,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-71-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-72-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2336,7 +2362,25 @@
         // turns the arrow back off once the transfer looks finished.
         let flowWeightBaseline = {};   // { [row]: number } last "settled" weight
         let flowManualState = {};      // { [row]: 'fill' | 'discharge' }
+        let flowDeltaMT = {};          // { [row]: number } signed (new - previous/baseline) weight, shown on the flow label
         let flowSettleTimers = {};     // { [row]: timeoutId }
+
+        // ---- Step-over-step water diff (click history) ----
+        // Separate from the live weight-delta above: this compares the
+        // tank fill values of the CURRENT step just loaded against the
+        // tank fill values of the LAST step actually loaded via the
+        // Step Data Loader (whichever button the user clicked before
+        // this one — not a fixed STEP00->STEP01->STEP02.. sequence).
+        // Populated in loadStepDataToLoadEditor() right after dValues
+        // is read (works for both the Excel-write branch and the
+        // standalone applyStepDataToDashboard() branch, since both read
+        // through the same dValues). Consumed by
+        // renderTankStepDiffLabels(), shown only on tanks with a pump.
+        let lastStepLoadTankFills = null; // { ["row"+id]: number } tank fills as of the last step LOAD (not manual edits) — "row"-prefixed keys, same convention as publishToFirebase()'s tanks object, to avoid Firebase silently coercing plain-integer-keyed objects into sparse arrays
+        let lastStepLoadName = null;      // name of that last-loaded step
+        let stepDiffMT = {};              // { ["row"+id]: number } current step's fill minus lastStepLoadTankFills's fill
+        let stepDiffFromStepName = null;  // step name the current diff is measured FROM (null if this is the first step ever loaded)
+        let stepDiffToStepName = null;    // step name the current diff is measured TO (the step just loaded)
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
         const FLOW_SETTLE_MS = 1500;         // how long a weight must hold steady before the arrow turns off
 
@@ -2346,6 +2390,7 @@
         function seedFlowBaseline(row, weight) {
             flowWeightBaseline[row] = parseFloat(weight) || 0;
             delete flowManualState[row];
+            delete flowDeltaMT[row];
             if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
         }
 
@@ -2373,6 +2418,7 @@
                 if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
                 if (flowManualState[row]) {
                     delete flowManualState[row];
+                    delete flowDeltaMT[row];
                     if (typeof renderTankFlowOverlay === 'function') {
                         const c = document.getElementById('tankContainer');
                         if (c) renderTankFlowOverlay(c);
@@ -2382,10 +2428,15 @@
                 return;
             }
             flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
+            // Signed delta between the NEW value just entered/synced and
+            // the PREVIOUS (settled baseline) value — this is what the
+            // flow-overlay label shows instead of the tank's raw weight.
+            flowDeltaMT[row] = delta;
             if (flowSettleTimers[row]) clearTimeout(flowSettleTimers[row]);
             flowSettleTimers[row] = setTimeout(() => {
                 flowWeightBaseline[row] = w;
                 delete flowManualState[row];
+                delete flowDeltaMT[row];
                 delete flowSettleTimers[row];
                 if (typeof renderTankFlowOverlay === 'function') {
                     const c = document.getElementById('tankContainer');
@@ -3112,6 +3163,7 @@
             renderBargeCornerLabels(container);
             renderPumpMarkers(container);
             renderTankFlowOverlay(container);
+            renderTankStepDiffLabels(container);
             applyDimensionVisibility();
         }
 
@@ -3341,13 +3393,24 @@
                 const tank = tankData.find(t => t.row === cfg.id);
                 const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
 
+                // Prefer the tracked weight-delta (new value minus the
+                // previous/settled baseline — see noteFlowWeightChange)
+                // so the label reads as the quantity actually moving
+                // in/out, not the tank's total current weight. Falls
+                // back to the absolute weight only when flow state came
+                // from real pump/valve status text with no matching
+                // weight-delta on record (e.g. right after page load).
+                const delta = flowDeltaMT[cfg.id];
+                const hasDelta = typeof delta === 'number' && isFinite(delta) && Math.abs(delta) >= FLOW_WEIGHT_EPSILON_MT;
+                const deltaLabel = hasDelta ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)} mT` : `${weightMT.toFixed(1)} mT`;
+
                 const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
                 const stateLabel = state === 'discharge' ? 'Discharging' : (state === 'mixed' ? 'Filling & discharging' : 'Filling');
                 const stateWord = state === 'discharge' ? 'OUT' : (state === 'mixed' ? '↕' : 'IN');
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-flow-marker';
-                wrap.title = `${stateLabel} — ${weightMT.toFixed(1)} mT`;
+                wrap.title = `${stateLabel} — ${deltaLabel} (current ${weightMT.toFixed(1)} mT)`;
                 wrap.innerHTML = `
                     <span class="tank-flow-state ${arrowCls}">${stateWord}</span>
                     <span class="tank-flow-pipe ${arrowCls}">
@@ -3355,8 +3418,44 @@
                         <span class="tank-flow-chevron"></span>
                         <span class="tank-flow-chevron"></span>
                     </span>
-                    <span class="tank-flow-label">${weightMT.toFixed(1)} mT</span>
+                    <span class="tank-flow-label">${deltaLabel}</span>
                 `;
+                card.appendChild(wrap);
+            });
+        }
+
+        // ============================================================
+        // 3a4b. STEP-OVER-STEP WATER DIFF LABEL (2D) — pump tanks only
+        //      Small amber badge at the bottom-left of a tank card
+        //      showing how much that tank's target fill changed
+        //      between the last step actually loaded and the step
+        //      just loaded (click history — see loadStepDataToLoadEditor
+        //      and the stepDiffMT/lastStepLoadTankFills comment above).
+        //      Only rendered for tanks that have at least one pump
+        //      assigned (reuses tanksWithPump, populated by
+        //      renderPumpMarkers() just before this runs). Tanks with
+        //      no diff on record yet (first step ever loaded, or a
+        //      tank not present in the previous step's data) show no
+        //      label rather than a misleading "0.0 mT".
+        // ============================================================
+        function renderTankStepDiffLabels(container) {
+            container.querySelectorAll('.tank-step-diff-marker').forEach(el => el.remove());
+            if (!TANK_CONFIG.length || !tanksWithPump.size) return;
+
+            tanksWithPump.forEach((tankId) => {
+                const diff = stepDiffMT["row" + tankId];
+                if (typeof diff !== 'number' || !isFinite(diff) || Math.abs(diff) < FLOW_WEIGHT_EPSILON_MT) return;
+                const card = document.getElementById(`tank_card_${tankId}`);
+                if (!card) return;
+
+                const sign = diff > 0 ? '+' : '';
+                const fromLabel = stepDiffFromStepName || 'previous state';
+                const toLabel = stepDiffToStepName || 'current step';
+
+                const wrap = document.createElement('div');
+                wrap.className = 'tank-step-diff-marker';
+                wrap.title = `Step diff — ${fromLabel} → ${toLabel}: ${sign}${diff.toFixed(1)} mT`;
+                wrap.innerHTML = `<span class="tank-step-diff-label">Δstep ${sign}${diff.toFixed(1)} mT</span>`;
                 card.appendChild(wrap);
             });
         }
@@ -4553,6 +4652,11 @@
                     trailerPredictionLevel: trailerPredictionLevel,
                     nextTrailerMove: nextTrailerMove,
                     trailerMoveSequence: trailerMoveSequence,
+                    lastStepLoadTankFills: lastStepLoadTankFills,
+                    lastStepLoadName: lastStepLoadName,
+                    stepDiffMT: stepDiffMT,
+                    stepDiffFromStepName: stepDiffFromStepName,
+                    stepDiffToStepName: stepDiffToStepName,
                     updatedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -4643,6 +4747,17 @@
                     // older snapshot that predates the ghost toggle.
                     trailerMoveSequence = data.trailerMoveSequence.map(m => Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, m));
                 }
+                // Step-over-step water diff (click history) — see
+                // lastStepLoadTankFills/stepDiffMT comment near their
+                // declaration. Older snapshots won't have these keys at
+                // all, in which case they simply stay at whatever this
+                // session already had (null/empty), rather than getting
+                // wiped.
+                if (data.lastStepLoadTankFills && typeof data.lastStepLoadTankFills === 'object') lastStepLoadTankFills = data.lastStepLoadTankFills;
+                if (typeof data.lastStepLoadName === 'string') lastStepLoadName = data.lastStepLoadName;
+                if (data.stepDiffMT && typeof data.stepDiffMT === 'object') stepDiffMT = data.stepDiffMT;
+                if (typeof data.stepDiffFromStepName === 'string' || data.stepDiffFromStepName === null) stepDiffFromStepName = data.stepDiffFromStepName;
+                if (typeof data.stepDiffToStepName === 'string' || data.stepDiffToStepName === null) stepDiffToStepName = data.stepDiffToStepName;
                 if (typeof syncTrailerLevelUI === 'function') syncTrailerLevelUI();
                 if (typeof data.showTrailer === 'boolean') {
                     showTrailer = data.showTrailer;
@@ -10159,6 +10274,31 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW}`);
                 }
 
+                // ---- Step-over-step water diff (click history) ----
+                // newFills[row] = this step's target fill for that tank.
+                // Diffed against lastStepLoadTankFills (the last step
+                // actually loaded, whatever button that was) — NOT a
+                // fixed step-sequence lookup. First-ever load has no
+                // "previous", so stepDiffMT stays empty for it.
+                if (dValues.length > 0) {
+                    const newFills = {};
+                    dValues.forEach((v, idx) => { newFills["row" + (STEP_DEST_D_START_ROW + idx)] = parseFloat(v) || 0; });
+                    if (lastStepLoadTankFills) {
+                        const diffs = {};
+                        Object.keys(newFills).forEach(key => {
+                            const prev = lastStepLoadTankFills[key];
+                            if (prev !== undefined) diffs[key] = newFills[key] - prev;
+                        });
+                        stepDiffMT = diffs;
+                    } else {
+                        stepDiffMT = {};
+                    }
+                    stepDiffFromStepName = lastStepLoadName;
+                    stepDiffToStepName = stepName;
+                    lastStepLoadTankFills = newFills;
+                    lastStepLoadName = stepName;
+                }
+
                 if (isOfficeInitialized) {
                     // --- 3) Write everything into Load_Editor ---
                     // Load_Editor may be sheet-protected (Review > Protect Sheet,
@@ -10308,6 +10448,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     results.push(quayCenterLabel ? `✓ quay-center label applied` : `· quay-center label cleared (blank for this step)`);
                     logAutoBallast(`📥 Step Data "${stepName}" (imported — no Excel): ${results.join(' · ')}`);
                     if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
+
+                    // No Excel to re-sync from here (unlike the branch
+                    // above, which republishes via the pullExcelTankData()
+                    // call it schedules) — publish the in-memory state
+                    // directly instead, so this step's tank fills, the
+                    // step-diff label state, and everything else survive
+                    // a refresh or show up on another device polling
+                    // Firebase.
+                    publishToFirebase();
                 }
             } catch (e) {
                 console.warn(`Step Data Loader: failed for "${stepName}"`, e);
