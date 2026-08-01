@@ -617,15 +617,16 @@
             white-space: nowrap;
         }
 
-        /* ---- Step-over-step water diff label (pump tanks only) ----
-           Shows how much a tank's target fill changed between the
-           LAST step actually loaded (click history, not fixed
-           STEP00/01/02.. order) and the CURRENT step just loaded. See
-           lastStepLoadTankFills/stepDiffMT and
-           renderTankStepDiffLabels(). Anchored bottom-left so it never
-           collides with the live flow marker (top-left) or pump-name
-           label (top-right). Distinct amber styling keeps it visually
-           separate from the blue/red live flow badge above. */
+        /* ---- Step baseline water diff label (pump tanks only) ----
+           Shows how far a tank's CURRENT fill has drifted from the
+           value it had at the moment the active step was loaded/
+           restored (stays live as the tank is edited afterward — not
+           a comparison between two different steps). See
+           stepBaselineFills/stepDiffMT and renderTankStepDiffLabels().
+           Anchored bottom-left so it never collides with the live flow
+           marker (top-left) or pump-name label (top-right). Distinct
+           amber styling keeps it visually separate from the blue/red
+           live flow badge above. */
         .tank-step-diff-marker {
             position: absolute;
             bottom: 2px;
@@ -1671,7 +1672,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-72-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-72(Rev.01)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2365,22 +2366,24 @@
         let flowDeltaMT = {};          // { [row]: number } signed (new - previous/baseline) weight, shown on the flow label
         let flowSettleTimers = {};     // { [row]: timeoutId }
 
-        // ---- Step-over-step water diff (click history) ----
-        // Separate from the live weight-delta above: this compares the
-        // tank fill values of the CURRENT step just loaded against the
-        // tank fill values of the LAST step actually loaded via the
-        // Step Data Loader (whichever button the user clicked before
-        // this one — not a fixed STEP00->STEP01->STEP02.. sequence).
-        // Populated in loadStepDataToLoadEditor() right after dValues
-        // is read (works for both the Excel-write branch and the
-        // standalone applyStepDataToDashboard() branch, since both read
-        // through the same dValues). Consumed by
-        // renderTankStepDiffLabels(), shown only on tanks with a pump.
-        let lastStepLoadTankFills = null; // { ["row"+id]: number } tank fills as of the last step LOAD (not manual edits) — "row"-prefixed keys, same convention as publishToFirebase()'s tanks object, to avoid Firebase silently coercing plain-integer-keyed objects into sparse arrays
-        let lastStepLoadName = null;      // name of that last-loaded step
-        let stepDiffMT = {};              // { ["row"+id]: number } current step's fill minus lastStepLoadTankFills's fill
-        let stepDiffFromStepName = null;  // step name the current diff is measured FROM (null if this is the first step ever loaded)
-        let stepDiffToStepName = null;    // step name the current diff is measured TO (the step just loaded)
+        // ---- Step baseline water diff (live vs. the step's own values) ----
+        // Separate from the live weight-delta above: this compares a
+        // tank's CURRENT fill value against the value that tank had at
+        // the moment a step was last loaded/restored (via the Step
+        // Data Loader). The baseline is captured ONCE per step load and
+        // then held fixed; every subsequent edit to that tank (manual
+        // input, or a live Excel sync of Load_Editor!D<row>) recomputes
+        // the diff against that same baseline — it does NOT reset or
+        // auto-hide the way the live flow-delta badge does. Loading a
+        // different (or the same) step again replaces the baseline and
+        // clears all diffs back to zero. Example: STEP00 restored with
+        // WB-02-PS.P at 295.00 -> baseline=295.00, diff hidden (0). Type
+        // 300 -> diff +5.00. Type 310 -> diff +15.00. Type 290 -> diff
+        // -5.00. All measured against the same 295.00 baseline the
+        // whole time, not against the previous edit.
+        let stepBaselineFills = null;     // { ["row"+id]: number } tank fills as of the last step LOAD/restore — "row"-prefixed keys, same convention as publishToFirebase()'s tanks object, to avoid Firebase silently coercing plain-integer-keyed objects into sparse arrays
+        let stepBaselineStepName = null;  // name of the step that set the current baseline
+        let stepDiffMT = {};              // { ["row"+id]: number } current tank fill minus stepBaselineFills's fill for that tank
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
         const FLOW_SETTLE_MS = 1500;         // how long a weight must hold steady before the arrow turns off
 
@@ -2444,6 +2447,38 @@
                 }
                 if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
             }, FLOW_SETTLE_MS);
+        }
+
+        // Replaces the step-diff baseline wholesale — called once, right
+        // when a step's values are loaded/restored (see
+        // loadStepDataToLoadEditor). fillsByRowKey uses the same
+        // "row"+id keys as stepDiffMT/flowWeightBaseline elsewhere.
+        // Diffs reset to empty (hidden) since every tank's current value
+        // now equals its own baseline.
+        function setStepDiffBaseline(fillsByRowKey, stepName) {
+            stepBaselineFills = fillsByRowKey;
+            stepBaselineStepName = stepName;
+            stepDiffMT = {};
+        }
+
+        // Called every time a tank's weight actually changes (manual
+        // 2D input or a live Excel sync of Load_Editor!D<row>) to
+        // recompute that tank's diff against the CURRENT step baseline
+        // (see stepBaselineFills comment above). Unlike
+        // noteFlowWeightChange(), this never resets on its own — the
+        // diff only goes away when a new step baseline is set, or when
+        // the tank isn't part of the loaded step's data at all.
+        function noteStepDiffChange(row, weight) {
+            if (!stepBaselineFills) return; // no step loaded/restored yet this session
+            const key = "row" + row;
+            const base = stepBaselineFills[key];
+            if (base === undefined) return; // tank wasn't part of the loaded step's data
+            const diff = (parseFloat(weight) || 0) - base;
+            if (Math.abs(diff) < FLOW_WEIGHT_EPSILON_MT) {
+                delete stepDiffMT[key];
+            } else {
+                stepDiffMT[key] = diff;
+            }
         }
 
         // Aggregates flow state across every pump matched to a tank
@@ -3425,18 +3460,19 @@
         }
 
         // ============================================================
-        // 3a4b. STEP-OVER-STEP WATER DIFF LABEL (2D) — pump tanks only
+        // 3a4b. STEP BASELINE WATER DIFF LABEL (2D) — pump tanks only
         //      Small amber badge at the bottom-left of a tank card
-        //      showing how much that tank's target fill changed
-        //      between the last step actually loaded and the step
-        //      just loaded (click history — see loadStepDataToLoadEditor
-        //      and the stepDiffMT/lastStepLoadTankFills comment above).
-        //      Only rendered for tanks that have at least one pump
-        //      assigned (reuses tanksWithPump, populated by
-        //      renderPumpMarkers() just before this runs). Tanks with
-        //      no diff on record yet (first step ever loaded, or a
-        //      tank not present in the previous step's data) show no
-        //      label rather than a misleading "0.0 mT".
+        //      showing how far that tank's CURRENT fill has drifted
+        //      from the value it had at the moment the active step was
+        //      loaded/restored (see stepBaselineFills/noteStepDiffChange
+        //      above). Stays live as the tank is edited — does NOT
+        //      auto-hide the way the live flow-delta badge does — and
+        //      only resets when a step is (re)loaded. Only rendered for
+        //      tanks that have at least one pump assigned (reuses
+        //      tanksWithPump, populated by renderPumpMarkers() just
+        //      before this runs). No label when there's no diff to show
+        //      (right after a step load, or before any step has ever
+        //      been loaded this session).
         // ============================================================
         function renderTankStepDiffLabels(container) {
             container.querySelectorAll('.tank-step-diff-marker').forEach(el => el.remove());
@@ -3449,13 +3485,12 @@
                 if (!card) return;
 
                 const sign = diff > 0 ? '+' : '';
-                const fromLabel = stepDiffFromStepName || 'previous state';
-                const toLabel = stepDiffToStepName || 'current step';
+                const baselineLabel = stepBaselineStepName || 'step baseline';
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-step-diff-marker';
-                wrap.title = `Step diff — ${fromLabel} → ${toLabel}: ${sign}${diff.toFixed(1)} mT`;
-                wrap.innerHTML = `<span class="tank-step-diff-label">Δstep ${sign}${diff.toFixed(1)} mT</span>`;
+                wrap.title = `vs ${baselineLabel} baseline: ${sign}${diff.toFixed(2)} mT`;
+                wrap.innerHTML = `<span class="tank-step-diff-label">Δ${baselineLabel} ${sign}${diff.toFixed(2)} mT</span>`;
                 card.appendChild(wrap);
             });
         }
@@ -4374,6 +4409,10 @@
                             // last-seen weight so an external Excel edit
                             // shows the arrow exactly like a manual one.
                             noteFlowWeightChange(tank.row, tank.weight);
+                            // Also keep the step baseline diff current for
+                            // edits made directly in Excel (not just the
+                            // 2D input box) — see noteStepDiffChange().
+                            noteStepDiffChange(tank.row, tank.weight);
                         }
                     });
 
@@ -4652,11 +4691,9 @@
                     trailerPredictionLevel: trailerPredictionLevel,
                     nextTrailerMove: nextTrailerMove,
                     trailerMoveSequence: trailerMoveSequence,
-                    lastStepLoadTankFills: lastStepLoadTankFills,
-                    lastStepLoadName: lastStepLoadName,
+                    stepBaselineFills: stepBaselineFills,
+                    stepBaselineStepName: stepBaselineStepName,
                     stepDiffMT: stepDiffMT,
-                    stepDiffFromStepName: stepDiffFromStepName,
-                    stepDiffToStepName: stepDiffToStepName,
                     updatedAt: new Date().toISOString(),
                     source: "excel-addin"
                 };
@@ -4747,17 +4784,14 @@
                     // older snapshot that predates the ghost toggle.
                     trailerMoveSequence = data.trailerMoveSequence.map(m => Object.assign({ x: 0, y: 0, weightT: 0, showGhost: true }, m));
                 }
-                // Step-over-step water diff (click history) — see
-                // lastStepLoadTankFills/stepDiffMT comment near their
-                // declaration. Older snapshots won't have these keys at
-                // all, in which case they simply stay at whatever this
-                // session already had (null/empty), rather than getting
-                // wiped.
-                if (data.lastStepLoadTankFills && typeof data.lastStepLoadTankFills === 'object') lastStepLoadTankFills = data.lastStepLoadTankFills;
-                if (typeof data.lastStepLoadName === 'string') lastStepLoadName = data.lastStepLoadName;
+                // Step baseline water diff — see stepBaselineFills/
+                // stepDiffMT comment near their declaration. Older
+                // snapshots won't have these keys at all, in which case
+                // they simply stay at whatever this session already had
+                // (null/empty), rather than getting wiped.
+                if (data.stepBaselineFills && typeof data.stepBaselineFills === 'object') stepBaselineFills = data.stepBaselineFills;
+                if (typeof data.stepBaselineStepName === 'string' || data.stepBaselineStepName === null) stepBaselineStepName = data.stepBaselineStepName;
                 if (data.stepDiffMT && typeof data.stepDiffMT === 'object') stepDiffMT = data.stepDiffMT;
-                if (typeof data.stepDiffFromStepName === 'string' || data.stepDiffFromStepName === null) stepDiffFromStepName = data.stepDiffFromStepName;
-                if (typeof data.stepDiffToStepName === 'string' || data.stepDiffToStepName === null) stepDiffToStepName = data.stepDiffToStepName;
                 if (typeof syncTrailerLevelUI === 'function') syncTrailerLevelUI();
                 if (typeof data.showTrailer === 'boolean') {
                     showTrailer = data.showTrailer;
@@ -4999,6 +5033,13 @@
                 const flowContainer = document.getElementById('tankContainer');
                 if (flowContainer) renderTankFlowOverlay(flowContainer);
             }
+            // Step baseline diff: recompute this tank's drift from its
+            // step-load baseline (if any) and repaint the amber badge —
+            // stays visible after this (no settle/auto-hide), unlike
+            // the live flow arrow above.
+            noteStepDiffChange(row, parsed);
+            const stepDiffContainer = document.getElementById('tankContainer');
+            if (stepDiffContainer) renderTankStepDiffLabels(stepDiffContainer);
             update3DFillAndAttitude();
 
             if (!isOfficeInitialized) return;
@@ -10274,29 +10315,18 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     throw new Error(`no data found on sheet "${stepName}" at D${STEP_SRC_D_START_ROW}:.., P:S${STEP_SRC_PQRS_START_ROW}:.., or ${STEP_SRC_TIME_SHEET}!${timeCol}${STEP_SRC_TIME_ROW}`);
                 }
 
-                // ---- Step-over-step water diff (click history) ----
-                // newFills[row] = this step's target fill for that tank.
-                // Diffed against lastStepLoadTankFills (the last step
-                // actually loaded, whatever button that was) — NOT a
-                // fixed step-sequence lookup. First-ever load has no
-                // "previous", so stepDiffMT stays empty for it.
+                // ---- Step baseline water diff — set the baseline ----
+                // newFills[row] = this step's own target fill for that
+                // tank, captured the moment it's loaded/restored. This
+                // REPLACES any prior baseline (and clears stepDiffMT
+                // back to empty/hidden) — subsequent manual edits are
+                // then diffed live against THIS baseline via
+                // noteStepDiffChange(), not against whatever step was
+                // loaded before this one.
                 if (dValues.length > 0) {
                     const newFills = {};
                     dValues.forEach((v, idx) => { newFills["row" + (STEP_DEST_D_START_ROW + idx)] = parseFloat(v) || 0; });
-                    if (lastStepLoadTankFills) {
-                        const diffs = {};
-                        Object.keys(newFills).forEach(key => {
-                            const prev = lastStepLoadTankFills[key];
-                            if (prev !== undefined) diffs[key] = newFills[key] - prev;
-                        });
-                        stepDiffMT = diffs;
-                    } else {
-                        stepDiffMT = {};
-                    }
-                    stepDiffFromStepName = lastStepLoadName;
-                    stepDiffToStepName = stepName;
-                    lastStepLoadTankFills = newFills;
-                    lastStepLoadName = stepName;
+                    setStepDiffBaseline(newFills, stepName);
                 }
 
                 if (isOfficeInitialized) {
