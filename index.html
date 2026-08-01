@@ -519,7 +519,11 @@
         /* ---- Tank fill/discharge flow overlay (see getTankFlowState /
            renderTankFlowOverlay). Anchored top-left of the tank card so
            it never collides with the pump-name label (top-right) or the
-           dimension badge. Direction driven by BALLASTPLAN(mT) pump
+           dimension badge. `top` below is only a pre-layout fallback —
+           renderTankFlowOverlay() overrides it via positionCornerLabel()
+           once the card's real .tank-header height is known, so the
+           badge sits just under the tank-name/coords row instead of on
+           top of it. Direction driven by BALLASTPLAN(mT) pump
            status — see PUMP_STATUS_COL comment. Gated by showTankFlow. */
         .tank-flow-marker {
             position: absolute;
@@ -624,9 +628,13 @@
            a comparison between two different steps). See
            stepBaselineFills/stepDiffMT and renderTankStepDiffLabels().
            Anchored bottom-left so it never collides with the live flow
-           marker (top-left) or pump-name label (top-right). Distinct
-           amber styling keeps it visually separate from the blue/red
-           live flow badge above. */
+           marker (top-left) or pump-name label (top-right). `bottom`
+           below is only a pre-layout fallback — renderTankStepDiffLabels()
+           overrides it via positionCornerLabel() once the card's real
+           .tank-inputs top edge is known, so the badge sits just above
+           the weight field instead of on top of it. Distinct amber
+           styling keeps it visually separate from the blue/red live
+           flow badge above. */
         .tank-step-diff-marker {
             position: absolute;
             bottom: 2px;
@@ -1672,7 +1680,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-72-(Rev.02)(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-72(Rev.02)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -3354,6 +3362,50 @@
         // enabled when "pump-only input" mode is on.
         let tanksWithPump = new Set();
 
+        // ============================================================
+        // Corner-label collision avoidance
+        //      All the on-card overlay badges (pump-marker, tank-flow-
+        //      marker, tank-step-diff-marker) used to sit at hardcoded
+        //      top:2px/bottom:2px pixel offsets, which put them directly
+        //      on top of the in-flow .tank-header (tank name + coords
+        //      badge) and .tank-inputs (weight field / % / warning)
+        //      content — e.g. the "Filling" flow badge would visually
+        //      block the tank name label underneath it. These helpers
+        //      measure the ACTUAL rendered position of the header and
+        //      inputs blocks for a given card and clamp each overlay's
+        //      top offset to the gap between them, so no two labels on
+        //      the same card ever cover each other regardless of card
+        //      size, header wrapping (buffer/future badges), or how
+        //      many input warning lines are showing.
+        // ============================================================
+        function getTankHeaderBottom(card) {
+            const header = card.querySelector('.tank-header');
+            return header ? (header.offsetTop + header.offsetHeight) : 2;
+        }
+        function getTankInputsTop(card) {
+            const inputs = card.querySelector('.tank-inputs');
+            return inputs ? inputs.offsetTop : Math.max(card.offsetHeight - 2, 2);
+        }
+        // edge: 'top-left' | 'top-right' (hug the header's bottom edge,
+        // pulled up if the card is too short to fit above the inputs)
+        // or 'bottom-left' (hug the inputs' top edge, pushed down if the
+        // card is too short to fit below the header). Must be called
+        // AFTER wrap has been appended to card so offsetHeight is real.
+        function positionCornerLabel(card, wrap, edge) {
+            const headerBottom = getTankHeaderBottom(card);
+            const inputsTop = getTankInputsTop(card);
+            const h = wrap.offsetHeight;
+            let top;
+            if (edge === 'bottom-left') {
+                top = Math.max(headerBottom + 1, inputsTop - h - 2);
+            } else {
+                top = headerBottom + 1;
+                if (top + h + 2 > inputsTop) top = Math.max(2, inputsTop - h - 2);
+            }
+            wrap.style.top = top + 'px';
+            wrap.style.bottom = 'auto';
+        }
+
         function renderPumpMarkers(container) {
             container.querySelectorAll('.pump-marker').forEach(el => el.remove());
             tanksWithPump = new Set();
@@ -3386,7 +3438,6 @@
                 const wrap = document.createElement('div');
                 wrap.className = 'pump-marker pump-marker-inner';
                 wrap.style.position = 'absolute';
-                wrap.style.top = '2px';
                 wrap.style.right = '2px';
                 wrap.style.left = 'auto';
                 wrap.style.flexDirection = 'column';
@@ -3395,6 +3446,10 @@
                 wrap.title = `Pump${pumpNames.length > 1 ? 's' : ''} ${pumpNames.join(', ')}`;
                 wrap.innerHTML = pumpNames.map(name => `<span class="pump-marker-label">${name}</span>`).join('');
                 card.appendChild(wrap);
+                // Anchored just below the tank-header's real bottom edge
+                // (measured, not guessed) so it never sits on top of the
+                // tank-coords-badge that already lives in that corner.
+                positionCornerLabel(card, wrap, 'top-right');
             });
 
             applyPumpInputRestriction();
@@ -3456,6 +3511,11 @@
                     <span class="tank-flow-label">${deltaLabel}</span>
                 `;
                 card.appendChild(wrap);
+                // Anchored just below the tank-header's real bottom edge
+                // (measured, not guessed) so the "Filling/Discharging"
+                // badge never covers the tank-name label sitting in that
+                // same top-left corner.
+                positionCornerLabel(card, wrap, 'top-left');
             });
         }
 
@@ -3492,6 +3552,10 @@
                 wrap.title = `vs ${baselineLabel} baseline: ${sign}${diff.toFixed(2)} mT`;
                 wrap.innerHTML = `<span class="tank-step-diff-label">Δ${baselineLabel} ${sign}${diff.toFixed(2)} mT</span>`;
                 card.appendChild(wrap);
+                // Anchored just above the tank-inputs' real top edge
+                // (measured, not guessed) so it never covers the weight
+                // field / % label / capacity warning that live there.
+                positionCornerLabel(card, wrap, 'bottom-left');
             });
         }
 
