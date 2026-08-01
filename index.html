@@ -507,6 +507,8 @@
         }
 
         .pump-marker-label {
+            pointer-events: auto;
+            cursor: help;
             font-size: 8px;
             font-weight: 700;
             color: #f5f3ff;
@@ -517,18 +519,21 @@
         }
 
         /* ---- Tank fill/discharge flow overlay (see getTankFlowState /
-           renderTankFlowOverlay). Anchored top-left of the tank card so
-           it never collides with the pump-name label (top-right) or the
-           dimension badge. `top` below is only a pre-layout fallback —
-           renderTankFlowOverlay() overrides it via positionCornerLabel()
-           once the card's real .tank-header height is known, so the
-           badge sits just under the tank-name/coords row instead of on
-           top of it. Direction driven by BALLASTPLAN(mT) pump
-           status — see PUMP_STATUS_COL comment. Gated by showTankFlow. */
+           renderTankFlowOverlay). This is the pump-STATUS badge (IN /
+           OUT / mixed) — anchored top-RIGHT of the tank card, same side
+           as the pump-NAME label (renderPumpMarkers), so the two read
+           together as one "pump info" stack. `top`/`right` below are
+           only a pre-layout fallback — renderTankFlowOverlay() overrides
+           them via positionCornerLabel(), which stacks this badge just
+           beneath the pump-name label (or beneath the header if there's
+           no pump-name badge on this tank) instead of on top of either.
+           Direction driven by BALLASTPLAN(mT) pump status — see
+           PUMP_STATUS_COL comment. Gated by showTankFlow. */
         .tank-flow-marker {
             position: absolute;
             top: 2px;
-            left: 2px;
+            right: 2px;
+            left: auto;
             z-index: 17;
             display: flex;
             flex-direction: column;
@@ -620,6 +625,16 @@
             border-radius: 3px;
             white-space: nowrap;
         }
+        /* Re-enable hover (for the wrap's title tooltip) on just the 2D
+           card badge's inner spans — scoped to .tank-flow-marker so this
+           doesn't also affect the same .tank-flow-state/.tank-flow-label
+           classes reused inside the 3D floating label HTML (renderLabels3D),
+           which should stay click-through over the 3D canvas. */
+        .tank-flow-marker .tank-flow-state,
+        .tank-flow-marker .tank-flow-label {
+            pointer-events: auto;
+            cursor: help;
+        }
 
         /* ---- Step baseline water diff label (pump tanks only) ----
            Shows how far a tank's CURRENT fill has drifted from the
@@ -627,22 +642,28 @@
            restored (stays live as the tank is edited afterward — not
            a comparison between two different steps). See
            stepBaselineFills/stepDiffMT and renderTankStepDiffLabels().
-           Anchored bottom-left so it never collides with the live flow
-           marker (top-left) or pump-name label (top-right). `bottom`
-           below is only a pre-layout fallback — renderTankStepDiffLabels()
-           overrides it via positionCornerLabel() once the card's real
-           .tank-inputs top edge is known, so the badge sits just above
-           the weight field instead of on top of it. Distinct amber
-           styling keeps it visually separate from the blue/red live
-           flow badge above. */
+           Anchored bottom-RIGHT. `bottom`/`right` below are only a
+           pre-layout fallback — renderTankStepDiffLabels() overrides
+           them via positionCornerLabel()/layoutCornerStack() once the
+           card's real .tank-inputs top edge is known, so the badge
+           sits just above the weight field instead of on top of it.
+           Distinct amber styling keeps it visually separate from the
+           blue/red live flow badge above. The wrapper stays
+           pointer-events:none (so it never blocks clicks on the tank
+           card underneath it), but .tank-step-diff-label re-enables
+           pointer-events just on itself so its title tooltip (the
+           "what is this" explanation) actually fires on hover. */
         .tank-step-diff-marker {
             position: absolute;
             bottom: 2px;
-            left: 2px;
+            right: 2px;
+            left: auto;
             z-index: 17;
             pointer-events: none;
         }
         .tank-step-diff-label {
+            pointer-events: auto;
+            cursor: help;
             font-size: 10px;
             font-weight: 700;
             color: #431407;
@@ -1680,7 +1701,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-72(Rev.02)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-72(Rev.04)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -3370,13 +3391,15 @@
         //      on top of the in-flow .tank-header (tank name + coords
         //      badge) and .tank-inputs (weight field / % / warning)
         //      content — e.g. the "Filling" flow badge would visually
-        //      block the tank name label underneath it. These helpers
-        //      measure the ACTUAL rendered position of the header and
-        //      inputs blocks for a given card and clamp each overlay's
-        //      top offset to the gap between them, so no two labels on
-        //      the same card ever cover each other regardless of card
-        //      size, header wrapping (buffer/future badges), or how
-        //      many input warning lines are showing.
+        //      block the tank name label underneath it. getTankHeaderBottom/
+        //      getTankInputsTop measure the ACTUAL rendered position of
+        //      the header and inputs blocks for a given card;
+        //      layoutCornerStack() then arranges every overlay badge
+        //      sharing a corner into a vertical stack in that gap, by
+        //      FIXED PRIORITY (not by which render*() function happened
+        //      to run last) — e.g. the pump-STATUS badge always sits
+        //      above the pump-NAME badge on the top-right corner, even
+        //      if only one of the two re-renders on a given refresh.
         // ============================================================
         function getTankHeaderBottom(card) {
             const header = card.querySelector('.tank-header');
@@ -3386,24 +3409,59 @@
             const inputs = card.querySelector('.tank-inputs');
             return inputs ? inputs.offsetTop : Math.max(card.offsetHeight - 2, 2);
         }
-        // edge: 'top-left' | 'top-right' (hug the header's bottom edge,
-        // pulled up if the card is too short to fit above the inputs)
-        // or 'bottom-left' (hug the inputs' top edge, pushed down if the
-        // card is too short to fit below the header). Must be called
-        // AFTER wrap has been appended to card so offsetHeight is real.
+        // Lower number = closer to the header (top corners) / further
+        // from the inputs (bottom corners), i.e. "shown first". The
+        // flow-status (filling/discharging) badge outranks the static
+        // pump-name badge so the live animation always reads on top.
+        const CORNER_STACK_PRIORITY = {
+            'tank-flow-marker': 0,
+            'pump-marker': 1,
+            'tank-step-diff-marker': 0
+        };
+        // Marks `wrap` as belonging to the given corner ('top-left' |
+        // 'top-right' | 'bottom-left' | 'bottom-right') and re-lays-out
+        // EVERY badge sharing that corner on this card, in priority
+        // order, packed into the gap between the header and the inputs.
+        // Safe to call even when `wrap` is the only badge in that
+        // corner, and safe to call from a partial refresh that only
+        // touches one badge type — it always re-reads whatever sibling
+        // badges are currently in the DOM rather than assuming render
+        // order. Must be called AFTER wrap has been appended to card.
         function positionCornerLabel(card, wrap, edge) {
+            wrap.dataset.cornerLabel = edge;
+            wrap.dataset.cornerPriority = CORNER_STACK_PRIORITY[wrap.classList[0]] ?? 9;
+            layoutCornerStack(card, edge);
+        }
+        function layoutCornerStack(card, edge) {
             const headerBottom = getTankHeaderBottom(card);
             const inputsTop = getTankInputsTop(card);
-            const h = wrap.offsetHeight;
-            let top;
-            if (edge === 'bottom-left') {
-                top = Math.max(headerBottom + 1, inputsTop - h - 2);
+            const els = Array.from(card.querySelectorAll(`[data-corner-label="${edge}"]`))
+                .sort((a, b) => (parseInt(a.dataset.cornerPriority, 10) || 9) - (parseInt(b.dataset.cornerPriority, 10) || 9));
+            if (!els.length) return;
+
+            if (edge === 'bottom-left' || edge === 'bottom-right') {
+                // First (highest-priority) badge sits closest to the
+                // inputs; earlier ones get pushed up toward the header.
+                let cursorBottom = inputsTop - 2;
+                els.forEach((el) => {
+                    let top = cursorBottom - el.offsetHeight;
+                    top = Math.max(top, headerBottom + 1);
+                    el.style.top = top + 'px';
+                    el.style.bottom = 'auto';
+                    cursorBottom = top - 2;
+                });
             } else {
-                top = headerBottom + 1;
-                if (top + h + 2 > inputsTop) top = Math.max(2, inputsTop - h - 2);
+                // First (highest-priority) badge sits closest to the
+                // header; later ones get pushed down toward the inputs.
+                let cursorTop = headerBottom + 1;
+                els.forEach((el) => {
+                    let top = cursorTop;
+                    if (top + el.offsetHeight + 2 > inputsTop) top = Math.max(2, inputsTop - el.offsetHeight - 2);
+                    el.style.top = top + 'px';
+                    el.style.bottom = 'auto';
+                    cursorTop = top + el.offsetHeight + 2;
+                });
             }
-            wrap.style.top = top + 'px';
-            wrap.style.bottom = 'auto';
         }
 
         function renderPumpMarkers(container) {
@@ -3465,8 +3523,9 @@
         //      real pump/valve status published from Excel (see
         //      PUMP_STATUS_COL — currently an ASSUMED column, confirm
         //      with the real workbook). Gated by showTankFlow; anchored
-        //      top-LEFT of the tank card so it never collides with the
-        //      pump-name label (top-right, see renderPumpMarkers).
+        //      top-RIGHT of the tank card, same corner as the pump-name
+        //      label (see renderPumpMarkers) — positionCornerLabel()
+        //      stacks this one below it rather than overlapping.
         // ============================================================
         let showTankFlow = true;
 
@@ -3511,17 +3570,16 @@
                     <span class="tank-flow-label">${deltaLabel}</span>
                 `;
                 card.appendChild(wrap);
-                // Anchored just below the tank-header's real bottom edge
-                // (measured, not guessed) so the "Filling/Discharging"
-                // badge never covers the tank-name label sitting in that
-                // same top-left corner.
-                positionCornerLabel(card, wrap, 'top-left');
+                // Anchored top-right, stacked below the pump-name badge
+                // (if this tank has one) or the header (if not) — never
+                // covers either.
+                positionCornerLabel(card, wrap, 'top-right');
             });
         }
 
         // ============================================================
         // 3a4b. STEP BASELINE WATER DIFF LABEL (2D) — pump tanks only
-        //      Small amber badge at the bottom-left of a tank card
+        //      Small amber badge at the bottom-right of a tank card
         //      showing how far that tank's CURRENT fill has drifted
         //      from the value it had at the moment the active step was
         //      loaded/restored (see stepBaselineFills/noteStepDiffChange
@@ -3533,6 +3591,14 @@
         //      before this runs). No label when there's no diff to show
         //      (right after a step load, or before any step has ever
         //      been loaded this session).
+        //      On-card text is kept to the bare number (e.g. "+100.00
+        //      mT") to save space at small card sizes; the full "what
+        //      is this and why" explanation — including the baseline
+        //      and current mT values, not just the delta — lives in the
+        //      hover title instead of being crammed onto the badge
+        //      itself. The title is set on the inner label span (not
+        //      the pointer-events:none wrapper) so hovering the visible
+        //      text is what actually triggers the tooltip.
         // ============================================================
         function renderTankStepDiffLabels(container) {
             container.querySelectorAll('.tank-step-diff-marker').forEach(el => el.remove());
@@ -3546,16 +3612,26 @@
 
                 const sign = diff > 0 ? '+' : '';
                 const baselineLabel = stepBaselineStepName || 'step baseline';
+                const direction = diff > 0 ? 'increased' : 'decreased';
+                const baseMT = stepBaselineFills ? stepBaselineFills["row" + tankId] : undefined;
+                const hasBase = typeof baseMT === 'number' && isFinite(baseMT);
+                const valuesLine = hasBase
+                    ? ` Currently ${(baseMT + diff).toFixed(2)} mT vs ${baseMT.toFixed(2)} mT when that step was loaded.`
+                    : '';
 
                 const wrap = document.createElement('div');
                 wrap.className = 'tank-step-diff-marker';
-                wrap.title = `vs ${baselineLabel} baseline: ${sign}${diff.toFixed(2)} mT`;
-                wrap.innerHTML = `<span class="tank-step-diff-label">Δ${baselineLabel} ${sign}${diff.toFixed(2)} mT</span>`;
+                const label = document.createElement('span');
+                label.className = 'tank-step-diff-label';
+                label.textContent = `${sign}${diff.toFixed(2)} mT`;
+                label.title = `Step baseline drift: this tank's fill has ${direction} by ${sign}${diff.toFixed(2)} mT since "${baselineLabel}" was loaded/restored.${valuesLine} Updates live as you edit the tank — only resets when a step is (re)loaded, not a comparison between two different steps.`;
+                wrap.appendChild(label);
                 card.appendChild(wrap);
-                // Anchored just above the tank-inputs' real top edge
-                // (measured, not guessed) so it never covers the weight
-                // field / % label / capacity warning that live there.
-                positionCornerLabel(card, wrap, 'bottom-left');
+                // Anchored bottom-right, just above the tank-inputs'
+                // real top edge (measured, not guessed) so it never
+                // covers the weight field / % label / capacity warning
+                // that live there.
+                positionCornerLabel(card, wrap, 'bottom-right');
             });
         }
 
