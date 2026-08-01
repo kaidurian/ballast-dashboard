@@ -642,7 +642,7 @@
            restored (stays live as the tank is edited afterward — not
            a comparison between two different steps). See
            stepBaselineFills/stepDiffMT and renderTankStepDiffLabels().
-           Anchored bottom-RIGHT. `bottom`/`right` below are only a
+           Anchored bottom-LEFT. `bottom`/`left` below are only a
            pre-layout fallback — renderTankStepDiffLabels() overrides
            them via positionCornerLabel()/layoutCornerStack() once the
            card's real .tank-inputs top edge is known, so the badge
@@ -656,8 +656,8 @@
         .tank-step-diff-marker {
             position: absolute;
             bottom: 2px;
-            right: 2px;
-            left: auto;
+            left: 2px;
+            right: auto;
             z-index: 17;
             pointer-events: none;
         }
@@ -1701,7 +1701,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-72(Rev.04)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-72(Rev.05)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -3496,18 +3496,18 @@
                 const wrap = document.createElement('div');
                 wrap.className = 'pump-marker pump-marker-inner';
                 wrap.style.position = 'absolute';
-                wrap.style.right = '2px';
-                wrap.style.left = 'auto';
+                wrap.style.left = '2px';
+                wrap.style.right = 'auto';
                 wrap.style.flexDirection = 'column';
-                wrap.style.alignItems = 'flex-end';
+                wrap.style.alignItems = 'flex-start';
                 wrap.style.gap = '1px';
                 wrap.title = `Pump${pumpNames.length > 1 ? 's' : ''} ${pumpNames.join(', ')}`;
                 wrap.innerHTML = pumpNames.map(name => `<span class="pump-marker-label">${name}</span>`).join('');
                 card.appendChild(wrap);
                 // Anchored just below the tank-header's real bottom edge
-                // (measured, not guessed) so it never sits on top of the
-                // tank-coords-badge that already lives in that corner.
-                positionCornerLabel(card, wrap, 'top-right');
+                // (measured, not guessed), stacked via positionCornerLabel
+                // so it never overlaps other top-left badges on this card.
+                positionCornerLabel(card, wrap, 'top-left');
             });
 
             applyPumpInputRestriction();
@@ -3623,15 +3623,15 @@
                 wrap.className = 'tank-step-diff-marker';
                 const label = document.createElement('span');
                 label.className = 'tank-step-diff-label';
-                label.textContent = `${sign}${diff.toFixed(2)} mT`;
+                label.textContent = `${sign}${diff.toFixed(2)}`;
                 label.title = `Step baseline drift: this tank's fill has ${direction} by ${sign}${diff.toFixed(2)} mT since "${baselineLabel}" was loaded/restored.${valuesLine} Updates live as you edit the tank — only resets when a step is (re)loaded, not a comparison between two different steps.`;
                 wrap.appendChild(label);
                 card.appendChild(wrap);
-                // Anchored bottom-right, just above the tank-inputs'
+                // Anchored bottom-left, just above the tank-inputs'
                 // real top edge (measured, not guessed) so it never
                 // covers the weight field / % label / capacity warning
                 // that live there.
-                positionCornerLabel(card, wrap, 'bottom-right');
+                positionCornerLabel(card, wrap, 'bottom-left');
             });
         }
 
