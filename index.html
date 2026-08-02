@@ -1701,7 +1701,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-72(Rev.05)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-74-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2518,6 +2518,19 @@
         // of the tank's pumps are currently running.
         function getTankFlowState(cfg) {
             if (!cfg) return 'off';
+            // Weight-delta signal first: it's derived from the exact
+            // same weight value that drives the tank's visible fill
+            // bar, so it can never disagree with what's actually
+            // rising/falling on screen. The real pump/valve status text
+            // below (PUMP_STATUS_COL) is still an UNCONFIRMED column
+            // assumption and can report a stale or simply wrong
+            // direction relative to the workbook's real layout — if we
+            // trusted it first, the arrow could point opposite to what
+            // the fill bar is actually doing. Only fall back to the
+            // text status when there's no live weight change to go on
+            // (e.g. right after a step load/sync, before any edit).
+            const manual = flowManualState[cfg.id];
+            if (manual) return manual;
             const targetNorm = normalizeTankName(cfg.name);
             const pumpsForTank = pumpLocations.filter(p => normalizeTankName(p.tankName) === targetNorm);
             if (pumpsForTank.length) {
@@ -2531,7 +2544,7 @@
             // fall back to the weight-delta signal so the arrow still
             // reflects an actual in-progress fill/discharge. See
             // noteFlowWeightChange()/flowManualState above.
-            return flowManualState[cfg.id] || 'off';
+            return 'off';
         }
 
         // 6 free-text labels positioned around the barge, sourced from
@@ -10392,6 +10405,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             quayCenterLabel = (src.quayCenterVal !== null && src.quayCenterVal !== undefined && src.quayCenterVal !== '')
                 ? String(src.quayCenterVal) : '';
 
+            // 3D/2D dashboard "current time" / "time usage" — same
+            // per-step row177/row178 values the Step Data button path
+            // already applies (see loadStepDataToLoadEditor). Previously
+            // only that manual path set these, so the animated "Play All
+            // Steps" path (which calls this function directly, bypassing
+            // loadStepDataToLoadEditor) never updated the dashboard time
+            // label at all as it moved through steps.
+            if (src.timeVal !== null && src.timeVal !== undefined && src.timeVal !== '') stepTime177Val = src.timeVal;
+            if (src.timeVal178 !== null && src.timeVal178 !== undefined && src.timeVal178 !== '') stepTime178Val = src.timeVal178;
+
             dValues.forEach((v, idx) => {
                 const t = tankData[idx];
                 if (!t) return;
@@ -10413,6 +10436,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
             activeStepName = stepName;
             updateActiveStepLabel();
+            if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
 
             initTankMatrix();
             drawAttitudeGraphics();
@@ -10722,6 +10746,48 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             const toTrim = hasToTrim ? (parseFloat(target.trimVal) || 0) : fromTrim;
             const toHeel = hasToHeel ? (parseFloat(target.heelVal) || 0) : fromHeel;
 
+            // "Current time" / "time usage" dashboard glide — same
+            // treatment as trim/heel above: hold at the current reading
+            // if the target step didn't carry a value, otherwise glide
+            // from where the label is now to the target step's row
+            // 177/178 values over the same duration as everything else,
+            // so it doesn't sit frozen for the whole tween and then jump.
+            const fromTime177 = Number(stepTime177Val);
+            const fromTime178 = Number(stepTime178Val);
+            const hasFromTime177 = Number.isFinite(fromTime177);
+            const hasFromTime178 = Number.isFinite(fromTime178);
+            const hasToTime177 = target.timeVal !== null && target.timeVal !== undefined && target.timeVal !== '';
+            const hasToTime178 = target.timeVal178 !== null && target.timeVal178 !== undefined && target.timeVal178 !== '';
+            const toTime177 = hasToTime177 ? (parseFloat(target.timeVal) || 0) : fromTime177;
+            const toTime178 = hasToTime178 ? (parseFloat(target.timeVal178) || 0) : fromTime178;
+
+            // ---- Live per-tank flow direction, synced to this glide ----
+            // Previously the flow-arrow badge (IN/OUT) only updated once
+            // the tween LANDED on the target step (via
+            // applyStepDataToDashboard -> noteFlowWeightChange). During
+            // the glide itself the fill bar was already animating but
+            // the arrow badge stayed on whatever state it happened to be
+            // in beforehand — sometimes the opposite of the direction
+            // actually playing out on screen. Set it explicitly here,
+            // once, from the same from/to values driving the fill-bar
+            // glide below, so the arrow and the fill bar always agree
+            // for the whole animation, not just at the two endpoints.
+            tankData.forEach((tank, idx) => {
+                const fromW = fromTankWeights[idx] || 0;
+                const toW = (toTankValues[idx] !== undefined) ? (parseFloat(toTankValues[idx]) || 0) : fromW;
+                const delta = toW - fromW;
+                if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) {
+                    delete flowManualState[tank.row];
+                    delete flowDeltaMT[tank.row];
+                } else {
+                    flowManualState[tank.row] = delta > 0 ? 'fill' : 'discharge';
+                    flowDeltaMT[tank.row] = delta;
+                }
+            });
+            const flowContainer = document.getElementById('tankContainer');
+            if (flowContainer && typeof renderTankFlowOverlay === 'function') renderTankFlowOverlay(flowContainer);
+            if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+
             return new Promise(resolve => {
                 const start = performance.now();
                 function frame(now) {
@@ -10753,11 +10819,30 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         // when landing.
                     }
                     drawAxleOverlay();
+                    // Keep the 3D trailer axles moving in lock-step with
+                    // the 2D overlay above — previously this only ran on
+                    // landing (via refresh3DView() inside
+                    // applyStepDataToDashboard()), so the 3D view sat
+                    // completely still for the whole glide and then
+                    // snapped straight to the final position the instant
+                    // the 2D animation finished.
+                    if (typeof syncAxlePositions3D === 'function') syncAxlePositions3D();
 
                     if (hasToTrim || hasToHeel) {
                         currentTrimDegrees = fromTrim + (toTrim - fromTrim) * e;
                         currentHeelDegrees = fromHeel + (toHeel - fromHeel) * e;
                         drawAttitudeGraphics();
+                    }
+                    // Same reasoning as syncAxlePositions3D() above: this
+                    // drives the 3D hull tilt AND the 3D tank fill glow /
+                    // flow-arrow meshes, which otherwise also sat frozen
+                    // until landing.
+                    if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+
+                    if ((hasFromTime177 && hasToTime177) || (hasFromTime178 && hasToTime178)) {
+                        if (hasFromTime177 && hasToTime177) stepTime177Val = fromTime177 + (toTime177 - fromTime177) * e;
+                        if (hasFromTime178 && hasToTime178) stepTime178Val = fromTime178 + (toTime178 - fromTime178) * e;
+                        if (typeof update3DTimeDashboardLabel === 'function') update3DTimeDashboardLabel();
                     }
 
                     if (t < 1 && !animationStopRequested) {
