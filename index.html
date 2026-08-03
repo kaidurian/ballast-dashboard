@@ -1651,7 +1651,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-75-(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-75-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2334,16 +2334,16 @@
         // flow badge never appears — even while the operator is actively
         // typing a new weight into a tank's input box. To make the badge
         // actually useful without depending on that column, every tank
-        // also tracks a baseline weight; whenever its CURRENT weight
-        // differs from that baseline, the badge shows fill (weight went
-        // up) or discharge (weight went down) on its own. STICKY: the
-        // baseline commits to the new value immediately (no settle
-        // timer), and the badge stays showing that edit's delta until
-        // the tank's weight is changed again — it does NOT auto-clear
-        // after a few seconds.
-        let flowWeightBaseline = {};   // { [row]: number } last-committed weight
+        // also tracks a "settled" baseline weight; whenever its CURRENT
+        // weight differs from that baseline, the badge shows fill
+        // (weight went up) or discharge (weight went down) on its own.
+        // The badge appears the instant the weight changes, then
+        // auto-hides FLOW_SETTLE_MS later regardless of anything else
+        // happening in the meantime (see noteFlowWeightChange).
+        let flowWeightBaseline = {};   // { [row]: number } last "settled" weight
         let flowManualState = {};      // { [row]: 'fill' | 'discharge' }
-        let flowDeltaMT = {};          // { [row]: number } signed (new - previous) weight, shown on the flow label
+        let flowDeltaMT = {};          // { [row]: number } signed (new - previous/baseline) weight, shown on the flow label
+        let flowSettleTimers = {};     // { [row]: timeoutId }
 
         // ---- Step baseline water diff (live vs. the step's own values) ----
         // Separate from the live weight-delta above: this compares a
@@ -2364,6 +2364,7 @@
         let stepBaselineStepName = null;  // name of the step that set the current baseline
         let stepDiffMT = {};              // { ["row"+id]: number } current tank fill minus stepBaselineFills's fill for that tank
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
+        const FLOW_SETTLE_MS = 3000;         // badge shows for 3s after a weight change, then auto-hides
 
         // Seeds/repins a tank's baseline to its CURRENT weight with no
         // transition shown — used on first load/sync so every tank
@@ -2372,42 +2373,57 @@
             flowWeightBaseline[row] = parseFloat(weight) || 0;
             delete flowManualState[row];
             delete flowDeltaMT[row];
+            if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
         }
 
         // Called every time a tank's weight actually changes (manual
         // input or Excel sync). Sets the fill/discharge state from the
-        // sign of the change and commits the new value as the baseline
-        // right away — the badge is STICKY: it shows the delta from
-        // THIS edit and holds that way (no auto-clear timer) until the
-        // tank's weight changes again, at which point this function
-        // runs again with a fresh delta against the just-committed
-        // baseline.
+        // sign of the change immediately, and (re)starts a 3-second
+        // timer that commits the new baseline and hides the badge once
+        // it fires — regardless of anything else that happens while it
+        // is counting down.
         function noteFlowWeightChange(row, newWeight) {
             const w = parseFloat(newWeight) || 0;
             const baseline = flowWeightBaseline[row];
             if (baseline === undefined) { seedFlowBaseline(row, w); return; }
             const delta = w - baseline;
-            flowWeightBaseline[row] = w;
             if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) {
-                // Back within noise range of the previous baseline (e.g.
+                // Back within noise range of the settled baseline (e.g.
                 // operator typed a value then corrected it back) —
                 // nothing meaningfully moved, so clear whatever badge
-                // was showing.
+                // was showing and cancel its pending hide-timer right
+                // away rather than leaving it counting down on stale
+                // data.
+                if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
+                if (flowManualState[row]) {
+                    delete flowManualState[row];
+                    delete flowDeltaMT[row];
+                    if (typeof renderTankFlowOverlay === 'function') {
+                        const c = document.getElementById('tankContainer');
+                        if (c) renderTankFlowOverlay(c);
+                    }
+                    if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+                }
+                return;
+            }
+            flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
+            // Signed delta between the NEW value just entered/synced and
+            // the PREVIOUS (settled baseline) value — this is what the
+            // pump label's rate suffix shows instead of the tank's raw
+            // weight.
+            flowDeltaMT[row] = delta;
+            if (flowSettleTimers[row]) clearTimeout(flowSettleTimers[row]);
+            flowSettleTimers[row] = setTimeout(() => {
+                flowWeightBaseline[row] = w;
                 delete flowManualState[row];
                 delete flowDeltaMT[row];
-            } else {
-                flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
-                // Signed delta between the NEW value just entered/synced
-                // and the PREVIOUS (now-replaced) baseline — this is
-                // what the pump label's rate suffix shows instead of
-                // the tank's raw weight.
-                flowDeltaMT[row] = delta;
-            }
-            if (typeof renderTankFlowOverlay === 'function') {
-                const c = document.getElementById('tankContainer');
-                if (c) renderTankFlowOverlay(c);
-            }
-            if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+                delete flowSettleTimers[row];
+                if (typeof renderTankFlowOverlay === 'function') {
+                    const c = document.getElementById('tankContainer');
+                    if (c) renderTankFlowOverlay(c);
+                }
+                if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
+            }, FLOW_SETTLE_MS);
         }
 
         // Replaces the step-diff baseline wholesale — called once, right
@@ -10708,14 +10724,20 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             // once, from the same from/to values driving the fill-bar
             // glide below, so the arrow and the fill bar always agree
             // for the whole animation, not just at the two endpoints.
+            // IMPORTANT: only SET state for tanks actually moving in
+            // THIS transition — never clear a tank just because it
+            // isn't part of this particular step change. That used to
+            // wipe the sticky badge on any tank the user had manually
+            // edited outside of the step system (or via a previous
+            // step) the moment ANY OTHER step transition ran, since
+            // every unrelated tank's near-zero delta hit the clear
+            // branch below. Leaving untouched tanks alone keeps their
+            // existing badge (manual-edit or otherwise) sticky.
             tankData.forEach((tank, idx) => {
                 const fromW = fromTankWeights[idx] || 0;
                 const toW = (toTankValues[idx] !== undefined) ? (parseFloat(toTankValues[idx]) || 0) : fromW;
                 const delta = toW - fromW;
-                if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) {
-                    delete flowManualState[tank.row];
-                    delete flowDeltaMT[tank.row];
-                } else {
+                if (Math.abs(delta) >= FLOW_WEIGHT_EPSILON_MT) {
                     flowManualState[tank.row] = delta > 0 ? 'fill' : 'discharge';
                     flowDeltaMT[tank.row] = delta;
                 }
