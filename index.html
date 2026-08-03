@@ -1651,7 +1651,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-76-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-77-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2059,6 +2059,16 @@
         const AXLE_PLATE_HEIGHT_ABOVE_DECK_M = 1.4;
         const AXLE_START_ROW = 124;
         const AXLE_MAX_ROWS = 60;
+
+        // ---- AutoCAD trailer block export ----
+        // Each trailerGenTrains[] entry = one physical SPMT unit. The
+        // AutoCAD side has whole-unit blocks (not per-axle-line blocks):
+        // 4AL = 4-axle-line SPMT, 6AL = 6-axle-line SPMT, etc. Extend
+        // this map if more block variants (e.g. 8AL) get added.
+        const CAD_BLOCK_MAP = { 4: '4AL', 6: '6AL' };
+        // Excel/dashboard values are in metres; set to 1 if the target
+        // AutoCAD drawing's units are already metres instead of mm.
+        const CAD_UNIT_SCALE = 1000;
 
         // Trailer axle rectangle appearance — edit these values to change
         // colour, transparency, or border of the amber overlay rectangles.
@@ -9565,6 +9575,77 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 alert('Could not write trailer data to Excel. See console for details.');
             }
         }
+
+        // ---- Export current trains as an AutoCAD script (.scr) ----
+        // One -INSERT per TRAIN (not per axle line/row) — each train is
+        // one whole SPMT unit, matched to the 4AL/6AL block by its axle
+        // count (train.groups' highest "to" value). Insertion point =
+        // that train's axle #1 position (train.x, train.y), same X/Y
+        // origin computeTrailerGenRows() uses for every axle line, since
+        // the AutoCAD block is assumed to have its basepoint there.
+        // ASSUMPTIONS (flagged in the on-screen warning list, if any):
+        //   - block basepoint sits at axle #1 (front-most axle line)
+        //   - all trains are unrotated (0°) — there's no per-train
+        //     heading field in trailerGenTrains yet
+        //   - CAD_UNIT_SCALE converts metres -> the drawing's units
+        function computeTrailerCADInserts() {
+            const inserts = [];
+            const warnings = [];
+            trailerGenTrains.forEach(train => {
+                const axleCount = train.groups.reduce((m, g) => Math.max(m, parseInt(g.to, 10) || 0), 0);
+                const blockName = CAD_BLOCK_MAP[axleCount];
+                if (!blockName) {
+                    warnings.push(`Train "${train.name}" has ${axleCount} axle line(s) — no AutoCAD block mapped (only ${Object.keys(CAD_BLOCK_MAP).join('/')} configured). Skipped.`);
+                    return;
+                }
+                inserts.push({
+                    trainName: train.name,
+                    blockName,
+                    axleCount,
+                    x: (parseFloat(train.x) || 0) * CAD_UNIT_SCALE,
+                    y: (parseFloat(train.y) || 0) * CAD_UNIT_SCALE,
+                    rotationDeg: 0
+                });
+            });
+            return { inserts, warnings };
+        }
+
+        function buildTrailerCADScript(inserts) {
+            const lines = [];
+            inserts.forEach(ins => {
+                // -INSERT (leading dash) suppresses the dialog box so the
+                // script can answer every prompt line-by-line:
+                // block name -> insertion point -> X scale -> Y scale -> rotation.
+                lines.push('-INSERT');
+                lines.push(ins.blockName);
+                lines.push(`${ins.x.toFixed(3)},${ins.y.toFixed(3)},0`);
+                lines.push('1');
+                lines.push('1');
+                lines.push(`${ins.rotationDeg}`);
+            });
+            return lines.join('\n') + '\n';
+        }
+
+        function exportTrailerLayoutToCADScript() {
+            const { inserts, warnings } = computeTrailerCADInserts();
+            if (inserts.length === 0) {
+                alert('Nothing to export — no train currently matches a mapped AutoCAD block (4AL/6AL).');
+                return;
+            }
+            const scriptText = buildTrailerCADScript(inserts);
+            const blob = new Blob([scriptText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `trailer-layout-${new Date().toISOString().slice(0, 10)}.scr`;
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+
+            let msg = `📐 Exported ${inserts.length} trailer block insert(s) (${inserts.map(i => i.blockName).join(', ')}) to .scr.`;
+            if (warnings.length) msg += ` ${warnings.length} train(s) skipped — see console.`;
+            logAutoBallast(msg);
+            if (warnings.length) console.warn('Trailer CAD export warnings:\n' + warnings.join('\n'));
+        }
     </script>  
 
     <!-- ============================================================
@@ -9635,6 +9716,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeTrailerGeneratorModal()">Cancel</button>
+                <button type="button" class="tg-btn" title="Download an AutoCAD script (.scr) that inserts a 4AL/6AL block per train at its axle #1 position. Run with the SCRIPT command in a drawing that already has 4AL/6AL defined."
+                        onclick="exportTrailerLayoutToCADScript()">📐 Export AutoCAD Script</button>
                 <button type="button" class="tg-btn tg-btn-primary" onclick="generateTrailerAndWriteToExcel()">Generate &amp; Write to Excel</button>
             </div>
         </div>
