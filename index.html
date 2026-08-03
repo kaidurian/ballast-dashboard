@@ -509,26 +509,32 @@
         .pump-marker-label {
             pointer-events: auto;
             cursor: help;
-            font-size: 8px;
+            font-size: 10px;
             font-weight: 700;
             color: #f5f3ff;
-            background: #7e22ce;
+            background: #475569;
             padding: 0 3px;
             border-radius: 2px;
             white-space: nowrap;
         }
+        /* Flow-state colouring merged directly into the pump-name label
+           (see renderPumpMarkers / getTankFlowState) — replaces the old
+           separate animated arrow badge. Idle pumps stay neutral slate
+           (base rule above); these override the background only while
+           the tank is actually filling/discharging/mixed, same colour
+           language the old badge used (blue/red/purple). */
+        .pump-marker-label.pml-flow-fill { background: #0284c7; }
+        .pump-marker-label.pml-flow-discharge { background: #b91c1c; }
+        .pump-marker-label.pml-flow-mixed { background: #7e22ce; }
 
-        /* ---- Tank fill/discharge flow overlay (see getTankFlowState /
-           renderTankFlowOverlay). This is the pump-STATUS badge (IN /
-           OUT / mixed) — anchored top-RIGHT of the tank card, same side
-           as the pump-NAME label (renderPumpMarkers), so the two read
-           together as one "pump info" stack. `top`/`right` below are
-           only a pre-layout fallback — renderTankFlowOverlay() overrides
-           them via positionCornerLabel(), which stacks this badge just
-           beneath the pump-name label (or beneath the header if there's
-           no pump-name badge on this tank) instead of on top of either.
-           Direction driven by BALLASTPLAN(mT) pump status — see
-           PUMP_STATUS_COL comment. Gated by showTankFlow. */
+        /* ---- (Deprecated 2D badge) ----
+           This used to be the separate pump-STATUS badge (IN/OUT/mixed
+           + animated arrow), anchored top-RIGHT of the tank card. Flow
+           state is now merged directly into the pump-name label instead
+           (see renderPumpMarkers/pml-flow-* and getTankFlowState) —
+           renderTankFlowOverlay() no longer creates this element, but
+           the rule is left in place since nothing currently depends on
+           removing it. */
         .tank-flow-marker {
             position: absolute;
             top: 2px;
@@ -542,68 +548,12 @@
             pointer-events: none;
         }
 
-        /* Real flow-pipe visual: a short vertical "pipe" containing 3
-           chevrons that stream in the actual direction of flow (down
-           into the tank for fill, up out of the tank for discharge).
-           Replaces the old static glyph-in-a-circle badge. Colour
-           coding (blue=fill, red=discharge, purple=mixed) unchanged so
-           existing state logic (getTankFlowState) needs no changes. */
-        .tank-flow-pipe {
-            position: relative;
-            width: 20px;
-            height: 28px;
-            overflow: hidden;
-            border-radius: 3px;
-        }
-
-        .tank-flow-pipe.flow-fill { background: rgba(2,132,199,0.18); box-shadow: 0 0 5px rgba(56,189,248,0.75) inset; }
-        .tank-flow-pipe.flow-discharge { background: rgba(185,28,28,0.18); box-shadow: 0 0 5px rgba(239,68,68,0.75) inset; }
-        .tank-flow-pipe.flow-mixed { background: rgba(126,34,206,0.18); box-shadow: 0 0 5px rgba(168,85,247,0.75) inset; }
-
-        .tank-flow-chevron {
-            position: absolute;
-            left: 50%;
-            width: 10px;
-            height: 10px;
-            opacity: 0;
-        }
-        .flow-fill .tank-flow-chevron {
-            border-right: 3px solid #38bdf8;
-            border-bottom: 3px solid #38bdf8;
-            transform: translateX(-50%) rotate(45deg);
-            animation: chevronDown 0.5s linear infinite;
-        }
-        .flow-discharge .tank-flow-chevron {
-            border-right: 3px solid #f87171;
-            border-bottom: 3px solid #f87171;
-            transform: translateX(-50%) rotate(225deg);
-            animation: chevronUp 0.5s linear infinite;
-        }
-        .flow-mixed .tank-flow-chevron {
-            border-right: 3px solid #c084fc;
-            border-bottom: 3px solid #c084fc;
-            transform: translateX(-50%) rotate(45deg);
-            animation: chevronDown 0.5s linear infinite;
-        }
-        .tank-flow-chevron:nth-child(1) { animation-delay: 0s; }
-        .tank-flow-chevron:nth-child(2) { animation-delay: 0.38s; }
-        .tank-flow-chevron:nth-child(3) { animation-delay: 0.76s; }
-
-        @keyframes chevronDown {
-            0%   { top: -11px; opacity: 0; }
-            15%  { opacity: 1; }
-            80%  { opacity: 1; }
-            100% { top: 26px; opacity: 0; }
-        }
-        @keyframes chevronUp {
-            0%   { top: 26px; opacity: 0; }
-            15%  { opacity: 1; }
-            80%  { opacity: 1; }
-            100% { top: -11px; opacity: 0; }
-        }
-
-        /* Small state pill (FILL / DISCHARGE / MIXED) sitting above the
-           pipe — this is the "label" half of the arrow+label ask. */
+        /* Small state pill (FILL / DISCHARGE / MIXED). No longer used
+           in the 2D card overlay (flow state is merged directly into
+           the pump-name label — see renderPumpMarkers/pml-flow-* above
+           and renderTankFlowOverlay). Still reused as a static (non-
+           animated) label in the 3D floating labels — see
+           renderLabels3D/buildLabelAnchors3D. */
         .tank-flow-state {
             font-size: 10px;
             font-weight: 800;
@@ -1701,7 +1651,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-75-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-75(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2381,19 +2331,19 @@
         // But that column is still an ASSUMPTION (see its comment) and
         // many workbooks/mock setups have no pumpLocations at all, in
         // which case the pump-based check always returns 'off' and the
-        // flow arrow never appears — even while the operator is actively
-        // typing a new weight into a tank's input box. To make the arrow
+        // flow badge never appears — even while the operator is actively
+        // typing a new weight into a tank's input box. To make the badge
         // actually useful without depending on that column, every tank
-        // also tracks a "settled" baseline weight; whenever its CURRENT
-        // weight differs from that baseline, the arrow shows fill
-        // (weight went up) or discharge (weight went down) on its own.
-        // The baseline re-settles automatically a few seconds after the
-        // weight stops changing (see scheduleFlowBaselineSettle), which
-        // turns the arrow back off once the transfer looks finished.
-        let flowWeightBaseline = {};   // { [row]: number } last "settled" weight
+        // also tracks a baseline weight; whenever its CURRENT weight
+        // differs from that baseline, the badge shows fill (weight went
+        // up) or discharge (weight went down) on its own. STICKY: the
+        // baseline commits to the new value immediately (no settle
+        // timer), and the badge stays showing that edit's delta until
+        // the tank's weight is changed again — it does NOT auto-clear
+        // after a few seconds.
+        let flowWeightBaseline = {};   // { [row]: number } last-committed weight
         let flowManualState = {};      // { [row]: 'fill' | 'discharge' }
-        let flowDeltaMT = {};          // { [row]: number } signed (new - previous/baseline) weight, shown on the flow label
-        let flowSettleTimers = {};     // { [row]: timeoutId }
+        let flowDeltaMT = {};          // { [row]: number } signed (new - previous) weight, shown on the flow label
 
         // ---- Step baseline water diff (live vs. the step's own values) ----
         // Separate from the live weight-delta above: this compares a
@@ -2414,7 +2364,6 @@
         let stepBaselineStepName = null;  // name of the step that set the current baseline
         let stepDiffMT = {};              // { ["row"+id]: number } current tank fill minus stepBaselineFills's fill for that tank
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
-        const FLOW_SETTLE_MS = 1500;         // how long a weight must hold steady before the arrow turns off
 
         // Seeds/repins a tank's baseline to its CURRENT weight with no
         // transition shown — used on first load/sync so every tank
@@ -2423,59 +2372,42 @@
             flowWeightBaseline[row] = parseFloat(weight) || 0;
             delete flowManualState[row];
             delete flowDeltaMT[row];
-            if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
         }
 
         // Called every time a tank's weight actually changes (manual
-        // input or Excel sync). Sets the transient fill/discharge state
-        // from the sign of the change, and (re)starts the settle timer
-        // that will commit the new baseline — and clear the arrow —
-        // once the value has held steady for FLOW_SETTLE_MS.
+        // input or Excel sync). Sets the fill/discharge state from the
+        // sign of the change and commits the new value as the baseline
+        // right away — the badge is STICKY: it shows the delta from
+        // THIS edit and holds that way (no auto-clear timer) until the
+        // tank's weight changes again, at which point this function
+        // runs again with a fresh delta against the just-committed
+        // baseline.
         function noteFlowWeightChange(row, newWeight) {
             const w = parseFloat(newWeight) || 0;
             const baseline = flowWeightBaseline[row];
             if (baseline === undefined) { seedFlowBaseline(row, w); return; }
             const delta = w - baseline;
+            flowWeightBaseline[row] = w;
             if (Math.abs(delta) < FLOW_WEIGHT_EPSILON_MT) {
-                // The new value is back within noise range of the settled
-                // baseline (e.g. operator typed a value then corrected it
-                // back). Previously this just returned, leaving any
-                // in-flight fill/discharge state — and its settle timer,
-                // which still had the OLD (now-stale) weight captured in
-                // its closure — running for the full FLOW_SETTLE_MS. That
-                // made the arrow appear "stuck" showing the earlier
-                // transition even though the box no longer reflects a
-                // real change. Clear it immediately instead so the arrow
-                // turns off right away rather than lingering.
-                if (flowSettleTimers[row]) { clearTimeout(flowSettleTimers[row]); delete flowSettleTimers[row]; }
-                if (flowManualState[row]) {
-                    delete flowManualState[row];
-                    delete flowDeltaMT[row];
-                    if (typeof renderTankFlowOverlay === 'function') {
-                        const c = document.getElementById('tankContainer');
-                        if (c) renderTankFlowOverlay(c);
-                    }
-                    if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
-                }
-                return;
-            }
-            flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
-            // Signed delta between the NEW value just entered/synced and
-            // the PREVIOUS (settled baseline) value — this is what the
-            // flow-overlay label shows instead of the tank's raw weight.
-            flowDeltaMT[row] = delta;
-            if (flowSettleTimers[row]) clearTimeout(flowSettleTimers[row]);
-            flowSettleTimers[row] = setTimeout(() => {
-                flowWeightBaseline[row] = w;
+                // Back within noise range of the previous baseline (e.g.
+                // operator typed a value then corrected it back) —
+                // nothing meaningfully moved, so clear whatever badge
+                // was showing.
                 delete flowManualState[row];
                 delete flowDeltaMT[row];
-                delete flowSettleTimers[row];
-                if (typeof renderTankFlowOverlay === 'function') {
-                    const c = document.getElementById('tankContainer');
-                    if (c) renderTankFlowOverlay(c);
-                }
-                if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
-            }, FLOW_SETTLE_MS);
+            } else {
+                flowManualState[row] = delta > 0 ? 'fill' : 'discharge';
+                // Signed delta between the NEW value just entered/synced
+                // and the PREVIOUS (now-replaced) baseline — this is
+                // what the pump label's rate suffix shows instead of
+                // the tank's raw weight.
+                flowDeltaMT[row] = delta;
+            }
+            if (typeof renderTankFlowOverlay === 'function') {
+                const c = document.getElementById('tankContainer');
+                if (c) renderTankFlowOverlay(c);
+            }
+            if (typeof update3DFillAndAttitude === 'function') update3DFillAndAttitude();
         }
 
         // Replaces the step-diff baseline wholesale — called once, right
@@ -3226,7 +3158,7 @@
                                             <div class="tank-inputs">
                                                 <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
                                                        id="txt_Row${cfg.id}" value="${weight}"
-                                                       onclick="this.select()" oninput="updateTankFillVisual(${cfg.id}, this.value)" onchange="updateTankFill(${cfg.id}, this.value)">
+                                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
                                                 <div class="load-percentage-label" id="lbl_Load${cfg.id}">
                                                     ${pctString} (Cap. ${cfg.capacity}t)
                                                 </div>
@@ -3238,8 +3170,7 @@
             });
 
             renderBargeCornerLabels(container);
-            renderPumpMarkers(container);
-            renderTankFlowOverlay(container);
+            renderTankFlowOverlay(container); // also (re)renders pump markers — see its comment
             renderTankStepDiffLabels(container);
             applyDimensionVisibility();
         }
@@ -3487,18 +3418,19 @@
 
             // Group pumps by matched tank so multiple pumps on one tank
             // stack neatly inside the top-right corner instead of
-            // overlapping.
+            // overlapping. Keeps the matched cfg (not just the tank id)
+            // so flow state/rate can be looked up per tank below.
             const pumpsByTankId = new Map();
             pumpLocations.forEach(pump => {
                 const targetNorm = normalizeTankName(pump.tankName);
                 const cfg = TANK_CONFIG.find(t => normalizeTankName(t.name) === targetNorm);
                 if (!cfg) return; // tank name in BALLASTPLAN didn't match any known tank
                 tanksWithPump.add(cfg.id);
-                if (!pumpsByTankId.has(cfg.id)) pumpsByTankId.set(cfg.id, []);
-                pumpsByTankId.get(cfg.id).push(pump.pumpName);
+                if (!pumpsByTankId.has(cfg.id)) pumpsByTankId.set(cfg.id, { cfg, pumpNames: [] });
+                pumpsByTankId.get(cfg.id).pumpNames.push(pump.pumpName);
             });
 
-            pumpsByTankId.forEach((pumpNames, tankId) => {
+            pumpsByTankId.forEach(({ cfg, pumpNames }, tankId) => {
                 // Pump label lives INSIDE the tank's own card, anchored to
                 // its top-right corner, so it naturally follows that
                 // tank's position/size without any separate world-space
@@ -3506,6 +3438,33 @@
                 // itself already makes that association visually.
                 const card = document.getElementById(`tank_card_${tankId}`);
                 if (!card) return;
+
+                // Flow state/rate merged directly into this label —
+                // replaces the old separate animated arrow badge (see
+                // getTankFlowState / renderTankFlowOverlay). Colour
+                // shows direction (blue=fill, red=discharge, purple=
+                // mixed); idle stays the neutral base colour. The
+                // suffix shows the live weight-delta rate (mT actually
+                // moved since the last settled baseline), falling back
+                // to the tank's current absolute weight when no delta
+                // is on record yet (e.g. right after a step load).
+                const state = showTankFlow ? getTankFlowState(cfg) : 'off';
+                const flowCls = state === 'discharge' ? 'pml-flow-discharge'
+                    : state === 'mixed' ? 'pml-flow-mixed'
+                    : state === 'fill' ? 'pml-flow-fill' : '';
+                let rateSuffix = '';
+                let flowTitle = '';
+                if (state !== 'off') {
+                    const tank = tankData.find(t => t.row === tankId);
+                    const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
+                    const delta = flowDeltaMT[tankId];
+                    const hasDelta = typeof delta === 'number' && isFinite(delta) && Math.abs(delta) >= FLOW_WEIGHT_EPSILON_MT;
+                    const deltaLabel = hasDelta ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)} mT` : `${weightMT.toFixed(1)} mT`;
+                    rateSuffix = ` · ${deltaLabel}`;
+                    const stateLabel = state === 'discharge' ? 'Discharging' : (state === 'mixed' ? 'Filling & discharging' : 'Filling');
+                    flowTitle = ` — ${stateLabel} ${deltaLabel} (current ${weightMT.toFixed(1)} mT)`;
+                }
+
                 const wrap = document.createElement('div');
                 wrap.className = 'pump-marker pump-marker-inner';
                 wrap.style.position = 'absolute';
@@ -3514,8 +3473,8 @@
                 wrap.style.flexDirection = 'column';
                 wrap.style.alignItems = 'flex-start';
                 wrap.style.gap = '1px';
-                wrap.title = `Pump${pumpNames.length > 1 ? 's' : ''} ${pumpNames.join(', ')}`;
-                wrap.innerHTML = pumpNames.map(name => `<span class="pump-marker-label">${name}</span>`).join('');
+                wrap.title = `Pump${pumpNames.length > 1 ? 's' : ''} ${pumpNames.join(', ')}${flowTitle}`;
+                wrap.innerHTML = pumpNames.map(name => `<span class="pump-marker-label ${flowCls}">${name}${rateSuffix}</span>`).join('');
                 card.appendChild(wrap);
                 // Anchored just below the tank-header's real bottom edge
                 // (measured, not guessed), stacked via positionCornerLabel
@@ -3528,66 +3487,22 @@
 
         // ============================================================
         // 3a4. TANK FILL/DISCHARGE FLOW OVERLAY (2D)
-        //      Shows a small pulsing arrow badge + "<weight> mT" label on
-        //      any tank currently being actively filled or discharged —
-        //      distinct from the tank's ALWAYS-visible static water-level
-        //      fill bar (.tank-water-level, driven by pct alone). Flow
-        //      direction comes from getTankFlowState(cfg), which reads
-        //      real pump/valve status published from Excel (see
-        //      PUMP_STATUS_COL — currently an ASSUMED column, confirm
-        //      with the real workbook). Gated by showTankFlow; anchored
-        //      top-RIGHT of the tank card, same corner as the pump-name
-        //      label (see renderPumpMarkers) — positionCornerLabel()
-        //      stacks this one below it rather than overlapping.
+        //      Used to be a separate pulsing arrow badge + "<weight> mT"
+        //      label, anchored top-right of the tank card. That's been
+        //      removed — flow direction/rate is now merged straight into
+        //      the pump-name label instead (colour = direction, suffix =
+        //      live weight-delta — see renderPumpMarkers/pml-flow-* and
+        //      getTankFlowState). This function is kept only so its many
+        //      existing call sites (manual weight edits, Excel sync,
+        //      step loads, the showTankFlow toggle) keep working — it
+        //      just clears any stale badge from an older render and
+        //      re-runs renderPumpMarkers() to pick up the current state.
         // ============================================================
         let showTankFlow = true;
 
         function renderTankFlowOverlay(container) {
             container.querySelectorAll('.tank-flow-marker').forEach(el => el.remove());
-            if (!showTankFlow || !TANK_CONFIG.length) return;
-
-            TANK_CONFIG.forEach((cfg) => {
-                const state = getTankFlowState(cfg);
-                if (state === 'off') return;
-                const card = document.getElementById(`tank_card_${cfg.id}`);
-                if (!card) return;
-
-                const tank = tankData.find(t => t.row === cfg.id);
-                const weightMT = tank ? parseFloat(tank.weight) || 0 : 0;
-
-                // Prefer the tracked weight-delta (new value minus the
-                // previous/settled baseline — see noteFlowWeightChange)
-                // so the label reads as the quantity actually moving
-                // in/out, not the tank's total current weight. Falls
-                // back to the absolute weight only when flow state came
-                // from real pump/valve status text with no matching
-                // weight-delta on record (e.g. right after page load).
-                const delta = flowDeltaMT[cfg.id];
-                const hasDelta = typeof delta === 'number' && isFinite(delta) && Math.abs(delta) >= FLOW_WEIGHT_EPSILON_MT;
-                const deltaLabel = hasDelta ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)} mT` : `${weightMT.toFixed(1)} mT`;
-
-                const arrowCls = state === 'discharge' ? 'flow-discharge' : (state === 'mixed' ? 'flow-mixed' : 'flow-fill');
-                const stateLabel = state === 'discharge' ? 'Discharging' : (state === 'mixed' ? 'Filling & discharging' : 'Filling');
-                const stateWord = state === 'discharge' ? 'OUT' : (state === 'mixed' ? '↕' : 'IN');
-
-                const wrap = document.createElement('div');
-                wrap.className = 'tank-flow-marker';
-                wrap.title = `${stateLabel} — ${deltaLabel} (current ${weightMT.toFixed(1)} mT)`;
-                wrap.innerHTML = `
-                    <span class="tank-flow-state ${arrowCls}">${stateWord}</span>
-                    <span class="tank-flow-pipe ${arrowCls}">
-                        <span class="tank-flow-chevron"></span>
-                        <span class="tank-flow-chevron"></span>
-                        <span class="tank-flow-chevron"></span>
-                    </span>
-                    <span class="tank-flow-label">${deltaLabel}</span>
-                `;
-                card.appendChild(wrap);
-                // Anchored top-right, stacked below the pump-name badge
-                // (if this tank has one) or the header (if not) — never
-                // covers either.
-                positionCornerLabel(card, wrap, 'top-right');
-            });
+            if (typeof renderPumpMarkers === 'function') renderPumpMarkers(container);
         }
 
         // ============================================================
@@ -4557,11 +4472,23 @@
                             tank.weight = extra.weight.toFixed(2);
                             tank.percent = extra.percent > 1 ? extra.percent / 100 : extra.percent;
                             // First time we ever see this row, this just
-                            // seeds its baseline silently (no arrow). On
-                            // every later sync, it compares against the
-                            // last-seen weight so an external Excel edit
-                            // shows the arrow exactly like a manual one.
-                            noteFlowWeightChange(tank.row, tank.weight);
+                            // seeds its baseline silently (no badge). On
+                            // every later sync, only touch the flow
+                            // badge when this tank's weight has actually
+                            // moved since the baseline was last set —
+                            // otherwise a routine sync (triggered by
+                            // editing a DIFFERENT tank) would re-run
+                            // noteFlowWeightChange() for every tank here,
+                            // including untouched ones, and since their
+                            // weight hasn't moved, the ~0 delta would
+                            // silently wipe their sticky badge. See
+                            // noteFlowWeightChange()'s epsilon-clear
+                            // branch.
+                            if (flowWeightBaseline[tank.row] === undefined) {
+                                seedFlowBaseline(tank.row, tank.weight);
+                            } else if (Math.abs(parseFloat(tank.weight) - flowWeightBaseline[tank.row]) >= FLOW_WEIGHT_EPSILON_MT) {
+                                noteFlowWeightChange(tank.row, tank.weight);
+                            }
                             // Also keep the step baseline diff current for
                             // edits made directly in Excel (not just the
                             // 2D input box) — see noteStepDiffChange().
@@ -5130,26 +5057,18 @@
         // ============================================================
         // 7. UPDATE TANK FILL (with Excel write)
         // ============================================================
-        // Updates the tank card visuals (fill bar, %, over-capacity
-        // warning, in-memory tankData, live flow arrow, and the
-        // step-diff badge) WITHOUT writing to Excel. Wired to the
-        // weight input's 'input' event so the step-diff badge tracks
-        // every keystroke as you re-type a value — not just once you
-        // click away/blur, which is what onchange (below) fires on.
-        // Returns the parsed number, or null if the input isn't a
-        // valid number yet (e.g. mid-edit like "24" before "245").
-        function updateTankFillVisual(row, value) {
+        async function updateTankFill(row, value) {
             const parsed = parseFloat(value);
-            if (isNaN(parsed)) return null;
+            if (isNaN(parsed)) return;
             const cfg = TANK_CONFIG.find(t => t.id === row);
-            if (!cfg) return null;
+            if (!cfg) return;
             const mockMax = cfg.capacity || 1000;
             const isOverCapacity = parsed > mockMax;
             let targetPct = Math.max(0, Math.min(parsed / mockMax, 1.0));
             const pctNum = targetPct * 100;
 
             const card = document.getElementById(`tank_card_${row}`);
-            if (!card) return null;
+            if (!card) return;
             const water = card.querySelector('.tank-water-level');
             const label = document.getElementById(`lbl_Load${row}`);
             const input = document.getElementById(`txt_Row${row}`);
@@ -5202,18 +5121,6 @@
             const stepDiffContainer = document.getElementById('tankContainer');
             if (stepDiffContainer) renderTankStepDiffLabels(stepDiffContainer);
             update3DFillAndAttitude();
-            return parsed;
-        }
-
-        // Commits the value: applies the same visuals as
-        // updateTankFillVisual() above (in case onchange fires without a
-        // preceding input event, e.g. spinner arrows or paste-then-blur),
-        // then writes it to Excel. Wired to the weight input's onchange
-        // (fires on blur/Enter) so we don't spam Excel with a write on
-        // every keystroke.
-        async function updateTankFill(row, value) {
-            const parsed = updateTankFillVisual(row, value);
-            if (parsed === null) return;
 
             if (!isOfficeInitialized) return;
             try {
@@ -10442,7 +10349,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 t.weight = w.toFixed(2);
                 const cap = parseFloat(t.capacity) || 0;
                 t.percent = cap > 0 ? Math.max(0, Math.min(w / cap, 1)) : 0;
-                if (typeof noteFlowWeightChange === 'function') noteFlowWeightChange(t.row, t.weight);
+                // Same guard as the Excel Load_Editor sync above: only
+                // touch this tank's flow badge when its weight actually
+                // moved, so applying a step (which re-sends EVERY tank's
+                // weight, changed or not) doesn't wipe the sticky badge
+                // on tanks this step left untouched.
+                if (flowWeightBaseline[t.row] === undefined) {
+                    seedFlowBaseline(t.row, t.weight);
+                } else if (Math.abs(parseFloat(t.weight) - flowWeightBaseline[t.row]) >= FLOW_WEIGHT_EPSILON_MT) {
+                    if (typeof noteFlowWeightChange === 'function') noteFlowWeightChange(t.row, t.weight);
+                }
             });
 
             if (pqrsValues.length > 0) {
