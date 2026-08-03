@@ -1651,7 +1651,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-75-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-76-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2529,6 +2529,13 @@
         const DECK_KEYS = ['AFT_PS', 'PS', 'FWD_PS', 'AFT_SB', 'SB', 'FWD_SB'];
         const DECK_LABELS_DISPLAY = ['AFT-PS', 'PS', 'FWD-PS', 'AFT-SB', 'SB', 'FWD-SB'];
 
+        // Tank id (TANK_CONFIG/cfg.id, matches the "txt_Row<id>" water-
+        // fill input) of the most recently EDITED water-fill box — see
+        // updateTankFill() (sets it) and initTankMatrix() (restores focus
+        // to it after the fill grid is rebuilt/re-rendered post-calc, so
+        // typing/Tabbing through tanks isn't interrupted by a recalc).
+        let lastEditedTankRow = null;
+
         let targetTrimDegrees = 0.0;
         let targetHeelDegrees = 0.0;
         let targetDeck = { AFT_PS: 0, PS: 0, FWD_PS: 0, AFT_SB: 0, SB: 0, FWD_SB: 0 };
@@ -2840,6 +2847,42 @@
             DECK_KEYS.forEach((key, i) => {
                 currentDeck[key] = extractDeckNumberFromLabel(bargeCornerLabels[i]);
             });
+            quayCenterLabel = computeQuayCenterLabelFromCorners();
+        }
+
+        // Quay deck-difference label at the barge's Y-center line (the
+        // 7th "quay center" label — see quayCenterLabel above). Derived
+        // live from the 6 corner deck-to-quay labels (Load_Editor!I1:I6,
+        // bargeCornerLabels[0..5] == label 1..6 in DECK_KEYS order:
+        // 1=AFT-PS, 2=PS, 3=FWD-PS, 4=AFT-SB, 5=SB, 6=FWD-SB) rather than
+        // typed in directly — whichever short edge of the barge sits at
+        // the quay, the center-line value is the average of that edge's
+        // PS/SB corners:
+        //   AFT edge -> label 1 (AFT-PS) & label 4 (AFT-SB) -> (v1+v4)/2
+        //   FWD edge -> label 3 (FWD-PS) & label 6 (FWD-SB) -> (v3+v6)/2
+        // AFT is tried first (the quay-center label is drawn at the AFT
+        // end — see renderBargeCornerLabels()); if labels 1 & 4 aren't
+        // both filled in yet, falls back to labels 3 & 6. A blank/unset
+        // corner label is skipped rather than treated as 0, so a single
+        // missing corner doesn't silently drag the average down. Returns
+        // '' (cleared) when neither pair is fully populated.
+        function computeQuayCenterLabelFromCorners() {
+            const hasCornerVal = (i) => {
+                const t = bargeCornerLabels[i];
+                return t !== null && t !== undefined && String(t).trim() !== '';
+            };
+            // indices: 0=label1(AFT-PS), 2=label3(FWD-PS), 3=label4(AFT-SB), 5=label6(FWD-SB)
+            if (hasCornerVal(0) && hasCornerVal(3)) {
+                const v1 = extractDeckNumberFromLabel(bargeCornerLabels[0]);
+                const v4 = extractDeckNumberFromLabel(bargeCornerLabels[3]);
+                return ((v1 + v4) / 2).toFixed(2);
+            }
+            if (hasCornerVal(2) && hasCornerVal(5)) {
+                const v3 = extractDeckNumberFromLabel(bargeCornerLabels[2]);
+                const v6 = extractDeckNumberFromLabel(bargeCornerLabels[5]);
+                return ((v3 + v6) / 2).toFixed(2);
+            }
+            return '';
         }
 
         // tank data store (synced with config) — (re)built whenever
@@ -3189,6 +3232,24 @@
             renderTankFlowOverlay(container); // also (re)renders pump markers — see its comment
             renderTankStepDiffLabels(container);
             applyDimensionVisibility();
+
+            // Restore the cursor to the water-fill box the operator was
+            // last typing in. The boxes above are all freshly recreated
+            // elements, so a rebuild triggered by that edit's own
+            // recalculation (Excel round-trip, Firebase pull, etc.) would
+            // otherwise silently drop focus mid-entry. Only do this when
+            // nothing else is currently being typed into (e.g. an Auto
+            // Ballast target field), so an unrelated background refresh
+            // never steals focus away from the operator.
+            const activeTag = document.activeElement && document.activeElement.tagName;
+            const nothingElseFocused = !activeTag || (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA' && activeTag !== 'SELECT');
+            if (lastEditedTankRow !== null && nothingElseFocused) {
+                const refocusInput = document.getElementById(`txt_Row${lastEditedTankRow}`);
+                if (refocusInput && !refocusInput.disabled) {
+                    refocusInput.focus();
+                    refocusInput.select();
+                }
+            }
         }
 
         // ============================================================
@@ -5076,6 +5137,10 @@
         async function updateTankFill(row, value) {
             const parsed = parseFloat(value);
             if (isNaN(parsed)) return;
+            // Remember this as the last-edited water-fill box so the
+            // cursor returns here (see initTankMatrix()) once the grid
+            // re-renders after the recalculation this edit triggers.
+            lastEditedTankRow = row;
             const cfg = TANK_CONFIG.find(t => t.id === row);
             if (!cfg) return;
             const mockMax = cfg.capacity || 1000;
