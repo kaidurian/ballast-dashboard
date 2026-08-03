@@ -2364,7 +2364,7 @@
         let stepBaselineStepName = null;  // name of the step that set the current baseline
         let stepDiffMT = {};              // { ["row"+id]: number } current tank fill minus stepBaselineFills's fill for that tank
         const FLOW_WEIGHT_EPSILON_MT = 0.05; // ignore sub-noise changes
-        const FLOW_SETTLE_MS = 3000;         // badge shows for 3s after a weight change, then auto-hides
+        const FLOW_SETTLE_MS = 1500;         // badge shows for 3s after a weight change, then auto-hides
 
         // Seeds/repins a tank's baseline to its CURRENT weight with no
         // transition shown — used on first load/sync so every tank
