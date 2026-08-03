@@ -1701,7 +1701,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-74-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-75-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -3226,7 +3226,7 @@
                                             <div class="tank-inputs">
                                                 <input type="number" step="any" class="weight-input${isOverCapacity ? ' weight-input-over' : ''}"
                                                        id="txt_Row${cfg.id}" value="${weight}"
-                                                       onclick="this.select()"onchange="updateTankFill(${cfg.id}, this.value)">
+                                                       onclick="this.select()" oninput="updateTankFillVisual(${cfg.id}, this.value)" onchange="updateTankFill(${cfg.id}, this.value)">
                                                 <div class="load-percentage-label" id="lbl_Load${cfg.id}">
                                                     ${pctString} (Cap. ${cfg.capacity}t)
                                                 </div>
@@ -5130,18 +5130,26 @@
         // ============================================================
         // 7. UPDATE TANK FILL (with Excel write)
         // ============================================================
-        async function updateTankFill(row, value) {
+        // Updates the tank card visuals (fill bar, %, over-capacity
+        // warning, in-memory tankData, live flow arrow, and the
+        // step-diff badge) WITHOUT writing to Excel. Wired to the
+        // weight input's 'input' event so the step-diff badge tracks
+        // every keystroke as you re-type a value — not just once you
+        // click away/blur, which is what onchange (below) fires on.
+        // Returns the parsed number, or null if the input isn't a
+        // valid number yet (e.g. mid-edit like "24" before "245").
+        function updateTankFillVisual(row, value) {
             const parsed = parseFloat(value);
-            if (isNaN(parsed)) return;
+            if (isNaN(parsed)) return null;
             const cfg = TANK_CONFIG.find(t => t.id === row);
-            if (!cfg) return;
+            if (!cfg) return null;
             const mockMax = cfg.capacity || 1000;
             const isOverCapacity = parsed > mockMax;
             let targetPct = Math.max(0, Math.min(parsed / mockMax, 1.0));
             const pctNum = targetPct * 100;
 
             const card = document.getElementById(`tank_card_${row}`);
-            if (!card) return;
+            if (!card) return null;
             const water = card.querySelector('.tank-water-level');
             const label = document.getElementById(`lbl_Load${row}`);
             const input = document.getElementById(`txt_Row${row}`);
@@ -5194,6 +5202,18 @@
             const stepDiffContainer = document.getElementById('tankContainer');
             if (stepDiffContainer) renderTankStepDiffLabels(stepDiffContainer);
             update3DFillAndAttitude();
+            return parsed;
+        }
+
+        // Commits the value: applies the same visuals as
+        // updateTankFillVisual() above (in case onchange fires without a
+        // preceding input event, e.g. spinner arrows or paste-then-blur),
+        // then writes it to Excel. Wired to the weight input's onchange
+        // (fires on blur/Enter) so we don't spam Excel with a write on
+        // every keystroke.
+        async function updateTankFill(row, value) {
+            const parsed = updateTankFillVisual(row, value);
+            if (parsed === null) return;
 
             if (!isOfficeInitialized) return;
             try {
