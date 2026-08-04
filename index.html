@@ -1651,7 +1651,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-78-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-77-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2063,18 +2063,12 @@
         // ---- AutoCAD trailer block export ----
         // Each trailerGenTrains[] entry = one physical SPMT unit. The
         // AutoCAD side has whole-unit blocks (not per-axle-line blocks):
-        // 4-axle-line SPMT and 6-axle-line SPMT. Extend this map if more
-        // block variants (e.g. 8AL) get added.
-        const CAD_BLOCK_MAP = { 4: 'SCH SPMT 4L top view', 6: 'GEN 2 SPMT 6L' };
+        // 4AL = 4-axle-line SPMT, 6AL = 6-axle-line SPMT, etc. Extend
+        // this map if more block variants (e.g. 8AL) get added.
+        const CAD_BLOCK_MAP = { 4: '4AL', 6: '6AL' };
         // Excel/dashboard values are in metres; set to 1 if the target
         // AutoCAD drawing's units are already metres instead of mm.
         const CAD_UNIT_SCALE = 1000;
-        // Offset (metres, along the train's X axis) from axle #1 to the
-        // block's insertion basepoint, per load direction:
-        //   Load In  : insertion point = axle #1 X + offset   (rotation 0°)
-        //   Load Out : insertion point = axle #1 X - offset   (rotation 180°)
-        const CAD_LOAD_IN_OFFSET_M = { 4: 4.9, 6: 7.7 };
-        const CAD_LOAD_OUT_OFFSET_M = { 4: 0.7, 6: 0.7 };
 
         // Trailer axle rectangle appearance — edit these values to change
         // colour, transparency, or border of the amber overlay rectangles.
@@ -8791,7 +8785,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 x: 30 + (index - 1) * 15,
                 y: (index % 2 === 1) ? 3.2 : -3.2,
                 vcg: 4.2,
-                loadDirection: 'in', // 'in' | 'out' — used only by the AutoCAD export
                 groups: [defaultAxleGroup(1, 5, 25, 1)]
             };
         }
@@ -8957,9 +8950,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         function updateTrailerGenField(id, field, rawValue) {
             const train = trailerGenTrains.find(t => t.id === id);
             if (!train) return;
-            if (field === 'name' || field === 'loadDirection') {
-                if (field === 'name') train.name = rawValue || train.name;
-                else train.loadDirection = (rawValue === 'out') ? 'out' : 'in';
+            if (field === 'name') {
+                train.name = rawValue || train.name;
             } else {
                 train[field] = parseFloat(rawValue);
                 if (isNaN(train[field])) train[field] = 0;
@@ -9105,14 +9097,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                             <label>VCG from deck (m)</label>
                             <input type="number" step="any" value="${train.vcg}" title="Shared VCG for every axle in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'vcg', this.value)">
-                        </div>
-                        <div class="tg-field">
-                            <label>Load direction (AutoCAD export)</label>
-                            <select title="Load In: block inserted ahead of axle #1 by the fixed offset, 0° rotation. Load Out: block inserted just behind axle #1, rotated 180°."
-                                    onchange="updateTrailerGenField(${train.id}, 'loadDirection', this.value)">
-                                <option value="in" ${(train.loadDirection || 'in') === 'in' ? 'selected' : ''}>Load In</option>
-                                <option value="out" ${train.loadDirection === 'out' ? 'selected' : ''}>Load Out</option>
-                            </select>
                         </div>
                     </div>
 
@@ -9594,17 +9578,15 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
         // ---- Export current trains as an AutoCAD script (.scr) ----
         // One -INSERT per TRAIN (not per axle line/row) — each train is
-        // one whole SPMT unit, matched to its block by axle count
-        // (train.groups' highest "to" value). The insertion point is
-        // offset from that train's axle #1 position (train.x, train.y)
-        // according to loadDirection:
-        //   Load In  : insertion X = axle #1 X + CAD_LOAD_IN_OFFSET_M[axleCount]   (rotation 0°)
-        //   Load Out : insertion X = axle #1 X - CAD_LOAD_OUT_OFFSET_M[axleCount]  (rotation 180°)
+        // one whole SPMT unit, matched to the 4AL/6AL block by its axle
+        // count (train.groups' highest "to" value). Insertion point =
+        // that train's axle #1 position (train.x, train.y), same X/Y
+        // origin computeTrailerGenRows() uses for every axle line, since
+        // the AutoCAD block is assumed to have its basepoint there.
         // ASSUMPTIONS (flagged in the on-screen warning list, if any):
-        //   - offsets above are along the train's local X axis; trains
-        //     are unrotated (0°) in their own row, so that's world X too
-        //   - Y is unaffected by load direction (block still lands on
-        //     the train's shared Y)
+        //   - block basepoint sits at axle #1 (front-most axle line)
+        //   - all trains are unrotated (0°) — there's no per-train
+        //     heading field in trailerGenTrains yet
         //   - CAD_UNIT_SCALE converts metres -> the drawing's units
         function computeTrailerCADInserts() {
             const inserts = [];
@@ -9616,34 +9598,13 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     warnings.push(`Train "${train.name}" has ${axleCount} axle line(s) — no AutoCAD block mapped (only ${Object.keys(CAD_BLOCK_MAP).join('/')} configured). Skipped.`);
                     return;
                 }
-                const loadDirection = (train.loadDirection === 'out') ? 'out' : 'in';
-                const axle1X = parseFloat(train.x) || 0;
-                let insertionXm, rotationDeg;
-                if (loadDirection === 'out') {
-                    const offset = CAD_LOAD_OUT_OFFSET_M[axleCount];
-                    if (offset === undefined) {
-                        warnings.push(`Train "${train.name}" (${axleCount} axle lines, Load Out) — no offset configured. Skipped.`);
-                        return;
-                    }
-                    insertionXm = axle1X - offset;
-                    rotationDeg = 180;
-                } else {
-                    const offset = CAD_LOAD_IN_OFFSET_M[axleCount];
-                    if (offset === undefined) {
-                        warnings.push(`Train "${train.name}" (${axleCount} axle lines, Load In) — no offset configured. Skipped.`);
-                        return;
-                    }
-                    insertionXm = axle1X + offset;
-                    rotationDeg = 0;
-                }
                 inserts.push({
                     trainName: train.name,
                     blockName,
                     axleCount,
-                    loadDirection,
-                    x: insertionXm * CAD_UNIT_SCALE,
+                    x: (parseFloat(train.x) || 0) * CAD_UNIT_SCALE,
                     y: (parseFloat(train.y) || 0) * CAD_UNIT_SCALE,
-                    rotationDeg
+                    rotationDeg: 0
                 });
             });
             return { inserts, warnings };
@@ -9668,7 +9629,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         function exportTrailerLayoutToCADScript() {
             const { inserts, warnings } = computeTrailerCADInserts();
             if (inserts.length === 0) {
-                alert('Nothing to export — no train currently matches a mapped AutoCAD block (4-line/6-line).');
+                alert('Nothing to export — no train currently matches a mapped AutoCAD block (4AL/6AL).');
                 return;
             }
             const scriptText = buildTrailerCADScript(inserts);
@@ -9755,7 +9716,7 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
             <div class="tg-footer">
                 <button type="button" class="tg-btn" onclick="closeTrailerGeneratorModal()">Cancel</button>
-                <button type="button" class="tg-btn" title="Download an AutoCAD script (.scr) that inserts one block per train, offset from axle #1 per its Load In/Load Out setting. Run with the SCRIPT command in a drawing that already has the SPMT blocks defined."
+                <button type="button" class="tg-btn" title="Download an AutoCAD script (.scr) that inserts a 4AL/6AL block per train at its axle #1 position. Run with the SCRIPT command in a drawing that already has 4AL/6AL defined."
                         onclick="exportTrailerLayoutToCADScript()">📐 Export AutoCAD Script</button>
                 <button type="button" class="tg-btn tg-btn-primary" onclick="generateTrailerAndWriteToExcel()">Generate &amp; Write to Excel</button>
             </div>
