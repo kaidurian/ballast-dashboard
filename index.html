@@ -1398,6 +1398,39 @@
             color: var(--text-muted);
         }
 
+        /* ---- Per-train AutoCAD block split (optional) ---- */
+        .tg-cad-split-row {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed var(--panel-border);
+        }
+        .tg-cad-split-row label {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-muted);
+            margin-bottom: 3px;
+        }
+        .tg-cad-split-row input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            font-size: 12px;
+            border-radius: 5px;
+            border: 1px solid var(--panel-border);
+            background: var(--input-bg);
+            color: var(--text-main);
+        }
+        .tg-cad-split-row input:focus { outline: none; border-color: var(--accent-blue); }
+        .tg-cad-split-status {
+            margin-top: 5px;
+            font-size: 10.5px;
+            color: var(--text-muted);
+        }
+        .tg-cad-split-status.tg-cad-split-error { color: #ef4444; }
+
         .tg-add-train-btn {
             width: 100%;
             padding: 10px;
@@ -1651,7 +1684,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-78-(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-80-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -8799,8 +8832,27 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 x: 30 + (index - 1) * 15,
                 y: (index % 2 === 1) ? 3.2 : -3.2,
                 vcg: 4.2,
-                groups: [defaultAxleGroup(1, 5, 25, 1)]
+                groups: [defaultAxleGroup(1, 5, 25, 1)],
+                // AutoCAD-export-only: how this train's axle lines are
+                // split across physical SPMT units for block insertion.
+                // Blank/empty = "auto" (whole train = one block, the old
+                // behavior). Non-blank = comma-separated axle-line counts
+                // per physical unit, front to back, e.g. "4,6" for a
+                // 10-line train built from a 4-line unit followed by a
+                // 6-line unit. Does NOT affect Load_Editor axle rows —
+                // those are still written per-axle-line as before.
+                cadSplit: ''
             };
+        }
+
+        // Parses a train's cadSplit text ("4,6" / "4 6" / "4, 6, ...")
+        // into an array of positive integer axle-line counts. Returns
+        // null for blank/unparseable input, meaning "no custom split —
+        // treat as auto/whole-train" to the caller.
+        function parseCadSplitString(raw) {
+            if (!raw || !String(raw).trim()) return null;
+            const parts = String(raw).split(/[,\s]+/).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n > 0);
+            return parts.length ? parts : null;
         }
 
         function openTrailerGeneratorModal() {
@@ -8941,7 +8993,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                         x: rows[0].x,
                         y: cluster.y,
                         vcg: cluster.vcg,
-                        groups: groups.length ? groups : [defaultAxleGroup(1, 1, 0, 1)]
+                        groups: groups.length ? groups : [defaultAxleGroup(1, 1, 0, 1)],
+                        // Not persisted on the sheet — reconstructed trains
+                        // start with no custom AutoCAD split (auto/whole-train).
+                        cadSplit: ''
                     };
                 });
 
@@ -8968,6 +9023,8 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             if (!train) return;
             if (field === 'name') {
                 train.name = rawValue || train.name;
+            } else if (field === 'cadSplit') {
+                train.cadSplit = rawValue;
             } else {
                 train[field] = parseFloat(rawValue);
                 if (isNaN(train[field])) train[field] = 0;
@@ -8976,6 +9033,36 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             // the operator is actively typing in never loses focus.
             renderTrailerGeneratorTotals();
             renderTrailerGenPreview();
+            if (field === 'cadSplit') updateCadSplitStatus(train.id);
+        }
+
+        // Live "N + M = total ✓/✗" validation line shown under a train's
+        // AutoCAD split input, updated directly by element id so typing
+        // in that field never triggers (or is interrupted by) a full
+        // train-list re-render.
+        function updateCadSplitStatus(trainId) {
+            const train = trailerGenTrains.find(t => t.id === trainId);
+            const el = document.getElementById(`tgCadSplitStatus_${trainId}`);
+            if (!train || !el) return;
+            const axleCount = train.groups.reduce((m, g) => Math.max(m, parseInt(g.to, 10) || 0), 0);
+            const segments = parseCadSplitString(train.cadSplit);
+            if (!segments) {
+                el.textContent = `Auto — one AutoCAD block for all ${axleCount} axle line(s).`;
+                el.classList.remove('tg-cad-split-error');
+                return;
+            }
+            const sum = segments.reduce((s, n) => s + n, 0);
+            const unmapped = segments.filter(n => !CAD_BLOCK_MAP[n]);
+            if (sum !== axleCount) {
+                el.textContent = `${segments.join(' + ')} = ${sum}, but this train has ${axleCount} axle line(s) — fix before export.`;
+                el.classList.add('tg-cad-split-error');
+            } else if (unmapped.length) {
+                el.textContent = `${segments.join(' + ')} = ${sum} ✓, but ${unmapped.join('/')}-line block(s) not mapped in CAD_BLOCK_MAP.`;
+                el.classList.add('tg-cad-split-error');
+            } else {
+                el.textContent = `${segments.join(' + ')} = ${sum} ✓ — ${segments.length} separate AutoCAD block(s) will be inserted.`;
+                el.classList.remove('tg-cad-split-error');
+            }
         }
 
         function addAxleGroup(trainId) {
@@ -9114,6 +9201,23 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                             <input type="number" step="any" value="${train.vcg}" title="Shared VCG for every axle in this train"
                                    onchange="updateTrailerGenField(${train.id}, 'vcg', this.value)">
                         </div>
+                    </div>
+
+                    <div class="tg-cad-split-row">
+                        <label>AutoCAD split (axle lines per physical trailer, front→back — e.g. "4,6" for a 10-line train built from a 4-line unit then a 6-line unit)</label>
+                        <input type="text" placeholder="auto — whole train as one block" value="${train.cadSplit || ''}"
+                               title="Leave blank for one AutoCAD block covering all axle lines. Enter comma-separated axle-line counts (matching CAD_BLOCK_MAP, e.g. 4,6) to insert one block per physical unit instead."
+                               onchange="updateTrailerGenField(${train.id}, 'cadSplit', this.value)">
+                        <div class="tg-cad-split-status" id="tgCadSplitStatus_${train.id}">${(() => {
+                            const axleCount = maxAxle;
+                            const segments = parseCadSplitString(train.cadSplit);
+                            if (!segments) return `Auto — one AutoCAD block for all ${axleCount} axle line(s).`;
+                            const sum = segments.reduce((s, n) => s + n, 0);
+                            const unmapped = segments.filter(n => !CAD_BLOCK_MAP[n]);
+                            if (sum !== axleCount) return `${segments.join(' + ')} = ${sum}, but this train has ${axleCount} axle line(s) — fix before export.`;
+                            if (unmapped.length) return `${segments.join(' + ')} = ${sum} ✓, but ${unmapped.join('/')}-line block(s) not mapped in CAD_BLOCK_MAP.`;
+                            return `${segments.join(' + ')} = ${sum} ✓ — ${segments.length} separate AutoCAD block(s) will be inserted.`;
+                        })()}</div>
                     </div>
 
                     <div class="tg-groups-label">Axle groups (custom load per axle range)</div>
@@ -9613,39 +9717,66 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
             const loadDirection = (trailerGenLoadDirection === 'out') ? 'out' : 'in';
             trailerGenTrains.forEach(train => {
                 const axleCount = train.groups.reduce((m, g) => Math.max(m, parseInt(g.to, 10) || 0), 0);
-                const blockNames = CAD_BLOCK_MAP[axleCount];
-                if (!blockNames) {
-                    warnings.push(`Train "${train.name}" has ${axleCount} axle line(s) — no AutoCAD block mapped (only ${Object.keys(CAD_BLOCK_MAP).join('/')} configured). Skipped.`);
+                const spacing = parseFloat(train.spacing) || 0;
+                const axle1X = parseFloat(train.x) || 0;
+
+                // Custom split: this train's axle lines are actually
+                // built from several separate physical SPMT units (e.g.
+                // a 10-line train = a 4-line unit + a 6-line unit), each
+                // needing its own AutoCAD block insert. Blank/unset split
+                // falls back to the original whole-train-as-one-block
+                // behavior.
+                const customSegments = parseCadSplitString(train.cadSplit);
+                const segments = customSegments || [axleCount];
+                const segSum = segments.reduce((s, n) => s + n, 0);
+                if (customSegments && segSum !== axleCount) {
+                    warnings.push(`Train "${train.name}" AutoCAD split (${segments.join('+')} = ${segSum}) doesn't match its ${axleCount} axle line(s). Skipped.`);
                     return;
                 }
-                const blockName = blockNames[loadDirection];
-                const axle1X = parseFloat(train.x) || 0;
-                let insertionXm, rotationDeg;
-                if (loadDirection === 'out') {
-                    const offset = CAD_LOAD_OUT_OFFSET_M[axleCount];
-                    if (offset === undefined) {
-                        warnings.push(`Train "${train.name}" (${axleCount} axle lines, Load Out) — no offset configured. Skipped.`);
+
+                let axleOffset = 0; // axle lines already consumed by earlier segments in this train
+                segments.forEach((segCount, segIdx) => {
+                    const segLabel = segments.length > 1 ? `${train.name} (#${axleOffset + 1}-#${axleOffset + segCount})` : train.name;
+                    const blockNames = CAD_BLOCK_MAP[segCount];
+                    if (!blockNames) {
+                        warnings.push(`Train "${segLabel}" has ${segCount} axle line(s) — no AutoCAD block mapped (only ${Object.keys(CAD_BLOCK_MAP).join('/')} configured). Skipped.`);
+                        axleOffset += segCount;
                         return;
                     }
-                    insertionXm = axle1X + offset;
-                    rotationDeg = 180;
-                } else {
-                    const offset = CAD_LOAD_IN_OFFSET_M[axleCount];
-                    if (offset === undefined) {
-                        warnings.push(`Train "${train.name}" (${axleCount} axle lines, Load In) — no offset configured. Skipped.`);
-                        return;
+                    const blockName = blockNames[loadDirection];
+                    // This segment's own axle #1 X — offset back along the
+                    // train by however many axle lines came before it.
+                    const segAxle1X = axle1X - axleOffset * spacing;
+                    let insertionXm, rotationDeg;
+                    if (loadDirection === 'out') {
+                        const offset = CAD_LOAD_OUT_OFFSET_M[segCount];
+                        if (offset === undefined) {
+                            warnings.push(`Train "${segLabel}" (${segCount} axle lines, Load Out) — no offset configured. Skipped.`);
+                            axleOffset += segCount;
+                            return;
+                        }
+                        insertionXm = segAxle1X + offset;
+                        rotationDeg = 180;
+                    } else {
+                        const offset = CAD_LOAD_IN_OFFSET_M[segCount];
+                        if (offset === undefined) {
+                            warnings.push(`Train "${segLabel}" (${segCount} axle lines, Load In) — no offset configured. Skipped.`);
+                            axleOffset += segCount;
+                            return;
+                        }
+                        insertionXm = segAxle1X - offset;
+                        rotationDeg = 0;
                     }
-                    insertionXm = axle1X - offset;
-                    rotationDeg = 0;
-                }
-                inserts.push({
-                    trainName: train.name,
-                    blockName,
-                    axleCount,
-                    loadDirection,
-                    x: insertionXm * CAD_UNIT_SCALE,
-                    y: (parseFloat(train.y) || 0) * CAD_UNIT_SCALE,
-                    rotationDeg
+                    inserts.push({
+                        trainName: segLabel,
+                        blockName,
+                        axleCount: segCount,
+                        loadDirection,
+                        x: insertionXm * CAD_UNIT_SCALE,
+                        y: (parseFloat(train.y) || 0) * CAD_UNIT_SCALE,
+                        rotationDeg
+                    });
+                    axleOffset += segCount;
                 });
             });
             return { inserts, warnings };
@@ -9718,7 +9849,16 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                 <strong>No line load</strong> for axles that carry no cargo
                 weight. Every range assigned to the same group (even across
                 different trains) shares that one color, shown below, in the
-                preview, and on the 2D/3D dashboard. Rows are written to
+                preview, and on the 2D/3D dashboard. If a train is actually
+                made up of several separate physical SPMT units (e.g. a
+                10-line train built from a 4-line unit followed by a
+                6-line unit), use that train's
+                <strong>AutoCAD split</strong> field to enter the axle-line
+                count per unit, front&nbsp;&rarr;&nbsp;back (e.g.
+                <em>4,6</em>) &mdash; each unit then gets its own AutoCAD
+                block insert on export, instead of one block for the
+                whole train; leave it blank for the old one-block-per-train
+                behavior. Rows are written to
                 <strong>Load_Editor!B</strong> (name, e.g.
                 <em>Group_1_line_1</em>) and <strong>D:G</strong>
                 starting at row <strong id="tgStartRowLabel">124</strong>
