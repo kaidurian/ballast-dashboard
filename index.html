@@ -1684,7 +1684,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-82-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-82(Rev.00)-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -9776,6 +9776,29 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
         function buildTrailerCADScript(inserts) {
             const lines = [];
+            // Preamble — runs once at the top of the script, before any
+            // -INSERT commands. Guards against the most common causes of
+            // blocks landing off-position when the script runs unattended:
+            //   ESC        cancels any command already active in the
+            //              drawing so the first real script line isn't
+            //              swallowed by a stale prompt
+            //   OSMODE 0   disable running object snaps
+            //   ATTDIA 0   suppress the attribute dialog box (would
+            //              otherwise pause the script waiting on a click)
+            //   ATTREQ 0   suppress attribute value prompts entirely
+            //   FILEDIA 0  suppress file dialogs
+            //   CMDECHO 0  quiet command-line echo
+            //   UCS W      force World UCS so insertion coordinates are
+            //              interpreted as absolute WCS, not whatever UCS
+            //              happened to be active in the target drawing
+            lines.push('ESC');
+            lines.push('OSMODE 0');
+            lines.push('ATTDIA 0');
+            lines.push('ATTREQ 0');
+            lines.push('FILEDIA 0');
+            lines.push('CMDECHO 0');
+            lines.push('UCS W');
+            lines.push('');
             inserts.forEach(ins => {
                 // -INSERT (leading dash) suppresses the dialog box so the
                 // script can answer every prompt line-by-line:
