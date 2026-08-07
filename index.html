@@ -1684,7 +1684,7 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-81-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-82-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
@@ -2107,12 +2107,10 @@
         // Excel/dashboard values are in metres; set to 1 if the target
         // AutoCAD drawing's units are already metres instead of mm.
         const CAD_UNIT_SCALE = 1000;
-        // Offset (metres, along the train's X axis) from axle #1 to the
-        // block's insertion basepoint, per load direction:
-        //   Load In  : insertion point = axle #1 X - offset   (rotation 0°)
-        //   Load Out : insertion point = axle #1 X + offset   (rotation 180°)
-        const CAD_LOAD_IN_OFFSET_M = { 4: 4.9, 6: 7.7 };
-        const CAD_LOAD_OUT_OFFSET_M = { 4: 0.7, 6: 0.7 };
+        // No insertion offset is applied for either load direction —
+        // block insertion X is always the segment's own axle #1 X:
+        //   Load In  : insertion point = axle #1 X   (rotation 0°)
+        //   Load Out : insertion point = axle #1 X   (rotation 180°)
 
         // Trailer axle rectangle appearance — edit these values to change
         // colour, transparency, or border of the amber overlay rectangles.
@@ -9701,21 +9699,18 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
         // matched to its block by axle count AND the global
         // trailerGenLoadDirection setting (applies to every train in
         // the export, not per-train).
-        //   Load In  : insertion X = axle #1 X - CAD_LOAD_IN_OFFSET_M[axleCount]   (rotation 0°),  block = *_AFT
-        //   Load Out : insertion X = axle #1 X + CAD_LOAD_OUT_OFFSET_M[axleCount]  (rotation 180°), block = *_FWD
-        // These offset/rotation/block rules apply ONLY to the FIRST
-        // (start) block of each train — that's the unit with the
-        // power pack/cabin extending past its own axle #1, which is
-        // what the offset table represents. Any FOLLOWING blocks in a
-        // custom AutoCAD split (e.g. the "6" in a "4,6" split) are
-        // just coupled axle modules with no such overhang: they are
-        // inserted directly at their own axle #1 position (no added
-        // offset), reached purely by walking back along the train at
-        // the train's normal line spacing — same spacing used between
-        // every axle in Load_Editor.
+        //   Load In  : insertion X = axle #1 X (rotation 0°),   block = *_AFT
+        //   Load Out : insertion X = axle #1 X (rotation 180°), block = *_FWD
+        // No offset is applied in either direction — insertion point is
+        // always the segment's own axle #1 X, for both 4L and 6L blocks.
+        // Every block in a custom AutoCAD split (e.g. the "4" and "6" in
+        // a "4,6" split) is inserted at its own axle #1 position, reached
+        // purely by walking back along the train at the train's normal
+        // line spacing — same spacing used between every axle in
+        // Load_Editor.
         // ASSUMPTIONS (flagged in the on-screen warning list, if any):
-        //   - offsets above are along the train's local X axis; trains
-        //     are unrotated (0°) in their own row, so that's world X too
+        //   - trains are unrotated (0°) in their own row, so local X is
+        //     world X too
         //   - Y is unaffected by load direction (block still lands on
         //     the train's shared Y)
         //   - CAD_UNIT_SCALE converts metres -> the drawing's units
@@ -9744,7 +9739,6 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
 
                 let axleOffset = 0; // axle lines already consumed by earlier segments in this train
                 segments.forEach((segCount, segIdx) => {
-                    const isStartBlock = (segIdx === 0);
                     const segLabel = segments.length > 1 ? `${train.name} (#${axleOffset + 1}-#${axleOffset + segCount})` : train.name;
                     const blockNames = CAD_BLOCK_MAP[segCount];
                     if (!blockNames) {
@@ -9757,37 +9751,10 @@ THREE.STLLoader.prototype = Object.assign( Object.create( THREE.Loader.prototype
                     // train by however many axle lines came before it, at
                     // the train's normal line spacing.
                     const segAxle1X = axle1X - axleOffset * spacing;
-                    let insertionXm, rotationDeg;
-                    if (loadDirection === 'out') {
-                        rotationDeg = 180;
-                        if (isStartBlock) {
-                            const offset = CAD_LOAD_OUT_OFFSET_M[segCount];
-                            if (offset === undefined) {
-                                warnings.push(`Train "${segLabel}" (${segCount} axle lines, Load Out) — no offset configured. Skipped.`);
-                                axleOffset += segCount;
-                                return;
-                            }
-                            insertionXm = segAxle1X + offset;
-                        } else {
-                            // Trailing coupled unit — no cabin/power-pack
-                            // overhang, so no offset: insert right at its
-                            // own axle #1.
-                            insertionXm = segAxle1X;
-                        }
-                    } else {
-                        rotationDeg = 0;
-                        if (isStartBlock) {
-                            const offset = CAD_LOAD_IN_OFFSET_M[segCount];
-                            if (offset === undefined) {
-                                warnings.push(`Train "${segLabel}" (${segCount} axle lines, Load In) — no offset configured. Skipped.`);
-                                axleOffset += segCount;
-                                return;
-                            }
-                            insertionXm = segAxle1X - offset;
-                        } else {
-                            insertionXm = segAxle1X;
-                        }
-                    }
+                    // No insertion offset in either direction — the block
+                    // always lands right at the segment's own axle #1 X.
+                    const insertionXm = segAxle1X;
+                    const rotationDeg = (loadDirection === 'out') ? 180 : 0;
                     inserts.push({
                         trainName: segLabel,
                         blockName,
