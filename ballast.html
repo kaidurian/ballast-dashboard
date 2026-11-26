@@ -1704,7 +1704,27 @@
 </head>
 <body class="light-theme">
     <header>
-        <h1>⚓ Barge Ballast-Rev.84-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)</h1><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
+        <h1>⚓ Barge Ballast-Rev.84.1-(Note:Y_P and Y_SB in Excel CREST_301 need to manual input)<span id="sourceBadge" style="display:inline-block; margin-left:8px; padding:1px 7px; border-radius:9px; font-size:10px; font-weight:700; letter-spacing:.3px; vertical-align:middle; white-space:nowrap; color:#0f141c; background:#94a3b8;">...</span></h1><script>
+        // Shows which copy of the page is running: LOCAL (offline, localhost) or ONLINE (GitHub).
+        (function () {
+            var b = document.getElementById('sourceBadge');
+            if (!b) return;
+            var h = location.hostname;
+            var local = (h === 'localhost' || h === '127.0.0.1' || h === '[::1]');
+            var online = /github\.io$/i.test(h);
+            b.textContent = local ? 'LOCAL \u00B7 OFFLINE' : (online ? 'ONLINE \u00B7 GITHUB' : h.toUpperCase());
+            b.style.background = local ? '#10b981' : (online ? '#38bdf8' : '#eab308');
+            b.title = 'Page loaded from: ' + location.origin;
+            // After everything loads, add where office.js / three.js came from (local file or internet)
+            window.addEventListener('load', function () {
+                try {
+                    var src = Array.prototype.map.call(document.querySelectorAll('script[src]'), function (x) { return x.src; });
+                    var cdn = src.some(function (u) { return /appsforoffice\.microsoft\.com|cdnjs\.cloudflare\.com|threejs\.org/i.test(u); });
+                    b.title += '\nLibraries: ' + (cdn ? 'loaded from the internet (CDN)' : 'loaded from local files');
+                } catch (e) {}
+            });
+        })();
+        </script><div class="header-subtitle" id="bargeInfoNote">CREST_301 · total length —m (0 tanks) × total width —m (0 tanks)</div>
         <div class="header-controls">
             <div class="toggle-container" title="Select which of the 11 barge sheets to load geometry &amp; targets from. Load_Editor and BALLASTPLAN(mT) stay shared across all barges.">
                 <span>⚓ Barge</span>
